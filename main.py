@@ -72,6 +72,15 @@ def _banner(text: str):
 
 
 def main():
+    # Force UTF-8 output — Windows console defaults to cp1252 which
+    # can't encode ↔, ✅, ❌ etc. and raises UnicodeEncodeError.
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer,
+                                       encoding="utf-8", errors="replace")
+
     args    = parse_args()
     banks   = [b.lower() for b in args.bank] if args.bank else ALL_BANKS
 
@@ -113,16 +122,25 @@ def main():
     if "bca" in banks:
         _banner("Reading BCA transactions...")
         try:
+            # Derive allowed dates from ODO BCA transactions.
+            # Single ODO date  → same filter as original behavior.
+            # Multiple ODO dates → all are allowed automatically.
+            from datetime import datetime as _dt
+            bca_filter_dates = {
+                _dt.strptime(t["date"], "%Y-%m-%d").date()
+                for t in odo_bank_txns.get("BCA", [])
+                if t.get("date")
+            } or None   # None = no filter if ODO has no dates (shouldn't happen)
+
             bank_txns["BCA"] = read_bca(
                 excel_dir     = BCA_EXCEL_DIR,
                 excel_pattern = BCA_EXCEL_PATTERN,
                 password      = BCA_EXCEL_PASSWORD,
                 amount_col    = BCA_AMOUNT_COLUMN,
                 date_col      = BCA_DATE_COLUMN,
-                filter_date   = odo_date,
                 number_col    = BCA_NUMBER_COLUMN,
+                filter_dates  = bca_filter_dates,
             )
-            print(f"  ✅ BCA: {len(bank_txns['BCA'])} transactions loaded")
         except Exception as e:
             print(f"\n❌ ERROR (BCA): {e}\n")
             sys.exit(1)
@@ -130,12 +148,19 @@ def main():
     if "mandiri" in banks:
         _banner("Reading Mandiri transactions...")
         try:
+            from datetime import datetime as _dt
+            mandiri_filter_dates = {
+                _dt.strptime(t["date"], "%Y-%m-%d").date()
+                for t in odo_bank_txns.get("Mandiri", [])
+                if t.get("date")
+            } or None
             bank_txns["Mandiri"] = read_mandiri(
                 zip_dir     = MANDIRI_ZIP_DIR,
                 password    = MANDIRI_ZIP_PASSWORD,
                 amount_col  = MANDIRI_AMOUNT_COLUMN,
                 number_col  = MANDIRI_NUMBER_COLUMN,
                 zip_pattern = MANDIRI_ZIP_PATTERN,
+                filter_dates = mandiri_filter_dates,
             )
             print(f"  ✅ Mandiri: {len(bank_txns['Mandiri'])} transactions loaded")
         except Exception as e:
@@ -145,12 +170,19 @@ def main():
     if "bri" in banks:
         _banner("Reading BRI transactions...")
         try:
+            from datetime import datetime as _dt
+            bri_filter_dates = {
+                _dt.strptime(t["date"], "%Y-%m-%d").date()
+                for t in odo_bank_txns.get("BRI", [])
+                if t.get("date")
+            } or None
             bank_txns["BRI"] = read_bri(
-                zip_dir     = BRI_ZIP_DIR,
-                zip_pattern = BRI_ZIP_PATTERN,
-                pdf_pattern = BRI_PDF_PATTERN,
-                amount_col  = BRI_AMOUNT_COLUMN,
-                number_col  = BRI_NUMBER_COLUMN,
+                zip_dir      = BRI_ZIP_DIR,
+                zip_pattern  = BRI_ZIP_PATTERN,
+                pdf_pattern  = BRI_PDF_PATTERN,
+                amount_col   = BRI_AMOUNT_COLUMN,
+                number_col   = BRI_NUMBER_COLUMN,
+                filter_dates = bri_filter_dates,
             )
             print(f"  ✅ BRI: {len(bank_txns['BRI'])} transactions loaded")
         except Exception as e:
@@ -182,7 +214,13 @@ def main():
     _banner("Writing Excel report...")
 
     try:
-        out_path = write_report(all_results, odo_date, OUTPUT_DIR)
+        out_path = write_report(
+            all_results,
+            odo_date,
+            OUTPUT_DIR,
+            bank_txns=bank_txns,
+            odo_bank_txns=odo_bank_txns,
+        )
     except Exception as e:
         print(f"\n❌ ERROR writing report: {e}\n")
         sys.exit(1)

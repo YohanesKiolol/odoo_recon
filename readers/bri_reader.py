@@ -30,15 +30,15 @@ import pdfplumber
 from amount_utils import parse_amount, normalize_for_compare
 
 
-def _find_bri_zip(zip_dir: Path, zip_pattern: str) -> Path:
+def _find_bri_zips(zip_dir: Path, zip_pattern: str) -> list[Path]:
     """
-    Find the BRI ZIP file in zip_dir whose name contains zip_pattern (substring).
-    Raises FileNotFoundError if not found or multiple found.
+    Find ALL BRI ZIP files in zip_dir whose name contains zip_pattern.
+    Returns sorted list.
     """
-    candidates = [
+    candidates = sorted(
         p for p in zip_dir.iterdir()
         if p.suffix.lower() == ".zip" and zip_pattern.lower() in p.name.lower()
-    ]
+    )
     if not candidates:
         all_zips = [p.name for p in zip_dir.glob("*.zip")]
         raise FileNotFoundError(
@@ -46,10 +46,7 @@ def _find_bri_zip(zip_dir: Path, zip_pattern: str) -> Path:
             f"Available ZIPs: {all_zips}\n"
             f"Check BRI_ZIP_PATTERN in your .env file."
         )
-    if len(candidates) > 1:
-        print(f"  [WARN] Multiple BRI ZIPs matched '{zip_pattern}': {[c.name for c in candidates]}")
-        print(f"  Using: {candidates[0].name}")
-    return candidates[0]
+    return candidates
 
 
 def _extract_detail_pdf(zip_path: Path, pdf_pattern: str) -> bytes:
@@ -100,7 +97,26 @@ def _normalize_pdf_header(h: str) -> str:
     return h
 
 
-def _parse_pdf_table(pdf_bytes: bytes, amount_col: str, number_col: str = "") -> list[dict]:
+def _parse_any_date(s: str):
+    """Parse a date string in various formats → datetime.date or None."""
+    from datetime import datetime
+    if not s or not s.strip():
+        return None
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(s.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_pdf_table(
+    pdf_bytes: bytes,
+    amount_col: str,
+    number_col: str = "",
+    filter_dates: set | None = None,
+    source_file: str = "",   # filename tag for tracing
+) -> list[dict]:
     """
     Extract table rows from PDF, find the AMT_TRX column.
     Returns list of transaction dicts.
@@ -172,12 +188,20 @@ def _parse_pdf_table(pdf_bytes: bytes, amount_col: str, number_col: str = "") ->
                     desc_val   = str(row[desc_idx]).strip()   if desc_idx   is not None and row[desc_idx]   else ""
                     number_val = str(row[number_idx]).strip() if number_idx is not None and row[number_idx] else ""
 
+                    # Date filter
+                    if filter_dates is not None:
+                        txn_date = _parse_any_date(date_val)
+                        if txn_date not in filter_dates:
+                            skipped += 1
+                            continue
+
                     txns.append({
                         "amount":      amount,
                         "amount_raw":  raw_amount,
                         "date":        date_val,
                         "description": desc_val,
                         "number":      number_val,
+                        "filename":    source_file,
                         "source":      "Bank (BRI)",
                     })
 
@@ -193,12 +217,11 @@ def read_bri(
     pdf_pattern: str,
     amount_col: str,
     number_col: str = "",
+    filter_dates: set | None = None,
 ) -> list[dict]:
     """
-    Read BRI transactions from the ZIP in zip_dir whose name contains zip_pattern.
-    Extracts the PDF whose name starts with pdf_pattern, then reads its table.
-
-    Returns list of transaction dicts.
+    Read BRI transactions from ALL matching ZIPs in zip_dir.
+    If filter_dates is provided, only rows matching those dates are returned.
     """
     if not zip_dir.exists():
         raise FileNotFoundError(
@@ -206,9 +229,17 @@ def read_bri(
             f"Check BRI_ZIP_DIR in your .env file."
         )
 
-    zip_path = _find_bri_zip(zip_dir, zip_pattern)
-    print(f"  BRI ZIP: {zip_path.name}")
-    pdf_bytes = _extract_detail_pdf(zip_path, pdf_pattern)
-    print(f"  PDF extracted ({len(pdf_bytes):,} bytes), parsing table...")
-    txns = _parse_pdf_table(pdf_bytes, amount_col, number_col)
-    return txns
+    zip_paths = _find_bri_zips(zip_dir, zip_pattern)
+    print(f"  Found {len(zip_paths)} BRI ZIP(s): {[p.name for p in zip_paths]}")
+
+    all_txns: list[dict] = []
+    for zip_path in zip_paths:
+        print(f"  BRI ZIP: {zip_path.name}")
+        pdf_bytes = _extract_detail_pdf(zip_path, pdf_pattern)
+        print(f"  PDF extracted ({len(pdf_bytes):,} bytes), parsing table...")
+        txns = _parse_pdf_table(pdf_bytes, amount_col, number_col,
+                                filter_dates=filter_dates,
+                                source_file=zip_path.name)
+        all_txns.extend(txns)
+
+    return all_txns

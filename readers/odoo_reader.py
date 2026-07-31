@@ -166,8 +166,9 @@ def read_odoo(
             print(f"  [WARN] ODO row skip: {e}")
             continue
 
-        # Description: use col A (date) formatted, or empty
-        desc = str(col_a).split()[0] if col_a else ""  # just the date part
+        # Actual transaction date from col A (datetime → date string)
+        txn_date = col_a.date() if isinstance(col_a, datetime) else col_a
+        desc = str(txn_date).split()[0] if txn_date else ""   # keep date as desc for compat
         number = ""
         if number_idx is not None and number_idx < len(row):
             number = str(row[number_idx]).strip() if row[number_idx] is not None else ""
@@ -177,7 +178,7 @@ def read_odoo(
             "amount_raw":  raw_amount,
             "description": desc,
             "number":      number,
-            "date":        str(odo_date),
+            "date":        str(txn_date).split()[0],   # "2026-07-20" (drop time part)
             "source":      "Odoo",
         })
 

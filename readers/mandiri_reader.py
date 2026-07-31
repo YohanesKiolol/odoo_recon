@@ -19,7 +19,27 @@ import pyzipper
 from amount_utils import parse_amount, normalize_for_compare
 
 
-def _read_csv_from_bytes(data: bytes, amount_col: str, number_col: str = "") -> list[dict]:
+def _parse_any_date(s: str):
+    """Parse a date string in various formats → datetime.date or None."""
+    from datetime import datetime
+    if not s or not s.strip():
+        return None
+    s = s.strip()
+    for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d %b %Y", "%d %B %Y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _read_csv_from_bytes(
+    data: bytes,
+    amount_col: str,
+    number_col: str = "",
+    filter_dates: set | None = None,
+    source_file: str = "",   # filename tag for tracing
+) -> list[dict]:
     """
     Parse CSV bytes where header starts at row 6 (0-indexed row 5).
     Returns list of transaction dicts.
@@ -69,13 +89,20 @@ def _read_csv_from_bytes(data: bytes, amount_col: str, number_col: str = "") -> 
             skipped += 1
             continue
 
-        # Try to get date from common Mandiri CSV column names
+        # Date
         date_val = (
             row.get("TRXDATE") or
             row.get("TRANSACTION DATE") or
             row.get("TGL TRANSAKSI") or
             row.get("DATE") or ""
         )
+
+        # Date filter: skip rows not in the allowed set
+        if filter_dates is not None:
+            txn_date = _parse_any_date(date_val)
+            if txn_date not in filter_dates:
+                continue
+
         desc_val = (
             row.get("DESCRIPTION") or
             row.get("KETERANGAN") or
@@ -99,6 +126,7 @@ def _read_csv_from_bytes(data: bytes, amount_col: str, number_col: str = "") -> 
             "date":        date_val,
             "description": desc_val,
             "number":      number_val,
+            "filename":    source_file,
             "source":      "Bank (Mandiri)",
         })
 
@@ -114,12 +142,11 @@ def read_mandiri(
     amount_col: str,
     number_col: str = "",
     zip_pattern: str = "MSR_*.zip",
+    filter_dates: set | None = None,
 ) -> list[dict]:
     """
     Read all Mandiri transactions from ZIP files in zip_dir.
-    Only files matching zip_pattern (glob) are processed.
-
-    Returns merged list of transaction dicts.
+    If filter_dates is provided, only rows matching those dates are returned.
     """
     if not zip_dir.exists():
         raise FileNotFoundError(
@@ -153,7 +180,9 @@ def read_mandiri(
                 for csv_name in csv_names:
                     print(f"    Reading CSV: {csv_name}")
                     data = zf.read(csv_name)
-                    txns = _read_csv_from_bytes(data, amount_col, number_col)
+                    txns = _read_csv_from_bytes(data, amount_col, number_col,
+                                                filter_dates=filter_dates,
+                                                source_file=zip_path.name)
                     print(f"    → {len(txns)} transactions")
                     all_txns.extend(txns)
 

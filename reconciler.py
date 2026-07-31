@@ -1,11 +1,13 @@
 """
-reconciler.py — compares bank vs Odoo transactions by amount (multiset).
+reconciler.py — compares bank vs Odoo transactions by (date, amount).
 
-Uses collections.Counter so duplicate amounts are matched 1-to-1.
-Example:
-  Bank:  [500, 500, 1000]
-  Odoo:  [500, 1000, 2000]
-  →  500(Done), 500(Cuma ada di Bank), 1000(Done), 2000(Cuma ada di ODO)
+Matching logic:
+  1. Try to match bank txn to an ODO txn with same date AND amount (strict).
+  2. If no ODO txn on that date → Cuma ada di Bank.
+  Remaining unmatched ODO txns → Cuma ada di ODO.
+
+This prevents a bank transaction on July 6 from matching an ODO transaction
+on July 10 just because they share the same amount.
 
 Result dicts carry two separate number fields:
   number_odo  : reference from ODO  (Number column)
@@ -13,7 +15,7 @@ Result dicts carry two separate number fields:
 Both are populated for Done rows; one is empty for Bank-only / ODO-only.
 """
 
-from collections import Counter
+from collections import Counter, defaultdict
 from decimal import Decimal
 
 
@@ -24,86 +26,99 @@ STATUS_ODO_ONLY    = "Cuma ada di ODO"
 
 def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
     """
-    Match bank and Odoo transactions by amount using multiset logic.
+    Match bank and Odoo transactions by (date, amount) — date-aware multiset.
 
     Returns a list of result dicts with fields:
         amount, amount_raw, date, description, source, status,
-        number_odo, number_bank
+        number_odo, number_bank, filename_bank
     """
     results = []
 
-    # Build lookup: amount → list of odo txns (to grab number_odo on match)
-    odo_by_amount: dict[Decimal, list[dict]] = {}
+    # ── Build per-date ODO index ──────────────────────────────────────────────
+    # odo_by_date[date][amount] = [txn, txn, ...]
+    odo_by_date: dict[str, dict[Decimal, list[dict]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     for txn in odo_txns:
-        odo_by_amount.setdefault(txn["amount"], []).append(txn)
+        d = txn.get("date", "") or ""
+        odo_by_date[d][txn["amount"]].append(txn)
 
-    # Remaining ODO counter — decremented as matches are found
-    remaining_odo = Counter(t["amount"] for t in odo_txns)
-    # Track which odo txns have already been used (by index)
-    odo_used_count: dict[Decimal, int] = {}
+    # Counter per date to track remaining matches
+    odo_remaining: dict[str, Counter] = {
+        d: Counter({amt: len(lst) for amt, lst in amts.items()})
+        for d, amts in odo_by_date.items()
+    }
+    # Track consumed index per (date, amount) for number_odo lookup
+    odo_used: dict[str, dict[Decimal, int]] = defaultdict(lambda: defaultdict(int))
 
-    # ── Bank transactions ──────────────────────────────────────────────────────
+    # ── Bank transactions ─────────────────────────────────────────────────────
     for txn in bank_txns:
-        amt = txn["amount"]
+        amt      = txn["amount"]
+        bank_d   = txn.get("date", "") or ""
         bank_num = txn.get("number", "")
 
-        if remaining_odo[amt] > 0:
-            remaining_odo[amt] -= 1
+        day_counter = odo_remaining.get(bank_d, Counter())
+
+        if day_counter[amt] > 0:
+            day_counter[amt] -= 1
             status = STATUS_DONE
 
             # Grab the matched ODO txn's number (FIFO)
-            used = odo_used_count.get(amt, 0)
-            candidates = odo_by_amount.get(amt, [])
-            odo_num = candidates[used]["number"] if used < len(candidates) else ""
-            odo_used_count[amt] = used + 1
+            used       = odo_used[bank_d][amt]
+            candidates = odo_by_date.get(bank_d, {}).get(amt, [])
+            odo_num    = candidates[used]["number"] if used < len(candidates) else ""
+            odo_used[bank_d][amt] = used + 1
         else:
-            status = STATUS_BANK_ONLY
+            status  = STATUS_BANK_ONLY
             odo_num = ""
 
         results.append({
-            "amount":      amt,
-            "amount_raw":  txn.get("amount_raw", ""),
-            "date":        txn.get("date", ""),
-            "description": txn.get("description", ""),
-            "source":      "Bank",
-            "status":      status,
-            "number_odo":  odo_num,
-            "number_bank": bank_num,
+            "amount":        amt,
+            "amount_raw":    txn.get("amount_raw", ""),
+            "date":          bank_d,
+            "description":   txn.get("description", ""),
+            "source":        "Bank",
+            "status":        status,
+            "number_odo":    odo_num,
+            "number_bank":   bank_num,
+            "filename_bank": txn.get("filename", ""),
         })
 
-    # ── Odoo-only transactions ─────────────────────────────────────────────────
-    for amt, count in remaining_odo.items():
-        if count <= 0:
-            continue
-        candidates = odo_by_amount.get(amt, [])
-        # The unmatched ones are the last `count` that were never consumed
-        used = odo_used_count.get(amt, 0)
-        unmatched = candidates[used:used + count]
+    # ── Odoo-only transactions ────────────────────────────────────────────────
+    for d, day_counter in odo_remaining.items():
+        for amt, count in day_counter.items():
+            if count <= 0:
+                continue
+            candidates = odo_by_date.get(d, {}).get(amt, [])
+            used       = odo_used[d][amt]
+            unmatched  = candidates[used:used + count]
 
-        for txn in unmatched:
-            results.append({
-                "amount":      amt,
-                "amount_raw":  txn.get("amount_raw", ""),
-                "date":        txn.get("date", ""),
-                "description": txn.get("description", ""),
-                "source":      "Odoo",
-                "status":      STATUS_ODO_ONLY,
-                "number_odo":  txn.get("number", ""),
-                "number_bank": "",
-            })
+            for txn in unmatched:
+                results.append({
+                    "amount":        amt,
+                    "amount_raw":    txn.get("amount_raw", ""),
+                    "date":          txn.get("date", ""),
+                    "description":   txn.get("description", ""),
+                    "source":        "Odoo",
+                    "status":        STATUS_ODO_ONLY,
+                    "number_odo":    txn.get("number", ""),
+                    "number_bank":   "",
+                    "filename_bank": "",
+                })
 
-        # Safety: fill if somehow count > available candidates
-        for _ in range(count - len(unmatched)):
-            results.append({
-                "amount":      amt,
-                "amount_raw":  str(amt),
-                "date":        "",
-                "description": "",
-                "source":      "Odoo",
-                "status":      STATUS_ODO_ONLY,
-                "number_odo":  "",
-                "number_bank": "",
-            })
+            # Safety: fill if count > available candidates
+            for _ in range(count - len(unmatched)):
+                results.append({
+                    "amount":        amt,
+                    "amount_raw":    str(amt),
+                    "date":          d,
+                    "description":   "",
+                    "source":        "Odoo",
+                    "status":        STATUS_ODO_ONLY,
+                    "number_odo":    "",
+                    "number_bank":   "",
+                    "filename_bank": "",
+                })
 
     return results
 

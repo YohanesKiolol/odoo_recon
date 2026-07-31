@@ -90,7 +90,7 @@ def _write_info_row(ws, parts: list[tuple[str, str]], ncols: int, row: int, bg: 
 def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     color = BANK_COLORS.get(bank_name, COLOR_HEADER)
     ws.title = bank_name
-    ncols = 8
+    ncols = 9
 
     done_count  = sum(1 for r in rows if r["status"] == STATUS_DONE)
     bank_count  = sum(1 for r in rows if r["status"] == STATUS_BANK_ONLY)
@@ -108,28 +108,30 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     ], ncols, row=2, bg=color)
 
     # ── Column headers (row 3) ───────────────────────────────────────
-    COL_HEADERS = ["No", "Tanggal", "Nomor ODO", "Nomor Bank", "Jumlah (Raw)", "Jumlah", "Sumber", "Status"]
+    COL_HEADERS = ["No", "Tanggal", "Nomor ODO", "Nomor Bank", "Filename", "Jumlah (Raw)", "Jumlah", "Sumber", "Status"]
     for col, h in enumerate(COL_HEADERS, 1):
         _hdr(ws.cell(row=3, column=col), h, bg=color)
     ws.row_dimensions[3].height = 28
 
     # ── Data rows (start row 4) ───────────────────────────────────────
-    for idx, r in enumerate(rows, 1):
+    rows_sorted = sorted(rows, key=lambda r: r.get("date", "") or "")
+    for idx, r in enumerate(rows_sorted, 1):
         rn = idx + 3  # offset by 3 header rows
         st = r["status"]
-        _cell(ws.cell(rn, 1), idx,                            st, "center")
-        _cell(ws.cell(rn, 2), r.get("date", ""),              st)
-        _cell(ws.cell(rn, 3), r.get("number_odo",  ""),       st)
-        _cell(ws.cell(rn, 4), r.get("number_bank", ""),       st)
-        _cell(ws.cell(rn, 5), str(r.get("amount_raw", "")),   st, "right")
-        _cell(ws.cell(rn, 6), _rp(r["amount"]),               st, "right")
-        _cell(ws.cell(rn, 7), r.get("source", ""),            st, "center")
-        sc = ws.cell(rn, 8)
+        _cell(ws.cell(rn, 1), idx,                              st, "center")
+        _cell(ws.cell(rn, 2), r.get("date", ""),                st)
+        _cell(ws.cell(rn, 3), r.get("number_odo",  ""),         st)
+        _cell(ws.cell(rn, 4), r.get("number_bank", ""),         st)
+        _cell(ws.cell(rn, 5), r.get("filename_bank", ""),       st)
+        _cell(ws.cell(rn, 6), str(r.get("amount_raw", "")),     st, "right")
+        _cell(ws.cell(rn, 7), _rp(r["amount"]),                 st, "right")
+        _cell(ws.cell(rn, 8), r.get("source", ""),              st, "center")
+        sc = ws.cell(rn, 9)
         _cell(sc, st, st, "center")
         sc.font = Font(bold=True, size=10)
         ws.row_dimensions[rn].height = 18
 
-    for col, w in enumerate([6, 14, 22, 22, 20, 20, 14, 22], 1):
+    for col, w in enumerate([6, 14, 22, 22, 30, 20, 20, 14, 22], 1):
         ws.column_dimensions[get_column_letter(col)].width = w
 
     ws.freeze_panes = "A4"  # freeze title + col-header rows
@@ -147,7 +149,7 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
 
 def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=None):
     ws.title = "Selisih (Semua)"
-    ncols = 8
+    ncols = 9
     date_str   = odo_date.strftime("%d %B %Y") if odo_date else "-"
     total_disc = sum(
         1 for rows in all_results.values()
@@ -162,32 +164,35 @@ def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=No
     ], ncols, row=2)
 
     # ── Column headers (row 3) ─────────────────────────────────────
-    COL_HEADERS = ["No", "Bank", "Tanggal", "Nomor ODO", "Nomor Bank", "Jumlah", "Sumber", "Status"]
+    COL_HEADERS = ["No", "Bank", "Tanggal", "Nomor ODO", "Nomor Bank", "Filename", "Jumlah", "Sumber", "Status"]
     for col, h in enumerate(COL_HEADERS, 1):
         _hdr(ws.cell(3, col), h)
     ws.row_dimensions[3].height = 28
 
     idx = 0
     for bank_name, rows in all_results.items():
-        for r in rows:
-            if r["status"] == STATUS_DONE:
-                continue
+        rows_sorted = sorted(
+            (r for r in rows if r["status"] != STATUS_DONE),
+            key=lambda r: r.get("date", "") or ""
+        )
+        for r in rows_sorted:
             idx += 1
             rn = idx + 3
             st = r["status"]
-            _cell(ws.cell(rn, 1), idx,                       st, "center")
-            _cell(ws.cell(rn, 2), bank_name,                 st, "center")
-            _cell(ws.cell(rn, 3), r.get("date", ""),         st)
-            _cell(ws.cell(rn, 4), r.get("number_odo",  ""),  st)
-            _cell(ws.cell(rn, 5), r.get("number_bank", ""),  st)
-            _cell(ws.cell(rn, 6), _rp(r["amount"]),          st, "right")
-            _cell(ws.cell(rn, 7), r.get("source", ""),       st, "center")
-            sc = ws.cell(rn, 8)
+            _cell(ws.cell(rn, 1), idx,                            st, "center")
+            _cell(ws.cell(rn, 2), bank_name,                      st, "center")
+            _cell(ws.cell(rn, 3), r.get("date", ""),              st)
+            _cell(ws.cell(rn, 4), r.get("number_odo",  ""),       st)
+            _cell(ws.cell(rn, 5), r.get("number_bank", ""),       st)
+            _cell(ws.cell(rn, 6), r.get("filename_bank", ""),     st)
+            _cell(ws.cell(rn, 7), _rp(r["amount"]),               st, "right")
+            _cell(ws.cell(rn, 8), r.get("source", ""),            st, "center")
+            sc = ws.cell(rn, 9)
             _cell(sc, st, st, "center")
             sc.font = Font(bold=True, size=10)
             ws.row_dimensions[rn].height = 18
 
-    for col, w in enumerate([6, 12, 14, 22, 22, 20, 14, 22], 1):
+    for col, w in enumerate([6, 12, 14, 22, 22, 30, 20, 14, 22], 1):
         ws.column_dimensions[get_column_letter(col)].width = w
     ws.freeze_panes = "A4"
 
@@ -225,10 +230,133 @@ def _write_legend(ws):
         ws.row_dimensions[i].height = 20
 
 
+def _write_daily_summary_sheet(
+    ws,
+    all_results: dict,   # {bank_name: [reconciled result dicts]}
+    odo_date=None,
+):
+    """
+    Sheet 'Ringkasan Harian': per-bank per-date sum comparison.
+
+    Uses reconciled results (not raw transactions) so that Done pairs
+    always cancel out — selisih only reflects truly unmatched transactions.
+
+    Logic per row:
+      Done      → bank_sum[bank_date] += amt  AND  odo_sum[bank_date] += amt
+                  (they cancel out → selisih = 0 for matched pairs)
+      Bank Only → bank_sum[bank_date] += amt
+      ODO Only  → odo_sum[odo_date]  += amt
+    """
+    from collections import defaultdict
+    from decimal import Decimal
+
+    ws.title = "Ringkasan Harian"
+    ncols = 7
+    date_str = odo_date.strftime("%d %B %Y") if odo_date else "-"
+
+    _merge_title(ws, "RINGKASAN HARIAN — BANK vs ODO", ncols, row=1)
+    _write_info_row(ws, [("Tanggal", date_str)], ncols, row=2)
+
+    COL_HEADERS = ["No", "Bank", "Tanggal", "Total Bank", "Total ODO", "Selisih", "Status"]
+    for col, h in enumerate(COL_HEADERS, 1):
+        _hdr(ws.cell(3, col), h)
+    ws.row_dimensions[3].height = 28
+
+    # Build sums from reconciled results
+    bank_sums: dict = defaultdict(lambda: defaultdict(Decimal))
+    odo_sums:  dict = defaultdict(lambda: defaultdict(Decimal))
+
+    all_banks = sorted(all_results.keys())
+
+    for bank in all_banks:
+        for r in all_results.get(bank, []):
+            d   = r.get("date", "") or ""
+            amt = r.get("amount", Decimal(0))
+            st  = r.get("status", "")
+            if st == STATUS_DONE:
+                # Both sides attributed to same date → cancel out in selisih
+                bank_sums[bank][d] += amt
+                odo_sums[bank][d]  += amt
+            elif st == STATUS_BANK_ONLY:
+                bank_sums[bank][d] += amt
+            elif st == STATUS_ODO_ONLY:
+                odo_sums[bank][d]  += amt
+
+    # Build sorted rows
+    rows = []
+    for bank in all_banks:
+        all_dates = sorted(
+            set(list(bank_sums[bank].keys()) + list(odo_sums[bank].keys()))
+        )
+        for d in all_dates:
+            b_sum = bank_sums[bank].get(d, Decimal(0))
+            o_sum = odo_sums[bank].get(d, Decimal(0))
+            rows.append((bank, d, b_sum, o_sum))
+
+    COLOR_MATCH   = "E2EFDA"   # light green  — sesuai
+    COLOR_DIFF    = "FCE4D6"   # light orange — selisih
+    COLOR_MISSING = "FFF2CC"   # light yellow — one side missing
+
+    for idx, (bank, d, b_sum, o_sum) in enumerate(rows, 1):
+        rn  = idx + 3
+        sel = b_sum - o_sum
+
+        if b_sum == 0 or o_sum == 0:
+            bg = COLOR_MISSING
+            label = "Data Tidak Lengkap"
+        elif sel == 0:
+            bg = COLOR_MATCH
+            label = "✅ Sesuai"
+        else:
+            bg = COLOR_DIFF
+            label = "⚠️ Selisih"
+
+        def _sc(cell, val, align="left", _bg=bg):
+            cell.value = val
+            cell.fill = PatternFill("solid", fgColor=_bg)
+            cell.alignment = Alignment(horizontal=align, vertical="center")
+            cell.font = Font(size=10)
+            cell.border = Border(
+                bottom=Side(style="thin", color="CCCCCC"),
+                right=Side(style="thin", color="CCCCCC"),
+            )
+
+        NUM_FMT = "#,##0"  # thousands separator, no decimals
+
+        def _num(cell, val, _bg=bg):
+            """Write a numeric cell with thousands-separator format."""
+            cell.value = float(val)
+            cell.number_format = NUM_FMT
+            cell.fill = PatternFill("solid", fgColor=_bg)
+            cell.alignment = Alignment(horizontal="right", vertical="center")
+            cell.font = Font(size=10)
+            cell.border = Border(
+                bottom=Side(style="thin", color="CCCCCC"),
+                right=Side(style="thin", color="CCCCCC"),
+            )
+
+        _sc(ws.cell(rn, 1), idx,   "center")
+        _sc(ws.cell(rn, 2), bank,  "center")
+        _sc(ws.cell(rn, 3), d)
+        _num(ws.cell(rn, 4), b_sum)
+        _num(ws.cell(rn, 5), o_sum)
+        _num(ws.cell(rn, 6), sel)
+        lc = ws.cell(rn, 7)
+        _sc(lc, label, "center")
+        lc.font = Font(size=10, bold=(sel != 0))
+        ws.row_dimensions[rn].height = 18
+
+    for col, w in enumerate([6, 14, 14, 20, 20, 20, 22], 1):
+        ws.column_dimensions[get_column_letter(col)].width = w
+    ws.freeze_panes = "A4"
+
+
 def write_report(
     all_results: dict[str, list[dict]],  # {bank_name: [result dicts]}
     odo_date: date,
     output_dir: Path,
+    bank_txns: dict | None = None,       # unused, kept for backward compat
+    odo_bank_txns: dict | None = None,   # unused, kept for backward compat
 ) -> Path:
     """Write full reconciliation report. Returns path to file."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -245,6 +373,10 @@ def write_report(
         else:
             ws = wb.create_sheet()
         _write_bank_sheet(ws, rows, bank_name, odo_date=odo_date)
+
+    # Daily summary sheet (before discrepancy)
+    ws_daily = wb.create_sheet()
+    _write_daily_summary_sheet(ws_daily, all_results, odo_date=odo_date)
 
     ws_disc = wb.create_sheet()
     _write_discrepancy_sheet(ws_disc, all_results, odo_date=odo_date)
