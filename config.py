@@ -4,10 +4,19 @@ Script never hardcodes any value; everything is user-configurable.
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# In frozen (PyInstaller) mode, config.py lives in a temp _MEI* folder.
+# The .env file is always next to the .exe (or next to config.py in dev).
+if getattr(sys, "frozen", False):
+    _base = Path(sys.executable).parent   # folder containing BankRekonsiliasi.exe
+else:
+    _base = Path(__file__).parent         # folder containing config.py (project root)
+
+load_dotenv(dotenv_path=_base / ".env", override=True)
+
 
 
 def _require(key: str) -> str:
