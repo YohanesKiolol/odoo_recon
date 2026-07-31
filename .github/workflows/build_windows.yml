@@ -2,7 +2,7 @@ name: Build Windows EXE
 
 on:
   push:
-    branches: [main]
+    branches: [master, main]   # supports both branch naming conventions
   workflow_dispatch:   # allow manual trigger from GitHub UI
 
 jobs:
