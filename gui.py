@@ -49,10 +49,14 @@ except ImportError:
     DateEntry = None
 
 # Venv python path (dev mode only — frozen uses sys.executable)
+if os.name == 'nt':
+    _venv_python_path = BASE_DIR / ".venv" / "Scripts" / "python.exe"
+else:
+    _venv_python_path = BASE_DIR / ".venv" / "bin" / "python"
+
 _venv_python = (
-    BASE_DIR / ".venv" / "Scripts" / "python.exe"
-    if IS_WINDOWS
-    else BASE_DIR / ".venv" / "bin" / "python3"
+    sys.executable if getattr(sys, "frozen", False) 
+    else str(_venv_python_path)
 )
 
 # ── Color palette ─────────────────────────────────────────────────────────────
@@ -264,36 +268,39 @@ class App(tk.Tk):
 
     # ── New Feature Stubs ─────────────────────────────────────────────────────
     def _on_upload(self):
-        from config import BCA_EXCEL_DIR, BCA_EXCEL_PATTERN, MANDIRI_ZIP_DIR, MANDIRI_ZIP_PATTERN, BRI_ZIP_DIR, BRI_ZIP_PATTERN, BRI_PDF_PATTERN, ODO_EXCEL_PATH
-        
-        files = filedialog.askopenfilenames(title="Pilih File Bank atau Odoo", filetypes=[("All Files", "*.*")])
-        if not files:
-            return
+        try:
+            from config import BCA_EXCEL_DIR, BCA_EXCEL_PATTERN, MANDIRI_ZIP_DIR, MANDIRI_ZIP_PATTERN, BRI_ZIP_DIR, BRI_ZIP_PATTERN, BRI_PDF_PATTERN, ODO_EXCEL_PATH
             
-        self._log_write("\n── Mengupload File ──\n", "head")
-        for f in files:
-            path = Path(f)
-            name = path.name.lower()
-            
-            target_dir = None
-            if BCA_EXCEL_PATTERN.lower() in name:
-                target_dir = BCA_EXCEL_DIR
-            elif fnmatch.fnmatch(name, MANDIRI_ZIP_PATTERN.lower()):
-                target_dir = MANDIRI_ZIP_DIR
-            elif BRI_ZIP_PATTERN.lower() in name or BRI_PDF_PATTERN.lower() in name:
-                target_dir = BRI_ZIP_DIR
-            elif "payments" in name and name.endswith(".xlsx"):
-                target_dir = ODO_EXCEL_PATH.parent
-            
-            if target_dir:
-                target_dir.mkdir(parents=True, exist_ok=True)
-                dest = target_dir / path.name
-                shutil.copy2(path, dest)
-                self._log_write(f"✅ Disalin: {path.name} -> {target_dir.name}/\n", "ok")
-            else:
-                self._log_write(f"⚠️ Diabaikan: {path.name} (Tidak cocok pola bank)\n", "warn")
+            files = filedialog.askopenfilenames(title="Pilih File Bank atau Odoo", filetypes=[("All Files", "*.*")])
+            if not files:
+                return
                 
-        self._refresh_folder_status()
+            self._log_write("\n── Mengupload File ──\n", "head")
+            for f in files:
+                path = Path(f)
+                name = path.name.lower()
+                
+                target_dir = None
+                if BCA_EXCEL_PATTERN.lower() in name:
+                    target_dir = BCA_EXCEL_DIR
+                elif fnmatch.fnmatch(name, MANDIRI_ZIP_PATTERN.lower()):
+                    target_dir = MANDIRI_ZIP_DIR
+                elif BRI_ZIP_PATTERN.lower() in name or BRI_PDF_PATTERN.lower() in name:
+                    target_dir = BRI_ZIP_DIR
+                elif "payments" in name and name.endswith(".xlsx"):
+                    target_dir = ODO_EXCEL_PATH.parent
+                
+                if target_dir:
+                    target_dir.mkdir(parents=True, exist_ok=True)
+                    dest = target_dir / path.name
+                    shutil.copy2(path, dest)
+                    self._log_write(f"✅ Disalin: {path.name} -> {target_dir.name}/\n", "ok")
+                else:
+                    self._log_write(f"⚠️ Diabaikan: {path.name} (Tidak cocok pola bank)\n", "warn")
+                    
+            self._refresh_folder_status()
+        except Exception as e:
+            self._log_write(f"\n❌ Error saat Upload: {e}\nPastikan file .env Anda sudah terisi lengkap!\n", "error")
 
     def _on_download(self):
         if DateEntry:
@@ -341,35 +348,38 @@ class App(tk.Tk):
         threading.Thread(target=run, daemon=True).start()
 
     def _on_cleanse(self):
-        from config import BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, ODO_EXCEL_PATH, OUTPUT_DIR
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        recap_dir = BASE_DIR / "recap" / timestamp
-        
-        self._log_write("\n── Membersihkan Data ──\n", "head")
-        
-        moved_count = 0
-        dirs_to_clean = [BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, OUTPUT_DIR]
-        
-        for d in dirs_to_clean:
-            if d.exists() and d.is_dir():
-                for f in d.glob("*"):
-                    if f.is_file():
-                        recap_dir.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(f), str(recap_dir / f.name))
-                        moved_count += 1
-                        
-        if ODO_EXCEL_PATH.exists():
-            recap_dir.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(ODO_EXCEL_PATH), str(recap_dir / ODO_EXCEL_PATH.name))
-            moved_count += 1
+        try:
+            from config import BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, ODO_EXCEL_PATH, OUTPUT_DIR
             
-        if moved_count > 0:
-            self._log_write(f"✅ {moved_count} file dipindahkan ke: recap/{timestamp}/\n", "ok")
-        else:
-            self._log_write("ℹ️ Tidak ada data yang perlu dibersihkan.\n", "dim")
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            recap_dir = BASE_DIR / "recap" / timestamp
             
-        self._refresh_folder_status()
+            self._log_write("\n── Membersihkan Data ──\n", "head")
+            
+            moved_count = 0
+            dirs_to_clean = [BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, OUTPUT_DIR]
+            
+            for d in dirs_to_clean:
+                if d.exists() and d.is_dir():
+                    for f in d.glob("*"):
+                        if f.is_file():
+                            recap_dir.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(f), str(recap_dir / f.name))
+                            moved_count += 1
+                            
+            if ODO_EXCEL_PATH.exists():
+                recap_dir.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(ODO_EXCEL_PATH), str(recap_dir / ODO_EXCEL_PATH.name))
+                moved_count += 1
+                
+            if moved_count > 0:
+                self._log_write(f"✅ {moved_count} file dipindahkan ke: recap/{timestamp}/\n", "ok")
+            else:
+                self._log_write("ℹ️ Tidak ada data yang perlu dibersihkan.\n", "dim")
+                
+            self._refresh_folder_status()
+        except Exception as e:
+            self._log_write(f"\n❌ Error saat Bersihkan Data: {e}\nPastikan file .env Anda sudah terisi lengkap!\n", "error")
 
     # ── Run / Scan ────────────────────────────────────────────────────────────
     def _on_scan(self):
