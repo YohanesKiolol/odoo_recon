@@ -21,7 +21,7 @@ import argparse
 # ── Dependency check ──────────────────────────────────────────────────────────
 def _check_deps():
     missing = []
-    for pkg in ["openpyxl", "dotenv", "pyzipper", "msoffcrypto", "pdfplumber"]:
+    for pkg in ["openpyxl", "pyzipper", "msoffcrypto", "pdfplumber"]:
         try:
             __import__(pkg)
         except ImportError:
@@ -113,10 +113,10 @@ def main():
             group_map   = group_map,
         )
     except (FileNotFoundError, ValueError) as e:
-        print(f"\n❌ ERROR (ODO): {e}\n")
+        print(f"\n[!] ERROR (ODO): {e}\n")
         sys.exit(1)
 
-    print(f"  ✅ ODO date: {odo_date}")
+    print(f"  [+] ODO date: {odo_date}")
     for bank_key, txns in odo_bank_txns.items():
         print(f"     {bank_key:10} → {len(txns)} transactions")
 
@@ -146,9 +146,9 @@ def main():
                 filter_dates  = bca_filter_dates,
             )
         except FileNotFoundError as e:
-            print(f"  ⚠️  No BCA files found, skipping BCA.")
+            print(f"  [!] No BCA files found, skipping BCA.")
         except Exception as e:
-            print(f"\n❌ ERROR (BCA): {e}\n")
+            print(f"\n[!] ERROR (BCA): {e}\n")
             sys.exit(1)
 
     if "mandiri" in banks:
@@ -168,11 +168,11 @@ def main():
                 zip_pattern = MANDIRI_ZIP_PATTERN,
                 filter_dates = mandiri_filter_dates,
             )
-            print(f"  ✅ Mandiri: {len(bank_txns['Mandiri'])} transactions loaded")
+            print(f"  [+] Mandiri: {len(bank_txns['Mandiri'])} transactions loaded")
         except FileNotFoundError as e:
-            print(f"  ⚠️  No Mandiri files found, skipping Mandiri.")
+            print(f"  [-] No Mandiri files found, skipping Mandiri.")
         except Exception as e:
-            print(f"\n❌ ERROR (Mandiri): {e}\n")
+            print(f"\n[!] ERROR (Mandiri): {e}\n")
             sys.exit(1)
 
     if "bri" in banks:
@@ -192,11 +192,11 @@ def main():
                 number_col   = BRI_NUMBER_COLUMN,
                 filter_dates = bri_filter_dates,
             )
-            print(f"  ✅ BRI: {len(bank_txns['BRI'])} transactions loaded")
+            print(f"  [+] BRI: {len(bank_txns['BRI'])} transactions loaded")
         except FileNotFoundError as e:
-            print(f"  ⚠️  No BRI files found, skipping BRI.")
+            print(f"  [-] No BRI files found, skipping BRI.")
         except Exception as e:
-            print(f"\n❌ ERROR (BRI): {e}\n")
+            print(f"\n[!] ERROR (BRI): {e}\n")
             sys.exit(1)
 
     # ── Handle Scan Mode ───────────────────────────────────────────────────────
@@ -262,10 +262,10 @@ def main():
             odo_bank_txns=odo_bank_txns,
         )
     except Exception as e:
-        print(f"\n❌ ERROR writing report: {e}\n")
+        print(f"\n[!] ERROR writing report: {e}\n")
         sys.exit(1)
 
-    print(f"\n✅ Report saved to:\n   {out_path.resolve()}")
+    print(f"\n[+] Report saved to:\n   {out_path.resolve()}")
 
     total_disc = sum(
         s["bank_only"] + s["odo_only"]
@@ -273,9 +273,9 @@ def main():
         for s in [summary(r)]
     )
     if total_disc > 0:
-        print(f"\n⚠️  {total_disc} discrepancies found — check 'Selisih (Semua)' sheet.")
+        print(f"\n[!] {total_disc} discrepancies found — check 'Selisih (Semua)' sheet.")
     else:
-        print("\n🎉 All transactions matched across all banks!")
+        print("\n[+] All transactions matched across all banks!")
 
     print()
 
