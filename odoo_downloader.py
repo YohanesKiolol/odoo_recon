@@ -20,12 +20,10 @@ def run_downloader():
     print("[+] Mengecek dan menginstall browser (butuh waktu beberapa menit pada run pertama)...")
     try:
         import subprocess
-        if getattr(sys, "frozen", False):
-            # Run the PyInstaller exe with the install hook
-            subprocess.run([sys.executable, "--install-playwright"], check=True)
-        else:
-            # Run the standard python module
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        from playwright._impl._driver import compute_driver_executable, get_driver_env
+        driver_executable = compute_driver_executable()
+        env = get_driver_env()
+        subprocess.run([str(driver_executable), "install", "chromium"], env=env, check=True)
     except Exception as e:
         print(f"[!] Gagal mengecek/menginstall browser: {e}")
 
@@ -55,24 +53,16 @@ def run_downloader():
         page = context.pages[0] if context.pages else context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # -------------------------------------------------------------
-        # Force HTTPS redirect internally to avoid nginx 404 if Odoo sends HTTP redirects
-        def upgrade_to_https(route):
-            url = route.request.url
-            if url.startswith("http://"):
-                url = url.replace("http://", "https://", 1)
-            route.continue_(url=url)
-            
-        page.route("**/*", upgrade_to_https)
-        # -------------------------------------------------------------
-
         print(f"[+] Membuka {ODOO_URL}")
         page.goto(ODOO_URL)
 
         print("\n[+] Menunggu Anda login secara manual...")
+        # Strip protocol so it matches even if Odoo bad-redirects to http://
+        dashboard_path = ODOO_DASHBOARD_URL.split("://")[-1]
+        
         page.wait_for_function(
-            "dashboardUrl => window.location.href.includes(dashboardUrl)",
-            arg=ODOO_DASHBOARD_URL,
+            "path => window.location.href.includes(path)",
+            arg=dashboard_path,
             timeout=0
         )
         print("[+] Dashboard terdeteksi!")
