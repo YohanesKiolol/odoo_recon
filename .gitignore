@@ -14,6 +14,7 @@ env/
 # PyInstaller build artifacts
 build/
 dist/
+*.spec
 *.spec.bak
 
 # Sensitive config — add your own .env next to the .exe
@@ -22,6 +23,11 @@ dist/
 # Input/output data — personal bank files and reports
 input/
 output/
+recap/
+*.log
+
+# Browser Automation
+playwright_profile/
 
 # macOS
 .DS_Store

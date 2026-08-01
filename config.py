@@ -34,6 +34,11 @@ def _optional(key: str, default: str = "") -> str:
 
 
 # ── Odoo ──────────────────────────────────────────────────────────────────────
+ODOO_URL                = _optional("ODOO_URL")
+ODOO_DASHBOARD_URL      = _optional("ODOO_DASHBOARD_URL")
+ODOO_JOURNAL_CREATE_URL = _optional("ODOO_JOURNAL_CREATE_URL")
+ODOO_PAYMENTS_URL       = _optional("ODOO_PAYMENTS_URL")
+
 ODO_EXCEL_PATH      = Path(_require("ODO_EXCEL_PATH"))
 ODO_AMOUNT_COLUMN   = _require("ODO_AMOUNT_COLUMN")
 ODO_NUMBER_COLUMN   = _optional("ODO_NUMBER_COLUMN", "Number")

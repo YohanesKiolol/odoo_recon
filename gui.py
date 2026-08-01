@@ -38,8 +38,15 @@ if "--worker" in sys.argv:
 # ── GUI-only imports (skipped in worker mode) ─────────────────────────────────
 import threading
 import subprocess
+import shutil
+import fnmatch
+from datetime import datetime
 import tkinter as tk
-from tkinter import scrolledtext
+from tkinter import scrolledtext, filedialog
+try:
+    from tkcalendar import DateEntry
+except ImportError:
+    DateEntry = None
 
 # Venv python path (dev mode only — frozen uses sys.executable)
 _venv_python = (
@@ -121,33 +128,90 @@ class App(tk.Tk):
             )
             cb.pack(side="left", padx=5)
 
-        # Buttons
-        btn_frame = tk.Frame(self, bg=BG, padx=30)
-        btn_frame.pack(fill="x", pady=(0, 14))
+        # ── Date Range Inputs ──
+        date_frame = tk.Frame(self, bg=BG, padx=30)
+        date_frame.pack(fill="x", pady=(10, 0))
+        
+        tk.Label(date_frame, text="Dari:", bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(side="left")
+        if DateEntry:
+            self._date_from_widget = DateEntry(date_frame, width=12, background='darkblue', foreground='white', borderwidth=2, date_pattern='mm/dd/yyyy')
+            self._date_from_widget.pack(side="left", padx=(5, 15))
+            self._date_from_widget.set_date(datetime.now().replace(day=1))
+        else:
+            self._date_from_var = tk.StringVar(value=datetime.now().strftime("%m/01/%Y"))
+            tk.Entry(date_frame, textvariable=self._date_from_var, width=12).pack(side="left", padx=(5, 15))
+        
+        tk.Label(date_frame, text="Sampai:", bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(side="left")
+        if DateEntry:
+            self._date_to_widget = DateEntry(date_frame, width=12, background='darkblue', foreground='white', borderwidth=2, date_pattern='mm/dd/yyyy')
+            self._date_to_widget.pack(side="left", padx=(5, 0))
+            self._date_to_widget.set_date(datetime.now())
+        else:
+            self._date_to_var = tk.StringVar(value=datetime.now().strftime("%m/%d/%Y"))
+            tk.Entry(date_frame, textvariable=self._date_to_var, width=12).pack(side="left", padx=(5, 0))
 
-        self._scan_btn = tk.Button(
-            btn_frame, text="🔍  Scan Data",
+        # ── Action Toolbar (Single Row) ──
+        action_frame = tk.Frame(self, bg=BG, padx=30)
+        action_frame.pack(fill="x", pady=(5, 10))
+        
+        # Style sangat compact
+        btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "flat", "cursor": "hand2", "padx": 12, "pady": 6}
+        
+        self._upload_btn = tk.Button(
+            action_frame, text="📤 Upload",
             bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
-            font=("Segoe UI", 11, "bold"), relief="flat", cursor="hand2",
-            padx=16, pady=10, command=self._on_scan,
+            command=self._on_upload, **btn_style
         )
-        self._scan_btn.pack(side="left", padx=(0, 10))
+        self._upload_btn.pack(side="left", padx=(0, 6))
+
+        self._download_btn = tk.Button(
+            action_frame, text="📥 Download Odoo",
+            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
+            command=self._on_download, **btn_style
+        )
+        self._download_btn.pack(side="left", padx=(0, 6))
+
+        self._cleanse_btn = tk.Button(
+            action_frame, text="🧹 Bersihkan",
+            bg=WARN, fg=WHITE, activebackground="#E67E22", activeforeground=WHITE,
+            command=self._on_cleanse, **btn_style
+        )
+        self._cleanse_btn.pack(side="left", padx=(0, 6))
 
         self._run_btn = tk.Button(
-            btn_frame, text="▶  Jalankan Rekonsiliasi",
-            bg=ACCENT, fg=WHITE, activebackground=ACCENT_DARK, activeforeground=WHITE,
-            font=("Segoe UI", 11, "bold"), relief="flat", cursor="hand2",
-            padx=16, pady=10, command=self._on_run,
+            action_frame, text="▶ Jalankan",
+            bg=SUCCESS, fg=WHITE, activebackground="#219653", activeforeground=WHITE,
+            command=self._on_run, **btn_style
         )
         self._run_btn.pack(side="left")
 
-        self._open_btn = tk.Button(
-            btn_frame, text="📁  Buka Hasil",
+        # ── Utility Buttons ──
+        util_frame = tk.Frame(self, bg=BG, padx=30)
+        util_frame.pack(fill="x", pady=(0, 14))
+
+        self._scan_btn = tk.Button(
+            util_frame, text="🔍  Scan Data Saja",
             bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
-            font=("Segoe UI", 11), relief="flat", cursor="hand2",
-            padx=14, pady=10, command=self._open_output, state="disabled",
+            font=("Segoe UI", 9), relief="flat", cursor="hand2",
+            padx=14, pady=4, command=self._on_scan,
         )
-        self._open_btn.pack(side="left", padx=(10, 0))
+        self._scan_btn.pack(side="left", padx=(0, 10))
+
+        self._open_input_btn = tk.Button(
+            util_frame, text="📂  Buka File (Input)",
+            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
+            font=("Segoe UI", 9), relief="flat", cursor="hand2",
+            padx=14, pady=4, command=self._open_input,
+        )
+        self._open_input_btn.pack(side="left", padx=(0, 10))
+
+        self._open_btn = tk.Button(
+            util_frame, text="📁  Buka Hasil",
+            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
+            font=("Segoe UI", 9), relief="flat", cursor="hand2",
+            padx=14, pady=4, command=self._open_output, state="disabled",
+        )
+        self._open_btn.pack(side="left")
 
         # Status row
         self._status_var = tk.StringVar(value="Siap")
@@ -197,6 +261,115 @@ class App(tk.Tk):
     def _set_status(self, text: str, color: str):
         self._status_var.set(text)
         self._dot.config(fg=color)
+
+    # ── New Feature Stubs ─────────────────────────────────────────────────────
+    def _on_upload(self):
+        from config import BCA_EXCEL_DIR, BCA_EXCEL_PATTERN, MANDIRI_ZIP_DIR, MANDIRI_ZIP_PATTERN, BRI_ZIP_DIR, BRI_ZIP_PATTERN, BRI_PDF_PATTERN, ODO_EXCEL_PATH
+        
+        files = filedialog.askopenfilenames(title="Pilih File Bank atau Odoo", filetypes=[("All Files", "*.*")])
+        if not files:
+            return
+            
+        self._log_write("\n── Mengupload File ──\n", "head")
+        for f in files:
+            path = Path(f)
+            name = path.name.lower()
+            
+            target_dir = None
+            if BCA_EXCEL_PATTERN.lower() in name:
+                target_dir = BCA_EXCEL_DIR
+            elif fnmatch.fnmatch(name, MANDIRI_ZIP_PATTERN.lower()):
+                target_dir = MANDIRI_ZIP_DIR
+            elif BRI_ZIP_PATTERN.lower() in name or BRI_PDF_PATTERN.lower() in name:
+                target_dir = BRI_ZIP_DIR
+            elif "payments" in name and name.endswith(".xlsx"):
+                target_dir = ODO_EXCEL_PATH.parent
+            
+            if target_dir:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                dest = target_dir / path.name
+                shutil.copy2(path, dest)
+                self._log_write(f"✅ Disalin: {path.name} -> {target_dir.name}/\n", "ok")
+            else:
+                self._log_write(f"⚠️ Diabaikan: {path.name} (Tidak cocok pola bank)\n", "warn")
+                
+        self._refresh_folder_status()
+
+    def _on_download(self):
+        if DateEntry:
+            date_from = self._date_from_widget.get()
+            date_to = self._date_to_widget.get()
+        else:
+            date_from = self._date_from_var.get().strip()
+            date_to = self._date_to_var.get().strip()
+        
+        self._log_write(f"\n── Mendownload Odoo Payment (Dari {date_from} sampai {date_to}) ──\n", "head")
+        self._set_status("Mendownload Odoo...", "orange")
+        self._running = True
+        
+        def run():
+            try:
+                cmd = [
+                    _venv_python, "odoo_downloader.py",
+                    "--date-from", date_from,
+                    "--date-to", date_to
+                ]
+                process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                )
+                
+                for line in process.stdout:
+                    self._log_write(line)
+                    
+                process.wait()
+                if process.returncode == 0:
+                    self._log_write("\n✅ Download Odoo Selesai!\n", "ok")
+                else:
+                    self._log_write(f"\n❌ Download Odoo gagal dengan kode {process.returncode}\n", "error")
+                    
+            except Exception as e:
+                self._log_write(f"\n❌ Error: {e}\n", "error")
+            finally:
+                self._running = False
+                self._refresh_folder_status()
+                self._set_status("Siap", SUCCESS)
+                
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_cleanse(self):
+        from config import BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, ODO_EXCEL_PATH, OUTPUT_DIR
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        recap_dir = BASE_DIR / "recap" / timestamp
+        
+        self._log_write("\n── Membersihkan Data ──\n", "head")
+        
+        moved_count = 0
+        dirs_to_clean = [BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, OUTPUT_DIR]
+        
+        for d in dirs_to_clean:
+            if d.exists() and d.is_dir():
+                for f in d.glob("*"):
+                    if f.is_file():
+                        recap_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(f), str(recap_dir / f.name))
+                        moved_count += 1
+                        
+        if ODO_EXCEL_PATH.exists():
+            recap_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(ODO_EXCEL_PATH), str(recap_dir / ODO_EXCEL_PATH.name))
+            moved_count += 1
+            
+        if moved_count > 0:
+            self._log_write(f"✅ {moved_count} file dipindahkan ke: recap/{timestamp}/\n", "ok")
+        else:
+            self._log_write("ℹ️ Tidak ada data yang perlu dibersihkan.\n", "dim")
+            
+        self._refresh_folder_status()
 
     # ── Run / Scan ────────────────────────────────────────────────────────────
     def _on_scan(self):
@@ -308,6 +481,11 @@ class App(tk.Tk):
             _open_path(path)
         elif OUTPUT_DIR.exists():
             _open_path(str(OUTPUT_DIR))
+
+    def _open_input(self):
+        input_dir = BASE_DIR / "input"
+        input_dir.mkdir(exist_ok=True)
+        _open_path(str(input_dir))
 
 
 if __name__ == "__main__":
