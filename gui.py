@@ -29,7 +29,7 @@ if "--worker" in sys.argv:
     os.chdir(str(BASE_DIR))
     import runpy
     if getattr(sys, "frozen", False):
-        main_path = str(Path(sys._MEIPASS) / "main.py")
+        main_path = str(Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "main.py")
     else:
         main_path = str(BASE_DIR / "main.py")
     runpy.run_path(main_path, run_name="__main__")
@@ -64,9 +64,11 @@ WHITE       = "#FFFFFF"
 def _open_path(path: str):
     """Open a file/folder in the OS default app."""
     if IS_WINDOWS:
-        os.startfile(path)
-    else:
+        os.startfile(path) # type: ignore
+    elif sys.platform == "darwin":
         subprocess.run(["open", path])
+    else:
+        subprocess.run(["xdg-open", path])
 
 
 class App(tk.Tk):
@@ -251,7 +253,7 @@ class App(tk.Tk):
         if is_scan:
             cmd.append("--scan")
 
-        flags = subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
         proc = subprocess.Popen(
             cmd,
             cwd=str(BASE_DIR),
@@ -264,13 +266,14 @@ class App(tk.Tk):
         )
 
         last_output_file = None
-        for line in proc.stdout:
-            ls = line.rstrip()
-            if "reconciliation_" in ls and ".xlsx" in ls:
-                for part in ls.split():
-                    if "reconciliation_" in part and ".xlsx" in part:
-                        last_output_file = part.strip()
-            self.after(0, self._log_write, ls + "\n", self._tag(ls))
+        if proc.stdout:
+            for line in proc.stdout:
+                ls = line.rstrip()
+                if "reconciliation_" in ls and ".xlsx" in ls:
+                    for part in ls.split():
+                        if "reconciliation_" in part and ".xlsx" in part:
+                            last_output_file = part.strip()
+                self.after(0, self._log_write, ls + "\n", self._tag(ls))
 
         proc.wait()
         self.after(0, self._on_done, proc.returncode, last_output_file)
