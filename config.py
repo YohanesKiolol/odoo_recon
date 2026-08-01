@@ -15,7 +15,12 @@ def _load_dotenv(dotenv_path):
                 if line and not line.startswith("#"):
                     if "=" in line:
                         k, v = line.split("=", 1)
-                        os.environ[k.strip()] = v.strip()
+                        v = v.strip()
+                        if v.startswith('"') and v.endswith('"'):
+                            v = v[1:-1]
+                        elif v.startswith("'") and v.endswith("'"):
+                            v = v[1:-1]
+                        os.environ[k.strip()] = v
     except FileNotFoundError:
         pass
 

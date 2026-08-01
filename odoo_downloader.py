@@ -43,19 +43,6 @@ def run_downloader():
         page = context.pages[0] if context.pages else context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # -------------------------------------------------------------
-        # Fix 404 Nginx Loop by upgrading HTTP to HTTPS automatically
-        # -------------------------------------------------------------
-        def upgrade_to_https(route, request):
-            if request.url.startswith("http://"):
-                secure_url = request.url.replace("http://", "https://", 1)
-                route.fulfill(status=301, headers={"Location": secure_url})
-            else:
-                route.continue_()
-
-        page.route("**/*", upgrade_to_https)
-        # -------------------------------------------------------------
-
         print(f"[+] Membuka {ODOO_URL}")
         page.goto(ODOO_URL)
 
