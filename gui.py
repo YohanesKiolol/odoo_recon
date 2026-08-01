@@ -48,6 +48,14 @@ try:
 except ImportError:
     DateEntry = None
 
+# Force PyInstaller to bundle dynamic imports
+try:
+    import dotenv
+    import config
+    import odoo_downloader
+except Exception:
+    pass
+
 # Venv python path (dev mode only — frozen uses sys.executable)
 if os.name == 'nt':
     _venv_python_path = BASE_DIR / ".venv" / "Scripts" / "python.exe"
