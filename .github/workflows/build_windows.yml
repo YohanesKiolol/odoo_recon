@@ -23,7 +23,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pyinstaller
-          playwright install chromium
+          python -m playwright install chromium
         env:
           PLAYWRIGHT_BROWSERS_PATH: 0
 
