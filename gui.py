@@ -316,11 +316,11 @@ class App(tk.Tk):
         
         def run():
             try:
-                cmd = [
-                    _venv_python, "odoo_downloader.py",
-                    "--date-from", date_from,
-                    "--date-to", date_to
-                ]
+                if getattr(sys, "frozen", False):
+                    cmd = [sys.executable, "--run-downloader", "--date-from", date_from, "--date-to", date_to]
+                else:
+                    cmd = [_venv_python, "odoo_downloader.py", "--date-from", date_from, "--date-to", date_to]
+                    
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -427,8 +427,8 @@ class App(tk.Tk):
         # When in dev:  launch main.py via the venv python
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--worker"]
-        elif _venv_python.exists():
-            cmd = [str(_venv_python), str(BASE_DIR / "main.py")]
+        elif _venv_python_path.exists():
+            cmd = [_venv_python, str(BASE_DIR / "main.py")]
         else:
             cmd = [sys.executable, str(BASE_DIR / "main.py")]
 
@@ -499,5 +499,20 @@ class App(tk.Tk):
 
 
 if __name__ == "__main__":
+    import sys
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--run-downloader":
+            import odoo_downloader
+            sys.argv = [sys.argv[0]] + sys.argv[2:]
+            odoo_downloader.run_downloader()
+            sys.exit(0)
+        elif sys.argv[1] == "--run-main":
+            # main.py usually runs its logic on import or inside a main() check.
+            # If main.py just runs on import, importing it is enough.
+            # If it requires __main__, we can run it using runpy.
+            import runpy
+            runpy.run_module('main', run_name='__main__')
+            sys.exit(0)
+
     app = App()
     app.mainloop()
