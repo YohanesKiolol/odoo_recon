@@ -98,6 +98,25 @@ class App(tk.Tk):
         self._folder_label.pack(fill="x")
         self._refresh_folder_status()
 
+        # Bank Selection
+        bank_frame = tk.Frame(self, bg=BG, padx=30, pady=5)
+        bank_frame.pack(fill="x")
+        tk.Label(bank_frame, text="Pilih Bank:", bg=BG, fg=TEXT, font=("Segoe UI", 10)).pack(side="left", padx=(0, 10))
+
+        self._bank_vars = {
+            "BCA": tk.BooleanVar(value=True),
+            "Mandiri": tk.BooleanVar(value=True),
+            "BRI": tk.BooleanVar(value=True)
+        }
+
+        for b in ["BCA", "Mandiri", "BRI"]:
+            cb = tk.Checkbutton(
+                bank_frame, text=b, variable=self._bank_vars[b],
+                bg=BG, fg=TEXT, selectcolor=PANEL, activebackground=BG, activeforeground=TEXT,
+                font=("Segoe UI", 10), cursor="hand2"
+            )
+            cb.pack(side="left", padx=5)
+
         # Buttons
         btn_frame = tk.Frame(self, bg=BG, padx=30)
         btn_frame.pack(fill="x", pady=(0, 14))
@@ -170,6 +189,12 @@ class App(tk.Tk):
         if self._running:
             return
         self._running = True
+        selected_banks = [b.lower() for b, var in self._bank_vars.items() if var.get()]
+        if not selected_banks:
+            self._set_status("Pilih minimal 1 bank!", ERROR)
+            self._running = False
+            return
+
         self._run_btn.config(state="disabled", text="⏳  Berjalan...")
         self._open_btn.config(state="disabled")
         self._log.config(state="normal")
@@ -177,9 +202,9 @@ class App(tk.Tk):
         self._log.config(state="disabled")
         self._set_status("Memproses...", WARN)
         self._refresh_folder_status()
-        threading.Thread(target=self._run_script, daemon=True).start()
+        threading.Thread(target=self._run_script, args=(selected_banks,), daemon=True).start()
 
-    def _run_script(self):
+    def _run_script(self, selected_banks):
         # When frozen: re-launch the same .exe with --worker flag for clean stdout
         # When in dev:  launch main.py via the venv python
         if getattr(sys, "frozen", False):
@@ -188,6 +213,9 @@ class App(tk.Tk):
             cmd = [str(_venv_python), str(BASE_DIR / "main.py")]
         else:
             cmd = [sys.executable, str(BASE_DIR / "main.py")]
+
+        if selected_banks:
+            cmd.extend(["--bank"] + selected_banks)
 
         flags = subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0
         proc = subprocess.Popen(
