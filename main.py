@@ -145,6 +145,8 @@ def main():
                 number_col    = BCA_NUMBER_COLUMN,
                 filter_dates  = bca_filter_dates,
             )
+        except FileNotFoundError as e:
+            print(f"  ⚠️  No BCA files found, skipping BCA.")
         except Exception as e:
             print(f"\n❌ ERROR (BCA): {e}\n")
             sys.exit(1)
@@ -167,6 +169,8 @@ def main():
                 filter_dates = mandiri_filter_dates,
             )
             print(f"  ✅ Mandiri: {len(bank_txns['Mandiri'])} transactions loaded")
+        except FileNotFoundError as e:
+            print(f"  ⚠️  No Mandiri files found, skipping Mandiri.")
         except Exception as e:
             print(f"\n❌ ERROR (Mandiri): {e}\n")
             sys.exit(1)
@@ -189,6 +193,8 @@ def main():
                 filter_dates = bri_filter_dates,
             )
             print(f"  ✅ BRI: {len(bank_txns['BRI'])} transactions loaded")
+        except FileNotFoundError as e:
+            print(f"  ⚠️  No BRI files found, skipping BRI.")
         except Exception as e:
             print(f"\n❌ ERROR (BRI): {e}\n")
             sys.exit(1)
