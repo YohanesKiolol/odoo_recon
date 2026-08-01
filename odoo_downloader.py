@@ -17,6 +17,18 @@ def run_downloader():
         print("[!] Error: ODOO_URL, ODOO_DASHBOARD_URL, atau ODOO_PAYMENTS_URL belum di-set di .env")
         sys.exit(1)
 
+    print("[+] Mengecek dan menginstall browser (butuh waktu beberapa menit pada run pertama)...")
+    try:
+        import subprocess
+        if getattr(sys, "frozen", False):
+            # Run the PyInstaller exe with the install hook
+            subprocess.run([sys.executable, "--install-playwright"], check=True)
+        else:
+            # Run the standard python module
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+    except Exception as e:
+        print(f"[!] Gagal mengecek/menginstall browser: {e}")
+
     print("[+] Menyiapkan browser (Playwright)...")
     
     with sync_playwright() as p:
@@ -42,6 +54,17 @@ def run_downloader():
 
         page = context.pages[0] if context.pages else context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+
+        # -------------------------------------------------------------
+        # Force HTTPS redirect internally to avoid nginx 404 if Odoo sends HTTP redirects
+        def upgrade_to_https(route):
+            url = route.request.url
+            if url.startswith("http://"):
+                url = url.replace("http://", "https://", 1)
+            route.continue_(url=url)
+            
+        page.route("**/*", upgrade_to_https)
+        # -------------------------------------------------------------
 
         print(f"[+] Membuka {ODOO_URL}")
         page.goto(ODOO_URL)

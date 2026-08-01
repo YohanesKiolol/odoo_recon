@@ -535,6 +535,11 @@ if __name__ == "__main__":
             import runpy
             runpy.run_module('main', run_name='__main__')
             sys.exit(0)
+        elif sys.argv[1] == "--install-playwright":
+            import runpy
+            sys.argv = [sys.argv[0], "install", "chromium"]
+            runpy.run_module('playwright', run_name='__main__')
+            sys.exit(0)
 
     app = App()
     app.mainloop()
