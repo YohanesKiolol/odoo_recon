@@ -26,7 +26,7 @@ a = Analysis(
         'readers.odoo_reader', 'readers.bca_reader',
         'readers.mandiri_reader', 'readers.bri_reader',
         'openpyxl', 'pdfplumber', 'pdfminer', 'pyzipper',
-        'msoffcrypto', 'dotenv', 'tkcalendar', 'babel.numbers',
+        'msoffcrypto', 'playwright', 'playwright.sync_api', 'tkcalendar', 'babel.numbers',
     ],
     hookspath=[],
     hooksconfig={},

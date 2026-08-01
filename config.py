@@ -6,7 +6,18 @@ Script never hardcodes any value; everything is user-configurable.
 import os
 import sys
 from pathlib import Path
-from dotenv import load_dotenv
+
+def _load_dotenv(dotenv_path):
+    try:
+        with open(dotenv_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    if "=" in line:
+                        k, v = line.split("=", 1)
+                        os.environ[k.strip()] = v.strip()
+    except FileNotFoundError:
+        pass
 
 # In frozen (PyInstaller) mode, config.py lives in a temp _MEI* folder.
 # The .env file is always next to the .exe (or next to config.py in dev).
@@ -15,7 +26,7 @@ if getattr(sys, "frozen", False):
 else:
     _base = Path(__file__).parent         # folder containing config.py (project root)
 
-load_dotenv(dotenv_path=_base / ".env", override=True)
+_load_dotenv(_base / ".env")
 
 
 

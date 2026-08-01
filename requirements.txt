@@ -2,7 +2,6 @@ msoffcrypto-tool==5.4.2
 openpyxl==3.1.5
 pdfminer.six==20231228
 pdfplumber==0.11.4
-python-dotenv==1.0.1
 pyzipper==0.3.6
 playwright==1.45.1
 playwright==1.45.1

@@ -50,7 +50,6 @@ except ImportError:
 
 # Force PyInstaller to bundle dynamic imports
 try:
-    import dotenv
     import config
     import odoo_downloader
 except Exception:
