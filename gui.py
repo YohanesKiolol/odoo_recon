@@ -120,13 +120,23 @@ class App(tk.Tk):
         # Buttons
         btn_frame = tk.Frame(self, bg=BG, padx=30)
         btn_frame.pack(fill="x", pady=(0, 14))
+
+        self._scan_btn = tk.Button(
+            btn_frame, text="🔍  Scan Data",
+            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
+            font=("Segoe UI", 11, "bold"), relief="flat", cursor="hand2",
+            padx=16, pady=10, command=self._on_scan,
+        )
+        self._scan_btn.pack(side="left", padx=(0, 10))
+
         self._run_btn = tk.Button(
             btn_frame, text="▶  Jalankan Rekonsiliasi",
             bg=ACCENT, fg=WHITE, activebackground=ACCENT_DARK, activeforeground=WHITE,
-            font=("Segoe UI", 12, "bold"), relief="flat", cursor="hand2",
-            padx=22, pady=10, command=self._on_run,
+            font=("Segoe UI", 11, "bold"), relief="flat", cursor="hand2",
+            padx=16, pady=10, command=self._on_run,
         )
         self._run_btn.pack(side="left")
+
         self._open_btn = tk.Button(
             btn_frame, text="📁  Buka Hasil",
             bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
@@ -184,7 +194,27 @@ class App(tk.Tk):
         self._status_var.set(text)
         self._dot.config(fg=color)
 
-    # ── Run ───────────────────────────────────────────────────────────────────
+    # ── Run / Scan ────────────────────────────────────────────────────────────
+    def _on_scan(self):
+        if self._running:
+            return
+        self._running = True
+        selected_banks = [b.lower() for b, var in self._bank_vars.items() if var.get()]
+        if not selected_banks:
+            self._set_status("Pilih minimal 1 bank!", ERROR)
+            self._running = False
+            return
+
+        self._scan_btn.config(state="disabled")
+        self._run_btn.config(state="disabled")
+        self._open_btn.config(state="disabled")
+        self._log.config(state="normal")
+        self._log.delete("1.0", "end")
+        self._log.config(state="disabled")
+        self._set_status("Scanning data...", WARN)
+        self._refresh_folder_status()
+        threading.Thread(target=self._run_script, args=(selected_banks, True), daemon=True).start()
+
     def _on_run(self):
         if self._running:
             return
@@ -195,6 +225,7 @@ class App(tk.Tk):
             self._running = False
             return
 
+        self._scan_btn.config(state="disabled")
         self._run_btn.config(state="disabled", text="⏳  Berjalan...")
         self._open_btn.config(state="disabled")
         self._log.config(state="normal")
@@ -202,9 +233,9 @@ class App(tk.Tk):
         self._log.config(state="disabled")
         self._set_status("Memproses...", WARN)
         self._refresh_folder_status()
-        threading.Thread(target=self._run_script, args=(selected_banks,), daemon=True).start()
+        threading.Thread(target=self._run_script, args=(selected_banks, False), daemon=True).start()
 
-    def _run_script(self, selected_banks):
+    def _run_script(self, selected_banks, is_scan=False):
         # When frozen: re-launch the same .exe with --worker flag for clean stdout
         # When in dev:  launch main.py via the venv python
         if getattr(sys, "frozen", False):
@@ -216,6 +247,9 @@ class App(tk.Tk):
 
         if selected_banks:
             cmd.extend(["--bank"] + selected_banks)
+        
+        if is_scan:
+            cmd.append("--scan")
 
         flags = subprocess.CREATE_NO_WINDOW if IS_WINDOWS else 0
         proc = subprocess.Popen(
@@ -252,6 +286,7 @@ class App(tk.Tk):
 
     def _on_done(self, code: int, output_path: str | None):
         self._running = False
+        self._scan_btn.config(state="normal")
         self._run_btn.config(state="normal", text="▶  Jalankan Rekonsiliasi")
         if code == 0:
             self._set_status("Selesai ✓", SUCCESS)

@@ -62,6 +62,10 @@ def parse_args():
         "--bank", nargs="+", choices=ALL_BANKS,
         help=f"Which banks to process. Default: all. Options: {ALL_BANKS}"
     )
+    parser.add_argument(
+        "--scan", action="store_true",
+        help="Scan files and print a summary of dates and counts, then exit."
+    )
     return parser.parse_args()
 
 
@@ -188,6 +192,36 @@ def main():
         except Exception as e:
             print(f"\n❌ ERROR (BRI): {e}\n")
             sys.exit(1)
+
+    # ── Handle Scan Mode ───────────────────────────────────────────────────────
+    if args.scan:
+        from collections import Counter
+        _banner("SCAN SUMMARY")
+        
+        print("  [ ODO FILE ]")
+        for bank_key, txns in odo_bank_txns.items():
+            print(f"    {bank_key}:")
+            dates = Counter(t.get("date", "Unknown") for t in txns)
+            if not dates:
+                print("      (No transactions)")
+            for d, c in sorted(dates.items()):
+                print(f"      {d} : {c} trxs")
+        
+        print("\n  [ BANK FILES ]")
+        for bank_key in banks:
+            b_key = bank_key.upper()
+            if b_key == "MANDIRI": b_key = "Mandiri"
+            
+            txns = bank_txns.get(b_key, [])
+            print(f"    {b_key}:")
+            dates = Counter(t.get("date", "Unknown") for t in txns)
+            if not dates:
+                print("      (No transactions)")
+            for d, c in sorted(dates.items()):
+                print(f"      {d} : {c} trxs")
+        
+        print(f"\n{'─' * 60}\n")
+        sys.exit(0)
 
     # ── Step 3: Reconcile per bank ─────────────────────────────────────────────
     _banner("Comparing transactions...")
