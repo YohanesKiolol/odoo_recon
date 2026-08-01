@@ -13,7 +13,12 @@ def run_downloader():
     parser.add_argument("--date-to", type=str, default="08/01/2026", help="Format: MM/DD/YYYY")
     args = parser.parse_args()
 
-    if not ODOO_URL or not ODOO_DASHBOARD_URL or not ODOO_PAYMENTS_URL:
+    # Force all URLs to use https:// to prevent Nginx 404 errors on login redirects
+    odoo_url_https = ODOO_URL.replace("http://", "https://") if ODOO_URL else ""
+    odoo_dash_https = ODOO_DASHBOARD_URL.replace("http://", "https://") if ODOO_DASHBOARD_URL else ""
+    odoo_pay_https = ODOO_PAYMENTS_URL.replace("http://", "https://") if ODOO_PAYMENTS_URL else ""
+
+    if not odoo_url_https or not odoo_dash_https or not odoo_pay_https:
         print("[!] Error: ODOO_URL, ODOO_DASHBOARD_URL, atau ODOO_PAYMENTS_URL belum di-set di .env")
         sys.exit(1)
 
@@ -52,13 +57,25 @@ def run_downloader():
 
         page = context.pages[0] if context.pages else context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # -------------------------------------------------------------
+        # Fix for Odoo proxy_mode bug: Odoo randomly redirects to http:// after login.
+        # Playwright network interceptors cannot change protocols on top-level navigation,
+        # so we inject a script that forces the browser to instantly redirect to https://
+        # if it ever lands on an http:// page (like the 404 Nginx page).
+        page.add_init_script("""
+            if (window.location.protocol === 'http:') {
+                window.location.href = window.location.href.replace('http:', 'https:');
+            }
+        """)
+        # -------------------------------------------------------------
 
-        print(f"[+] Membuka {ODOO_URL}")
-        page.goto(ODOO_URL)
+        print(f"[+] Membuka {odoo_url_https}")
+        page.goto(odoo_url_https)
 
         print("\n[+] Menunggu Anda login secara manual...")
-        # Strip protocol so it matches even if Odoo bad-redirects to http://
-        dashboard_path = ODOO_DASHBOARD_URL.split("://")[-1]
+        # Strip protocol so it matches exactly
+        dashboard_path = odoo_dash_https.split("://")[-1]
         
         page.wait_for_function(
             "path => window.location.href.includes(path)",
@@ -67,8 +84,8 @@ def run_downloader():
         )
         print("[+] Dashboard terdeteksi!")
 
-        print(f"\n[+] Mengarahkan ke halaman Payments: {ODOO_PAYMENTS_URL}")
-        page.goto(ODOO_PAYMENTS_URL)
+        print(f"\n[+] Mengarahkan ke halaman Payments: {odoo_pay_https}")
+        page.goto(odoo_pay_https)
 
         # Tunggu loading SPA Odoo secara dinamis berdasarkan elemen tabel data
         print("[+] Menunggu tabel data Odoo termuat sepenuhnya...")
