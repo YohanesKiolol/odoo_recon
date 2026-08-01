@@ -328,12 +328,17 @@ class App(tk.Tk):
                 else:
                     cmd = [_venv_python, "odoo_downloader.py", "--date-from", date_from, "--date-to", date_to]
                     
+                env = os.environ.copy()
+                env["PYTHONIOENCODING"] = "utf-8"
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
                     bufsize=1,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env
                 )
                 
                 for line in process.stdout:
@@ -445,6 +450,8 @@ class App(tk.Tk):
         if is_scan:
             cmd.append("--scan")
 
+        env = os.environ.copy()
+        env["PYTHONIOENCODING"] = "utf-8"
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
         proc = subprocess.Popen(
             cmd,
@@ -455,6 +462,7 @@ class App(tk.Tk):
             encoding="utf-8",
             errors="replace",
             creationflags=flags,
+            env=env
         )
 
         last_output_file = None
@@ -507,6 +515,13 @@ class App(tk.Tk):
 
 if __name__ == "__main__":
     import sys
+    import io
+
+    # Force UTF-8 encoding for subprocesses so emojis don't crash Windows CP1252
+    if len(sys.argv) > 1 and sys.argv[1] in ("--run-downloader", "--run-main", "--worker"):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
     if len(sys.argv) > 1:
         if sys.argv[1] == "--run-downloader":
             import odoo_downloader
