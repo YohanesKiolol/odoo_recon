@@ -98,10 +98,12 @@ def _read_csv_from_bytes(
         )
 
         # Date filter: skip rows not in the allowed set
+        txn_date = _parse_any_date(date_val)
         if filter_dates is not None:
-            txn_date = _parse_any_date(date_val)
             if txn_date not in filter_dates:
                 continue
+        
+        final_date = str(txn_date) if txn_date else date_val
 
         desc_val = (
             row.get("DESCRIPTION") or
@@ -123,7 +125,7 @@ def _read_csv_from_bytes(
         txns.append({
             "amount":      amount,
             "amount_raw":  raw,
-            "date":        date_val,
+            "date":        final_date,
             "description": desc_val,
             "number":      number_val,
             "filename":    source_file,

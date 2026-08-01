@@ -189,16 +189,18 @@ def _parse_pdf_table(
                     number_val = str(row[number_idx]).strip() if number_idx is not None and row[number_idx] else ""
 
                     # Date filter
+                    txn_date = _parse_any_date(date_val)
                     if filter_dates is not None:
-                        txn_date = _parse_any_date(date_val)
                         if txn_date not in filter_dates:
                             skipped += 1
                             continue
+                            
+                    final_date = str(txn_date) if txn_date else date_val
 
                     txns.append({
                         "amount":      amount,
                         "amount_raw":  raw_amount,
-                        "date":        date_val,
+                        "date":        final_date,
                         "description": desc_val,
                         "number":      number_val,
                         "filename":    source_file,
