@@ -76,7 +76,9 @@ class App(tk.Tk):
         super().__init__()
         self.title("Bank Reconciliation Tool")
         self.configure(bg=BG)
-        self.resizable(False, False)
+        self.geometry("900x700")
+        self.minsize(700, 500)
+        self.resizable(True, True)
         self._running = False
         self._last_output: str | None = None
         self._build_ui()
@@ -162,14 +164,14 @@ class App(tk.Tk):
         log_frame.pack(fill="both", expand=True, padx=30, pady=(0, 20))
         self._log = scrolledtext.ScrolledText(
             log_frame, bg="#0F1623", fg=TEXT, insertbackground=TEXT,
-            font=("Consolas", 10), relief="flat", state="disabled",
-            width=78, height=22, wrap="word",
+            font=("Consolas", 11), relief="flat", state="disabled",
+            width=90, height=28, wrap="word",
         )
         self._log.pack(fill="both", expand=True)
         self._log.tag_config("ok",   foreground=SUCCESS)
         self._log.tag_config("err",  foreground=ERROR)
         self._log.tag_config("warn", foreground=WARN)
-        self._log.tag_config("head", foreground=ACCENT, font=("Consolas", 10, "bold"))
+        self._log.tag_config("head", foreground=ACCENT, font=("Consolas", 11, "bold"))
         self._log.tag_config("dim",  foreground=MUTED)
 
     def _center(self):
