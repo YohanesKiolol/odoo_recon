@@ -68,7 +68,12 @@ def _read_csv_from_bytes(
 
     for row_num, row in enumerate(reader, start=7):
         # Strip whitespace from all keys
-        row = {k.strip(): v.strip() for k, v in row.items() if k is not None}
+        row = {k.strip(): str(v).strip() for k, v in row.items() if k is not None and v is not None}
+        
+        # Stop processing if we reach the TOTAL or SUMMARY GROUP section at the bottom
+        first_val = str(list(row.values())[0]).upper() if row.values() else ""
+        if first_val.startswith("TOTAL") or first_val.startswith("SUMMARY GROUP"):
+            break
 
         raw = row.get(amount_col_stripped)
         if raw is None:

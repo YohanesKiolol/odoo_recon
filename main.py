@@ -113,8 +113,13 @@ def main():
             group_map   = group_map,
         )
     except (FileNotFoundError, ValueError) as e:
-        print(f"\n[!] ERROR (ODO): {e}\n")
-        sys.exit(1)
+        if args.scan:
+            print(f"  [i] ODO file not found, continuing scan for bank files...")
+            odo_date = None
+            odo_bank_txns = {}
+        else:
+            print(f"\n[!] ERROR (ODO): {e}\n")
+            sys.exit(1)
 
     print(f"  [+] ODO date: {odo_date}")
     for bank_key, txns in odo_bank_txns.items():
@@ -214,6 +219,7 @@ def main():
                 print(f"      {d} : {c} trxs")
         
         print("\n  [ BANK FILES ]")
+        all_dates = []
         for bank_key in banks:
             b_key = bank_key.upper()
             if b_key == "MANDIRI": b_key = "Mandiri"
@@ -225,8 +231,17 @@ def main():
                 print("      (No transactions)")
             for d, c in sorted(dates.items()):
                 print(f"      {d} : {c} trxs")
+                d_str = str(d).strip()
+                if d_str and d_str != "Unknown":
+                    # basic check for YYYY-MM-DD
+                    if len(d_str) >= 10 and d_str[0:4].isdigit():
+                        all_dates.append(d_str[:10])
         
         print(f"\n{'─' * 60}\n")
+        
+        if all_dates:
+            print(f"[DATE_RANGE]|{min(all_dates)}|{max(all_dates)}")
+            
         sys.exit(0)
 
     # ── Step 3: Reconcile per bank ─────────────────────────────────────────────

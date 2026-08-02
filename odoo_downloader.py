@@ -4,14 +4,24 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 # Import configs
-from config import ODOO_URL, ODOO_DASHBOARD_URL, ODOO_PAYMENTS_URL, ODO_EXCEL_PATH
+from config import (
+    ODOO_URL, ODOO_DASHBOARD_URL, ODOO_PAYMENTS_URL, ODO_EXCEL_PATH,
+    ODO_GROUP_BCA, ODO_GROUP_MANDIRI, ODO_GROUP_BRI
+)
 
 
 def run_downloader():
     parser = argparse.ArgumentParser(description="Odoo Payment Downloader")
     parser.add_argument("--date-from", type=str, default="08/01/2026", help="Format: MM/DD/YYYY")
     parser.add_argument("--date-to", type=str, default="08/01/2026", help="Format: MM/DD/YYYY")
+    parser.add_argument("--email", type=str, default="", help="Odoo Email (opsional untuk auto-login)")
+    parser.add_argument("--password", type=str, default="", help="Odoo Password (opsional untuk auto-login)")
+    parser.add_argument("--banks", type=str, default="BCA,Mandiri,BRI", help="Comma separated list of banks")
     args = parser.parse_args()
+    
+    is_headless = bool(args.email and args.password)
+    
+    selected_banks = [b.strip() for b in args.banks.split(",")] if args.banks else []
 
     # Force all URLs to use https:// to prevent Nginx 404 errors on login redirects
     odoo_url_https = ODOO_URL.replace("http://", "https://") if ODOO_URL else ""
@@ -40,7 +50,7 @@ def run_downloader():
         try:
             context = p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
-                headless=False,
+                headless=is_headless,
                 channel="chrome",
                 args=["--disable-blink-features=AutomationControlled", "--test-type"],
                 ignore_default_args=["--no-sandbox", "--enable-automation"],
@@ -49,7 +59,7 @@ def run_downloader():
         except Exception:
             context = p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
-                headless=False,
+                headless=is_headless,
                 args=["--disable-blink-features=AutomationControlled", "--test-type"],
                 ignore_default_args=["--no-sandbox", "--enable-automation"],
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -73,14 +83,23 @@ def run_downloader():
         print(f"[+] Membuka {odoo_url_https}")
         page.goto(odoo_url_https)
 
-        print("\n[+] Menunggu Anda login secara manual...")
+        if is_headless:
+            print("[+] Mengisi form login Odoo di background...")
+            page.wait_for_selector("xpath=/html/body/div[2]/main/div[1]/form/div[1]/input", state="visible", timeout=30000)
+            page.fill("xpath=/html/body/div[2]/main/div[1]/form/div[1]/input", args.email)
+            page.fill("xpath=/html/body/div[2]/main/div[1]/form/div[2]/input", args.password)
+            page.click("xpath=/html/body/div[2]/main/div[1]/form/div[3]/button")
+            print("[+] Login disubmit, menunggu proses...")
+        else:
+            print("\n[+] Menunggu Anda login secara manual...")
+        
         # Strip protocol so it matches exactly
         dashboard_path = odoo_dash_https.split("://")[-1]
         
         page.wait_for_function(
             "path => window.location.href.includes(path)",
             arg=dashboard_path,
-            timeout=0
+            timeout=0 if not is_headless else 30000
         )
         print("[+] Dashboard terdeteksi!")
 
@@ -163,6 +182,77 @@ def run_downloader():
         to_loc.wait_for(state="visible", timeout=5000)
         to_loc.fill(args.date_to)
         page.wait_for_timeout(500)
+
+        # Langkah 6.5: Tambahkan filter Journal jika tidak semua bank dipilih
+        if len(selected_banks) < 3 and selected_banks:
+            print(f"[+] Menambahkan filter Journal untuk bank: {', '.join(selected_banks)}...")
+            
+            # Click '+' icon to add a new rule row
+            xpath_add_rule = "./div/div/div/div[2]/div/div[2]/button[1]"
+            dialog.locator(f"xpath={xpath_add_rule}").click()
+            page.wait_for_timeout(500)
+            
+            # Ensure 'Match ALL' is selected
+            print("    -> Memastikan rule matching diset ke 'all'...")
+            xpath_match_btn = "./div/div/div/div[1]/div/div/div/button"
+            dialog.locator(f"xpath={xpath_match_btn}").click()
+            page.wait_for_timeout(500)
+            xpath_match_all = "./div/div/div/div[1]/div/div/div/div/span[1]"
+            dialog.locator(f"xpath={xpath_match_all}").click()
+            page.wait_for_timeout(500)
+            
+            # Select 'Journal' field
+            xpath_field_2 = "./div/div/div/div[3]/div/div[1]/div[1]/div/div"
+            dialog.locator(f"xpath={xpath_field_2}").click()
+            page.wait_for_timeout(500)
+            page.keyboard.type("Journal")
+            page.wait_for_timeout(500)
+            page.keyboard.press("Enter")
+            
+            # Select operator 'is in'
+            xpath_operator_2 = "./div/div/div/div[3]/div/div[1]/div[2]/select"
+            op_loc = dialog.locator(f"xpath={xpath_operator_2}")
+            op_loc.wait_for(state="visible", timeout=5000)
+            try:
+                op_loc.select_option(label="is in")
+            except Exception as e:
+                print(f"[!] Gagal memilih 'is in' via select_option: {e}")
+                op_loc.click()
+                page.keyboard.type("in")
+                page.keyboard.press("Enter")
+            
+            page.wait_for_timeout(500)
+            
+            # Input journal values
+            xpath_value_input = "./div/div/div/div[3]/div/div[1]/div[3]/div/div/input"
+            val_input = dialog.locator(f"xpath={xpath_value_input}")
+            
+            journal_map = {
+                "BCA": ODO_GROUP_BCA,
+                "Mandiri": ODO_GROUP_MANDIRI,
+                "BRI": ODO_GROUP_BRI
+            }
+            
+            for bank in selected_banks:
+                j_name = journal_map.get(bank)
+                if j_name:
+                    print(f"    -> Memasukkan '{j_name}'")
+                    val_input.click()
+                    val_input.fill(j_name)
+                    # Tunggu dropdown Odoo muncul
+                    page.wait_for_timeout(1000)
+                    
+                    # Opsi dropdown biasanya di dalam popover UI
+                    # Cari elemen <a> (opsi) yang textnya mengandung j_name lalu click
+                    try:
+                        dropdown_opt = page.locator("a", has_text=j_name).first
+                        dropdown_opt.wait_for(state="visible", timeout=3000)
+                        dropdown_opt.click()
+                    except Exception:
+                        print(f"    [!] Tidak menemukan opsi dropdown untuk '{j_name}', mencoba fallback Enter")
+                        page.keyboard.press("Enter")
+                        
+                    page.wait_for_timeout(500)
 
         # Langkah 7: Klik tombol 'Add'
         print("[+] Mengklik tombol 'Add'...")

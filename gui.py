@@ -139,9 +139,27 @@ class App(tk.Tk):
             )
             cb.pack(side="left", padx=5)
 
-        # ── Date Range Inputs ──
+        # ── Credentials (Odoo) ──
+        cred_frame = tk.Frame(self, bg=BG, padx=30)
+        cred_frame.pack(fill="x", pady=(10, 5))
+        
+        tk.Label(cred_frame, text="Email:", bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(side="left")
+        self._email_var = tk.StringVar()
+        tk.Entry(cred_frame, textvariable=self._email_var, width=25).pack(side="left", padx=(5, 15))
+        
+        tk.Label(cred_frame, text="Password:", bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(side="left")
+        self._password_var = tk.StringVar()
+        self._password_entry = tk.Entry(cred_frame, textvariable=self._password_var, width=25, show="*")
+        self._password_entry.pack(side="left", padx=(5, 2))
+        
+        eye_lbl = tk.Label(cred_frame, text="👁", bg=BG, fg=MUTED, cursor="hand2")
+        eye_lbl.pack(side="left")
+        eye_lbl.bind("<ButtonPress-1>", lambda e: self._password_entry.config(show=""))
+        eye_lbl.bind("<ButtonRelease-1>", lambda e: self._password_entry.config(show="*"))
+
+        # ── Dates ──
         date_frame = tk.Frame(self, bg=BG, padx=30)
-        date_frame.pack(fill="x", pady=(10, 0))
+        date_frame.pack(fill="x", pady=(5, 5))
         
         tk.Label(date_frame, text="Dari:", bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(side="left")
         if DateEntry:
@@ -160,6 +178,7 @@ class App(tk.Tk):
         else:
             self._date_to_var = tk.StringVar(value=datetime.now().strftime("%m/%d/%Y"))
             tk.Entry(date_frame, textvariable=self._date_to_var, width=12).pack(side="left", padx=(5, 0))
+
 
         # ── Action Toolbar (Single Row) ──
         action_frame = tk.Frame(self, bg=BG, padx=30)
@@ -328,6 +347,15 @@ class App(tk.Tk):
                 else:
                     cmd = [_venv_python, "odoo_downloader.py", "--date-from", date_from, "--date-to", date_to]
                     
+                email = self._email_var.get().strip()
+                password = self._password_var.get()
+                if email and password:
+                    cmd.extend(["--email", email, "--password", password])
+                    
+                selected_banks = [b for b, var in self._bank_vars.items() if var.get()]
+                if selected_banks:
+                    cmd.extend(["--banks", ",".join(selected_banks)])
+
                 env = os.environ.copy()
                 env["PYTHONIOENCODING"] = "utf-8"
                 process = subprocess.Popen(
@@ -469,6 +497,14 @@ class App(tk.Tk):
         if proc.stdout:
             for line in proc.stdout:
                 ls = line.rstrip()
+                if ls.startswith("[DATE_RANGE]|"):
+                    try:
+                        _, min_d, max_d = ls.split("|")
+                        self.after(0, self._set_dates, min_d, max_d)
+                    except Exception:
+                        pass
+                    continue
+                    
                 if "reconciliation_" in ls and ".xlsx" in ls:
                     for part in ls.split():
                         if "reconciliation_" in part and ".xlsx" in part:
@@ -491,6 +527,7 @@ class App(tk.Tk):
         self._running = False
         self._scan_btn.config(state="normal")
         self._run_btn.config(state="normal", text="▶  Jalankan Rekonsiliasi")
+        
         if code == 0:
             self._set_status("Selesai ✓", SUCCESS)
             self._open_btn.config(state="normal")
@@ -499,6 +536,21 @@ class App(tk.Tk):
                 _open_path(output_path)
         else:
             self._set_status("Gagal — lihat log di bawah", ERROR)
+            
+    def _set_dates(self, min_d: str, max_d: str):
+        try:
+            from datetime import datetime
+            d_from = datetime.strptime(min_d, "%Y-%m-%d").strftime("%m/%d/%Y")
+            d_to = datetime.strptime(max_d, "%Y-%m-%d").strftime("%m/%d/%Y")
+            if DateEntry:
+                self._date_from_widget.set_date(datetime.strptime(d_from, "%m/%d/%Y"))
+                self._date_to_widget.set_date(datetime.strptime(d_to, "%m/%d/%Y"))
+            else:
+                self._date_from_var.set(d_from)
+                self._date_to_var.set(d_to)
+            self._log_write(f"\n📅 [Auto-Detect] Tanggal diupdate: {d_from} - {d_to}\n", "ok")
+        except Exception as e:
+            self._log_write(f"\n⚠️ Gagal update tanggal: {e}\n", "warn")
 
     def _open_output(self):
         path = self._last_output
