@@ -137,6 +137,7 @@ def main():
 
     # ── Step 2: Read each bank ─────────────────────────────────────────────────
     bank_txns: dict[str, list[dict]] = {}
+    all_excluded_txns: list[dict] = []
 
     if "bca" in banks:
         _banner("Reading BCA transactions...")
@@ -148,8 +149,7 @@ def main():
             try:
                 from datetime import datetime as _dt
                 filter_dates = None
-
-                bank_txns[acc_key] = read_bca(
+                b_txns, exc_txns = read_bca(
                     excel_dir     = target_dir,
                     excel_pattern = BCA_EXCEL_PATTERN,
                     password      = BCA_EXCEL_PASSWORD,
@@ -158,6 +158,8 @@ def main():
                     number_col    = BCA_NUMBER_COLUMN,
                     filter_dates  = filter_dates,
                 )
+                bank_txns[acc_key] = b_txns
+                all_excluded_txns.extend(exc_txns)
             except FileNotFoundError as e:
                 print(f"  [!] No BCA files found for {alias}, skipping.")
             except Exception as e:
@@ -174,7 +176,7 @@ def main():
             try:
                 from datetime import datetime as _dt
                 filter_dates = None
-                bank_txns[acc_key] = read_mandiri(
+                b_txns, exc_txns = read_mandiri(
                     zip_dir     = target_dir,
                     password    = MANDIRI_ZIP_PASSWORD,
                     amount_col  = MANDIRI_AMOUNT_COLUMN,
@@ -182,6 +184,8 @@ def main():
                     zip_pattern = MANDIRI_ZIP_PATTERN,
                     filter_dates = filter_dates,
                 )
+                bank_txns[acc_key] = b_txns
+                all_excluded_txns.extend(exc_txns)
                 print(f"  [+] Mandiri ({alias}): {len(bank_txns.get(acc_key, []))} transactions loaded")
             except FileNotFoundError as e:
                 print(f"  [-] No Mandiri files found for {alias}, skipping.")
@@ -199,7 +203,7 @@ def main():
             try:
                 from datetime import datetime as _dt
                 filter_dates = None
-                bank_txns[acc_key] = read_bri(
+                b_txns, exc_txns = read_bri(
                     zip_dir      = target_dir,
                     zip_pattern  = acc_info.get("mid", "") or BRI_ZIP_PATTERN,
                     pdf_pattern  = BRI_PDF_PATTERN,
@@ -207,6 +211,8 @@ def main():
                     number_col   = BRI_NUMBER_COLUMN,
                     filter_dates = filter_dates,
                 )
+                bank_txns[acc_key] = b_txns
+                all_excluded_txns.extend(exc_txns)
                 print(f"  [+] BRI ({alias}): {len(bank_txns.get(acc_key, []))} transactions loaded")
             except FileNotFoundError as e:
                 print(f"  [-] No BRI files found for {alias}, skipping.")
@@ -307,6 +313,7 @@ def main():
             odo_bank_txns=odo_bank_txns,
             mutations=mutations,
             unknown_mutations=unknown_mutations,
+            excluded_txns=all_excluded_txns,
         )
     except Exception as e:
         print(f"\n[!] ERROR writing report: {e}\n")
@@ -325,6 +332,12 @@ def main():
         print("\n[+] All transactions matched across all banks!")
 
     print()
+    import subprocess
+    import os
+    if os.name == 'nt':
+        os.startfile(out_path)
+    else:
+        subprocess.run(["open", str(out_path)])
 
 
 if __name__ == "__main__":

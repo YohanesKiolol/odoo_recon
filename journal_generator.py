@@ -369,7 +369,7 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
     mode_str = mode.upper() if mode != "both" else "EDC_AR"
     
     if is_preview:
-        out_filename = f"PREVIEW_{mode_str}_Journal.xlsx"
+        out_filename = f"Preview_{mode_str}_Journal.xlsx"
     else:
         out_filename = f"Journal_Import_{mode_str}_{timestamp}.xlsx"
         
@@ -381,7 +381,7 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
 if __name__ == "__main__":
     # Test script directly
     latest = None
-    files = list(OUTPUT_DIR.glob("reconciliation_*.xlsx"))
+    files = list(OUTPUT_DIR.glob("[Rr]econciliation_*.xlsx"))
     if files:
         import os
         latest = max(files, key=os.path.getmtime)

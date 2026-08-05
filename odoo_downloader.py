@@ -53,6 +53,12 @@ def run_downloader():
     with sync_playwright() as p:
         user_data_dir = str(Path(__file__).parent / "playwright_profile")
         
+        import platform
+        if platform.system() == "Windows":
+            ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        else:
+            ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        
         try:
             context = p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
@@ -60,7 +66,8 @@ def run_downloader():
                 channel="chrome",
                 args=["--disable-blink-features=AutomationControlled", "--test-type"],
                 ignore_default_args=["--no-sandbox", "--enable-automation"],
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent=ua,
+                viewport={"width": 1920, "height": 1080}
             )
         except Exception:
             context = p.chromium.launch_persistent_context(
@@ -68,7 +75,8 @@ def run_downloader():
                 headless=is_headless,
                 args=["--disable-blink-features=AutomationControlled", "--test-type"],
                 ignore_default_args=["--no-sandbox", "--enable-automation"],
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent=ua,
+                viewport={"width": 1920, "height": 1080}
             )
 
         page = context.pages[0] if context.pages else context.new_page()
@@ -91,10 +99,10 @@ def run_downloader():
 
         if is_headless:
             print("[+] Mengisi form login Odoo di background...")
-            page.wait_for_selector("xpath=/html/body/div[2]/main/div[1]/form/div[1]/input", state="visible", timeout=30000)
-            page.fill("xpath=/html/body/div[2]/main/div[1]/form/div[1]/input", args.email)
-            page.fill("xpath=/html/body/div[2]/main/div[1]/form/div[2]/input", args.password)
-            page.click("xpath=/html/body/div[2]/main/div[1]/form/div[3]/button")
+            page.wait_for_selector("#login", state="visible", timeout=30000)
+            page.fill("#login", args.email)
+            page.fill("#password", args.password)
+            page.press("#password", "Enter")
             print("[+] Login disubmit, menunggu proses...")
         else:
             print("\n[+] Menunggu Anda login secara manual...")

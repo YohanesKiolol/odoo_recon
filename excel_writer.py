@@ -15,7 +15,7 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from reconciler import STATUS_DONE, STATUS_BANK_ONLY, STATUS_ODO_ONLY
-from config import BANK_ACCOUNTS
+from config import BANK_ACCOUNTS, ODOO_COMPANY_NAME
 
 def _get_account_info(acc_key: str) -> tuple[str, str]:
     if acc_key == "other":
@@ -443,10 +443,12 @@ def write_report(
     odo_bank_txns: dict | None = None,
     mutations: list[dict] = None,
     unknown_mutations: list[dict] = None,
+    excluded_txns: list[dict] = None,
 ) -> Path:
+    date_str = odo_date.strftime("%d%m%Y") if odo_date else "unknown"
+    company_str = ODOO_COMPANY_NAME.replace(" ", "_") if ODOO_COMPANY_NAME else "Company"
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    date_str  = odo_date.strftime("%d%m%Y") if odo_date else "unknown"
-    out_path  = output_dir / f"reconciliation_{date_str}_{timestamp}.xlsx"
+    out_path = output_dir / f"Reconciliation_{company_str}_{date_str}_{timestamp}.xlsx"
 
     wb = openpyxl.Workbook()
     
@@ -459,27 +461,35 @@ def write_report(
     ws_disc = wb.create_sheet(title="Differences")
     _write_discrepancy_sheet(ws_disc, all_results, odo_date=odo_date)
     
+    # 3. Mutation Summary
+    if mutations is not None:
+        ws_mut = wb.create_sheet(title="Mutation Summary")
+        _write_mutation_summary(ws_mut, all_results, mutations, odo_date=odo_date)
+        
+    # 4. Admin Fee
+    ws_admin_fee = wb.create_sheet(title="Admin Fee")
+    _write_admin_fee_sheet(ws_admin_fee, all_results, mutations, odo_date=odo_date)
+
+    # 5. Excluded Payment
+    if excluded_txns is not None and excluded_txns:
+        ws_excluded = wb.create_sheet(title="Excluded Payment")
+        _write_excluded_sheet(ws_excluded, excluded_txns, odo_date=odo_date)
+    
     other_rows = all_results.pop("other", [])
     
-    # 3. Bank Sheets
+    # 6. Bank Sheets
     for acc_key, rows in all_results.items():
         bank_label, acc_name = _get_account_info(acc_key)
         sheet_name = f"{bank_label} ({acc_name})"[:31]
         ws = wb.create_sheet(title=sheet_name)
         _write_bank_sheet(ws, rows, f"{bank_label} ({acc_name})", odo_date=odo_date)
 
-    # 4. Other Payment
+    # 7. Other Payment
     if other_rows:
         ws_other = wb.create_sheet(title="Other Payment")
         _write_other_sheet(ws_other, other_rows, odo_date=odo_date)
-
-    if mutations is not None:
-        ws_mut = wb.create_sheet(title="Mutation Summary")
-        _write_mutation_summary(ws_mut, all_results, mutations, odo_date=odo_date)
         
-    ws_admin_fee = wb.create_sheet(title="Admin Fee")
-    _write_admin_fee_sheet(ws_admin_fee, all_results, mutations, odo_date=odo_date)
-        
+    # 8. Other Mutation
     if unknown_mutations is not None:
         ws_unmapped = wb.create_sheet(title="Other Mutation")
         _write_unmapped_mutations(ws_unmapped, all_results, unknown_mutations, odo_date=odo_date)
@@ -722,6 +732,54 @@ def _write_unmapped_mutations(ws, all_results, unknowns, odo_date=None):
         idx += 1
 
     for col, width in enumerate([6, 15, 15, 12, 18, 40, 14, 20], start=1):
+        ws.column_dimensions[get_column_letter(col)].width = width
+    
+    ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{row - 1}"
+    ws.freeze_panes = "A4"
+
+def _write_excluded_sheet(ws, excluded_txns: list[dict], odo_date=None):
+    ws.title = "Excluded Payment"
+    ncols = 8
+    date_str = odo_date.strftime("%d %B %Y") if odo_date else "-"
+    total_amount = sum(float(t.get("amount", 0)) for t in excluded_txns)
+    
+    _merge_title(ws, "EXCLUDED TRANSACTIONS", ncols, row=1)
+    _write_info_row(ws, [
+        ("Date", date_str),
+        ("Total Excluded", str(len(excluded_txns))),
+        ("Total Amount", _fmt_amount_str(total_amount))
+    ], ncols, row=2)
+    
+    _hdr(ws.cell(3, 1), "No")
+    _hdr(ws.cell(3, 2), "Date")
+    _hdr(ws.cell(3, 3), "Bank")
+    _hdr(ws.cell(3, 4), "Trace Number")
+    _hdr(ws.cell(3, 5), "Filename")
+    _hdr(ws.cell(3, 6), "Description")
+    _hdr(ws.cell(3, 7), "Amount")
+    _hdr(ws.cell(3, 8), "Exclusion Reason")
+    ws.row_dimensions[3].height = 28
+    
+    row = 4
+    for idx, t in enumerate(excluded_txns, 1):
+        _cell(ws.cell(row, 1), idx, STATUS_BANK_ONLY, "center")
+        _cell(ws.cell(row, 2), _fmt_date(t.get("date", "")), STATUS_BANK_ONLY, "center")
+        bank_name = t.get("source", "").replace("Bank (", "").replace(")", "")
+        _cell(ws.cell(row, 3), bank_name, STATUS_BANK_ONLY, "center")
+        _cell(ws.cell(row, 4), t.get("number", ""), STATUS_BANK_ONLY, "center")
+        _cell(ws.cell(row, 5), t.get("filename", ""), STATUS_BANK_ONLY, "left")
+        _cell(ws.cell(row, 6), t.get("description", ""), STATUS_BANK_ONLY, "left")
+        
+        c_amt = ws.cell(row, 7)
+        _cell(c_amt, float(t.get("amount", 0)), STATUS_BANK_ONLY, "right")
+        c_amt.number_format = '#,##0.00'
+        
+        _cell(ws.cell(row, 8), t.get("exclusion_reason", "Voided"), STATUS_BANK_ONLY, "center")
+        
+        ws.row_dimensions[row].height = 18
+        row += 1
+
+    for col, width in enumerate([6, 15, 15, 20, 30, 30, 20, 25], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{row - 1}"

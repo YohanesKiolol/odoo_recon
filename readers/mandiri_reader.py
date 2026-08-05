@@ -163,6 +163,9 @@ def _read_csv_from_bytes(
             "payment_date": final_payment_date,
             "description": desc_val,
             "number":      number_val,
+            "is_void":     "VOID" in desc_val.upper(),
+            "is_reversal": "REVERSAL" in desc_val.upper(),
+            "is_refund":   "REFUND" in desc_val.upper(),
             "filename":    source_file,
             "source":      "Bank (Mandiri)",
             "category":    file_category,
@@ -181,7 +184,7 @@ def read_mandiri(
     number_col: str = "",
     zip_pattern: str = "MSR_*.zip",
     filter_dates: set | None = None,
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     """
     Read all Mandiri transactions from ZIP files in zip_dir.
     If filter_dates is provided, only rows matching those dates are returned.
@@ -230,4 +233,33 @@ def read_mandiri(
                 f"Check MANDIRI_ZIP_PASSWORD in your .env file.\nError: {e}"
             )
 
-    return all_txns
+    # ── Exclude Voided/Reversed Transactions ──────────────────────────────────
+    voided_keys = set()
+    for t in all_txns:
+        if t.get("is_void") or t.get("is_reversal"):
+            num = (t.get("number") or "").strip()
+            if num:
+                voided_keys.add((t["date"], num))
+
+    excluded_txns = []
+    if voided_keys:
+        filtered_txns = []
+        for t in all_txns:
+            num = (t.get("number") or "").strip()
+            if num and (t["date"], num) in voided_keys:
+                if t.get("is_void"):
+                    t["exclusion_reason"] = "Void"
+                elif t.get("is_reversal"):
+                    t["exclusion_reason"] = "Reversal"
+                elif t.get("is_refund"):
+                    t["exclusion_reason"] = "Refund"
+                else:
+                    t["exclusion_reason"] = "Original transaction of Void/Reversal"
+                excluded_txns.append(t)
+                continue
+            filtered_txns.append(t)
+        
+        print(f"  [INFO] Mandiri: Excluded {len(excluded_txns)} rows due to Void/Reversal found in description")
+        all_txns = filtered_txns
+
+    return all_txns, excluded_txns

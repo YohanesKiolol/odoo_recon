@@ -282,7 +282,7 @@ class App(tk.Tk):
             util_frame, text="📁  Open Result",
             bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
             font=("Segoe UI", 9), relief="flat", cursor="hand2",
-            padx=14, pady=4, command=self._open_output, state="disabled",
+            padx=14, pady=4, command=self._open_output, state="normal",
         )
         self._open_btn.pack(side="left")
 
@@ -610,9 +610,10 @@ class App(tk.Tk):
                         pass
                     continue
                     
-                if "reconciliation_" in ls and ".xlsx" in ls:
+                ls_lower = ls.lower()
+                if "reconciliation_" in ls_lower and ".xlsx" in ls_lower:
                     for part in ls.split():
-                        if "reconciliation_" in part and ".xlsx" in part:
+                        if "reconciliation_" in part.lower() and ".xlsx" in part.lower():
                             last_output_file = part.strip()
                 self.after(0, self._log_write, ls + "\n", self._tag(ls))
 
@@ -633,10 +634,10 @@ class App(tk.Tk):
         self._scan_btn.config(state="normal")
         self._run_btn.config(state="normal", text="▶  Run Reconciliation")
         self._journal_btn.config(state="normal")
+        self._open_btn.config(state="normal")
         
         if code == 0:
             self._set_status("Finished ✓", SUCCESS)
-            self._open_btn.config(state="normal")
             self._last_output = output_path
             if output_path and Path(output_path).exists():
                 _open_path(output_path)
@@ -666,7 +667,7 @@ class App(tk.Tk):
         import os
         from openpyxl import load_workbook
         
-        output_files = glob.glob(str(OUTPUT_DIR / "reconciliation_*.xlsx"))
+        output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
         if not output_files:
             self._set_status("No reconciliation file found", ERROR)
             return

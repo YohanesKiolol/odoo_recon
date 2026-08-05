@@ -118,6 +118,30 @@ def _read_one_bca(
         except ValueError:
             print(f"  [WARN] BCA: number column '{number_col}' not found — skipping")
 
+    ref_idx: int | None = None
+    try:
+        ref_idx = _find_col("Reference Number")
+    except ValueError:
+        pass
+
+    void_idx: int | None = None
+    try:
+        void_idx = _find_col("Void")
+    except ValueError:
+        pass
+
+    reversal_idx: int | None = None
+    try:
+        reversal_idx = _find_col("Reversal")
+    except ValueError:
+        pass
+
+    refund_idx: int | None = None
+    try:
+        refund_idx = _find_col("Refund")
+    except ValueError:
+        pass
+
     txns = []
     skipped_empty = 0
 
@@ -158,14 +182,69 @@ def _read_one_bca(
         for desc_col_name in ("Transaction Remark", "Keterangan", "Description", "Remark"):
             try:
                 di = _find_col(desc_col_name)
-                desc = str(row[di]).strip() if row[di] is not None else ""
-                break
+                val = str(row[di]).strip() if row[di] is not None else ""
+                if val:
+                    desc = val
+                    break
             except (ValueError, IndexError):
                 continue
+
+        if not desc:
+            parts = []
+            # 1. Card Number or Phone Number
+            ident = ""
+            for col in ("Card Number", "Phone Number"):
+                try:
+                    idx = _find_col(col)
+                    val = str(row[idx]).strip() if row[idx] is not None else ""
+                    if val and val.lower() != "none":
+                        ident = val
+                        break
+                except (ValueError, IndexError):
+                    pass
+            if ident:
+                parts.append(ident)
+            
+            # 2. Date, Time, Method, Type
+            for col_name in ("Transaction Date", "Transaction Time", "Payment Method", "Payment Type"):
+                try:
+                    idx = _find_col(col_name)
+                    raw_val = row[idx]
+                    if raw_val is not None:
+                        if col_name == "Transaction Date" and hasattr(raw_val, "strftime"):
+                            val = raw_val.strftime("%Y-%m-%d")
+                        elif col_name == "Transaction Time" and hasattr(raw_val, "strftime"):
+                            val = raw_val.strftime("%H:%M:%S")
+                        else:
+                            val = str(raw_val).strip()
+                        
+                        if val and val.lower() != "none":
+                            parts.append(val)
+                except (ValueError, IndexError):
+                    pass
+            desc = ", ".join(parts)
 
         number = ""
         if number_idx is not None and number_idx < len(row):
             number = str(row[number_idx]).strip() if row[number_idx] is not None else ""
+            
+        ref_num = ""
+        if ref_idx is not None and ref_idx < len(row):
+            ref_num = str(row[ref_idx]).strip() if row[ref_idx] is not None else ""
+            
+        is_void = False
+        if void_idx is not None and void_idx < len(row):
+            is_void = (str(row[void_idx]).strip().upper() == "Y")
+            
+        is_reversal = False
+        if reversal_idx is not None and reversal_idx < len(row):
+            is_reversal = (str(row[reversal_idx]).strip().upper() == "Y")
+            
+        is_refund = False
+        if refund_idx is not None and refund_idx < len(row):
+            is_refund = (str(row[refund_idx]).strip().upper() == "Y")
+            if is_refund:
+                print(f"  [WARN] BCA row {row_num}: Refund detected! Manual check required to ensure correct netting.")
 
         txns.append({
             "amount":      amount,
@@ -174,6 +253,10 @@ def _read_one_bca(
             "payment_date": str(payment_date) if payment_date else "",
             "description": desc,
             "number":      number,
+            "ref_num":     ref_num,
+            "is_void":     is_void,
+            "is_reversal": is_reversal,
+            "is_refund":   is_refund,
             "filename":    excel_path.name,
             "source":      "Bank (BCA)",
         })
@@ -191,7 +274,7 @@ def read_bca(
     number_col: str = "",
     filter_date=None,          # single date (legacy, converted to set)
     filter_dates: set | None = None,  # set of dates from ODO — primary filter
-) -> list[dict]:
+) -> tuple[list[dict], list[dict]]:
     """
     Read BCA transactions from ALL matching Excel files in excel_dir.
 
@@ -222,14 +305,46 @@ def read_bca(
                           filter_dates=filter_dates)
         )
 
+    # ── Exclude Voided/Reversed Transactions ──────────────────────────────────
+    # If a trace number is marked as Void/Reversal, we must drop both the void
+    # transaction itself AND the original transaction.
+    voided_keys = set()
+    for t in all_txns:
+        if t.get("is_void") or t.get("is_reversal"):
+            num = (t.get("number") or "").strip()
+            if num:
+                voided_keys.add((t["date"], num))
+
+    excluded_txns = []
+    if voided_keys:
+        filtered_txns = []
+        for t in all_txns:
+            num = (t.get("number") or "").strip()
+            if num and (t["date"], num) in voided_keys:
+                if t.get("is_void"):
+                    t["exclusion_reason"] = "Void"
+                elif t.get("is_reversal"):
+                    t["exclusion_reason"] = "Reversal"
+                elif t.get("is_refund"):
+                    t["exclusion_reason"] = "Refund"
+                else:
+                    t["exclusion_reason"] = "Original transaction of Void/Reversal"
+                excluded_txns.append(t)
+                continue
+            filtered_txns.append(t)
+        
+        print(f"  [INFO] BCA: Excluded {len(excluded_txns)} rows due to Void/Reversal")
+        all_txns = filtered_txns
+
     # ── Deduplicate overlapping files ─────────────────────────────────────────
     # Key: (date, trace_number) if trace_number exists, else (date, amount, desc)
     seen: set = set()
     deduped: list[dict] = []
     for t in all_txns:
         num = (t.get("number") or "").strip()
+        ref = (t.get("ref_num") or "").strip()
         if num:
-            key = (t["date"], num)
+            key = (t["date"], num, ref)
         else:
             key = (t["date"], str(t["amount"]), t.get("description", ""))
         if key not in seen:
@@ -239,11 +354,10 @@ def read_bca(
     dupes = len(all_txns) - len(deduped)
     if dupes:
         print(f"  [INFO] BCA: {dupes} duplicate row(s) removed (overlapping files)")
-    all_txns = deduped
+    if filter_dates is not None:
+        final_dates = sorted({t["date"] for t in deduped})
+        print(f"  ✅ BCA: {len(deduped)} transactions loaded ({len(excel_files)} file(s), dates: {', '.join(final_dates)})")
+    else:
+        print(f"  ✅ BCA: {len(deduped)} transactions loaded ({len(excel_files)} file(s))")
 
-    dates = sorted({t["date"] for t in all_txns if t["date"]})
-    date_summary = (dates[0] if len(dates) == 1
-                    else f"{dates[0]} – {dates[-1]}" if dates else "?")
-    print(f"  ✅ BCA: {len(all_txns)} transactions loaded "
-          f"({len(excel_files)} file(s), dates: {date_summary})")
-    return all_txns
+    return deduped, excluded_txns
