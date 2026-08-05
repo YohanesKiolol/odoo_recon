@@ -37,12 +37,16 @@ def run_downloader():
         import subprocess
         import os
         
+        # Override PyInstaller's default behavior (which tries to use the temporary _MEI folder)
+        # by forcing Playwright to use a persistent browser path in the user's home directory.
+        browsers_path = str(Path.home() / ".playwright_browsers")
+        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
+        
         if getattr(sys, "frozen", False):
-            from playwright._impl._driver import compute_driver_executable, get_driver_env
+            from playwright._impl._driver import compute_driver_executable
             driver_executable = str(compute_driver_executable())
-            env = get_driver_env()
             use_shell = (os.name == 'nt' and driver_executable.endswith('.cmd'))
-            subprocess.run([driver_executable, "install", "chromium"], env=env, check=True, shell=use_shell)
+            subprocess.run([driver_executable, "install", "chromium"], check=True, shell=use_shell)
         else:
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
     except Exception as e:
