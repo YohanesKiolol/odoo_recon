@@ -21,7 +21,7 @@ def get_latest_excel_file() -> Path:
     excel_files = list(OUTPUT_DIR.glob("reconciliation_*.xlsx"))
     if not excel_files:
         print(f"❌ No Excel file found in '{OUTPUT_DIR}'.")
-        sys.exit(1)
+        return None
     # Sort by modification time, newest last
     latest_file = max(excel_files, key=os.path.getmtime)
     return latest_file
@@ -230,6 +230,8 @@ def main():
             sys.exit(1)
     else:
         file_path = get_latest_excel_file()
+        if not file_path:
+            sys.exit(1)
     
     print(f"📁 Memproses data dari: {file_path.name}")
 

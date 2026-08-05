@@ -76,6 +76,8 @@ _venv_python = (
 # ── Color palette ─────────────────────────────────────────────────────────────
 BG          = "#F0F2F5" # Modern soft gray for depth (Odoo backend style)
 PANEL       = "#FFFFFF" # Pure white for inputs/cards
+PREVIEW_BG  = "#E9ECEF" # Subtle intermediate gray for nested preview box
+BORDER      = "#D1D5DB" # Soft gray border
 ACCENT      = "#71639e" # Odoo Purple
 ACCENT_DARK = "#5D3D54"
 SUCCESS     = "#017E84" # Odoo Teal
@@ -800,7 +802,7 @@ class App(tk.Tk):
         top.title("Confirm Journal Creation")
         
         window_width = 1100
-        window_height = 800
+        window_height = 850
         screen_width = top.winfo_screenwidth()
         screen_height = top.winfo_screenheight()
         center_x = int(screen_width/2 - window_width / 2)
@@ -919,22 +921,22 @@ class App(tk.Tk):
                         props = p
                         break
                         
-                det_frame = tk.Frame(scrollable_frame, bg=PANEL)
+                det_frame = tk.Frame(scrollable_frame, bg=PREVIEW_BG, highlightbackground=BORDER, highlightthickness=1)
                 
                 # EDC Section
                 edc_debit = props.get("edc_debit") or f"{str(item['bank']).upper()} EDC Debit"
                 edc_credit = props.get("edc_credit") or f"{str(item['group'])} Credit"
                 
-                edc_frame = tk.Frame(det_frame, bg=PANEL)
+                edc_frame = tk.Frame(det_frame, bg=PREVIEW_BG)
                 edc_frame.pack(side="left", anchor="n", padx=20, pady=5)
                 
-                tk.Label(edc_frame, text="EDC Journal:", bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=0, column=0, columnspan=3, sticky="w")
-                tk.Label(edc_frame, text="Debit:", bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=1, column=0, sticky="w")
-                tk.Label(edc_frame, text=edc_debit, bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=1, column=1, sticky="w", padx=(10, 40))
-                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=1, column=2, sticky="e")
-                tk.Label(edc_frame, text="Credit:", bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=2, column=0, sticky="w")
-                tk.Label(edc_frame, text=edc_credit, bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=2, column=1, sticky="w", padx=(10, 40))
-                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=2, column=2, sticky="e")
+                tk.Label(edc_frame, text="EDC Journal:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=0, column=0, columnspan=3, sticky="w")
+                tk.Label(edc_frame, text="Debit:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w")
+                tk.Label(edc_frame, text=edc_debit, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=1, column=1, sticky="w", padx=(10, 40))
+                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=1, column=2, sticky="e")
+                tk.Label(edc_frame, text="Credit:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w")
+                tk.Label(edc_frame, text=edc_credit, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=2, column=1, sticky="w", padx=(10, 40))
+                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=2, column=2, sticky="e")
                 
                 # AR Section Preview Logic (Only if AR is valid)
                 if item.get("mutation_matched", False):
@@ -976,16 +978,16 @@ class App(tk.Tk):
                     elif round(t_diff, 2) < 0:
                         ar_rows.append(("Debit:", "8107 Bank Difference Loss", abs(t_diff)))
                         
-                    ar_frame = tk.Frame(det_frame, bg=PANEL)
+                    ar_frame = tk.Frame(det_frame, bg=PREVIEW_BG)
                     ar_frame.pack(side="left", anchor="n", padx=40, pady=5)
                     
-                    tk.Label(ar_frame, text="AR Journal:", bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=0, column=0, columnspan=3, sticky="w")
+                    tk.Label(ar_frame, text="AR Journal:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=0, column=0, columnspan=3, sticky="w")
                     
                     for i, (typ, acc, amt_val) in enumerate(ar_rows):
                         r = i + 1
-                        tk.Label(ar_frame, text=typ, bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=r, column=0, sticky="w")
-                        tk.Label(ar_frame, text=acc, bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=r, column=1, sticky="w", padx=(10, 40))
-                        tk.Label(ar_frame, text=f"Rp {amt_val:,.0f}", bg=PANEL, fg=TEXT, font=("Consolas", 9)).grid(row=r, column=2, sticky="e")
+                        tk.Label(ar_frame, text=typ, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=r, column=0, sticky="w")
+                        tk.Label(ar_frame, text=acc, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=r, column=1, sticky="w", padx=(10, 40))
+                        tk.Label(ar_frame, text=f"Rp {amt_val:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=r, column=2, sticky="e")
                 
                 def _toggle_det(btn, frm=det_frame, row_idx=r_det):
                     if frm.winfo_ismapped():
@@ -1116,10 +1118,9 @@ class App(tk.Tk):
             config_path.write_text(json.dumps(selected))
             
             from journal_generator import generate_journal_import
-            from odoo_journal_creator import get_latest_excel_file
-            recon_file = get_latest_excel_file()
-            if not recon_file:
-                messagebox.showerror("Error", "No reconciliation file found.")
+            recon_file = Path(latest_file)
+            if not recon_file.exists():
+                messagebox.showerror("Error", f"Reconciliation file not found at {recon_file.name}. Did you rename it while this window was open?")
                 return
                 
             try:
@@ -1188,7 +1189,7 @@ class App(tk.Tk):
             
             def run_script():
                 try:
-                    cmd = [_venv_python, "odoo_journal_creator.py", "--import-file", str(out_path), "--config", str(config_path)]
+                    cmd = [_venv_python, "odoo_journal_creator.py", "--file", str(recon_file), "--import-file", str(out_path), "--config", str(config_path)]
                     proc = subprocess.Popen(
                         cmd, cwd=str(BASE_DIR),
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
