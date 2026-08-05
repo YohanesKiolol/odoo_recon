@@ -74,14 +74,14 @@ _venv_python = (
 )
 
 # ── Color palette ─────────────────────────────────────────────────────────────
-BG          = "#FFFFFF"
-PANEL       = "#FFFFFF"
+BG          = "#F0F2F5" # Modern soft gray for depth (Odoo backend style)
+PANEL       = "#FFFFFF" # Pure white for inputs/cards
 ACCENT      = "#71639e" # Odoo Purple
 ACCENT_DARK = "#5D3D54"
 SUCCESS     = "#017E84" # Odoo Teal
 ERROR       = "#E74C3C"
 WARN        = "#F39C12"
-TEXT        = "#495057"
+TEXT        = "#374151" # Crisp dark gray (more readable)
 MUTED       = "#6B7280"
 WHITE       = "#FFFFFF"
 
@@ -246,17 +246,20 @@ class App(tk.Tk):
         )
         self._cleanse_btn.pack(side="left", padx=(0, 6))
 
+        # Primary button style (Solid colored blocks)
+        primary_btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "flat", "cursor": "hand2", "padx": 16, "pady": 8, "borderwidth": 0}
+
         self._run_btn = tk.Button(
             action_frame, text="Reconciliation",
-            bg=WHITE, fg=SUCCESS, activebackground="#F3F4F6", activeforeground=SUCCESS,
-            command=self._on_run, **btn_style
+            bg=SUCCESS, fg=WHITE, activebackground="#01666B", activeforeground=WHITE,
+            command=self._on_run, **primary_btn_style
         )
         self._run_btn.pack(side="left")
 
         self._journal_btn = tk.Button(
             action_frame, text="Generate Journal",
-            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
-            command=self._on_journal, **btn_style
+            bg=ACCENT, fg=WHITE, activebackground=ACCENT_DARK, activeforeground=WHITE,
+            command=self._on_journal, **primary_btn_style
         )
         self._journal_btn.pack(side="left", padx=(6, 0))
 
@@ -1223,7 +1226,8 @@ class App(tk.Tk):
                 v["var_ar"].set(False)
             render_page(current_page[0])
                 
-        mod_btn_style = {"bg": ACCENT, "fg": WHITE, "font": ("Segoe UI", 9, "bold"), "relief": "solid", "borderwidth": 1, "cursor": "hand2", "padx": 10, "pady": 4}
+        mod_btn_style = {"bg": WHITE, "fg": ACCENT, "font": ("Segoe UI", 9, "bold"), "relief": "solid", "borderwidth": 1, "cursor": "hand2", "padx": 10, "pady": 4}
+        primary_mod_style = {"bg": ACCENT, "fg": WHITE, "font": ("Segoe UI", 10, "bold"), "relief": "flat", "borderwidth": 0, "cursor": "hand2", "padx": 15, "pady": 5}
         
         tk.Button(btn_frame, text="Select All", command=_select_all, **mod_btn_style).pack(side="left", padx=10)
         tk.Button(btn_frame, text="Deselect All", command=_deselect_all, **mod_btn_style).pack(side="left")
@@ -1232,9 +1236,9 @@ class App(tk.Tk):
         tk.Button(btn_frame, text="Export EDC", command=lambda: _export("edc"), **mod_btn_style).pack(side="left", padx=15)
         tk.Button(btn_frame, text="Export AR", command=lambda: _export("ar"), **mod_btn_style).pack(side="left", padx=5)
         
-        tk.Button(btn_frame, text="Submit", command=_process, **{**mod_btn_style, "font": ("Segoe UI", 10, "bold")}).pack(side="right", padx=20)
+        tk.Button(btn_frame, text="Submit", command=_process, **primary_mod_style).pack(side="right", padx=20)
         
-        cancel_style = {**mod_btn_style, "bg": WHITE, "fg": ACCENT}
+        cancel_style = {**mod_btn_style, "bg": WHITE, "fg": TEXT, "font": ("Segoe UI", 10, "bold")}
         tk.Button(btn_frame, text="Cancel", command=top.destroy, **cancel_style).pack(side="right")
 
     def _open_output(self):
