@@ -67,15 +67,15 @@ _venv_python = (
 )
 
 # ── Color palette ─────────────────────────────────────────────────────────────
-BG          = "#1C2333"
-PANEL       = "#252E42"
-ACCENT      = "#3D8EF0"
-ACCENT_DARK = "#2A6AC2"
-SUCCESS     = "#27AE60"
+BG          = "#FFFFFF"
+PANEL       = "#FFFFFF"
+ACCENT      = "#71639e" # Odoo Purple
+ACCENT_DARK = "#5D3D54"
+SUCCESS     = "#017E84" # Odoo Teal
 ERROR       = "#E74C3C"
 WARN        = "#F39C12"
-TEXT        = "#E8EDF5"
-MUTED       = "#8899AA"
+TEXT        = "#495057"
+MUTED       = "#6B7280"
 WHITE       = "#FFFFFF"
 
 
@@ -105,12 +105,12 @@ class App(tk.Tk):
     # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self):
         # Header
-        hdr = tk.Frame(self, bg=PANEL, padx=30, pady=20)
+        hdr = tk.Frame(self, bg=ACCENT, padx=30, pady=20)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="🏦  Bank Reconciliation", bg=PANEL,
+        tk.Label(hdr, text="Bank Reconciliation", bg=ACCENT,
                  fg=WHITE, font=("Segoe UI", 20, "bold")).pack(anchor="w")
         tk.Label(hdr, text="Compare Bank transactions with Odoo automatically",
-                 bg=PANEL, fg=MUTED, font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 0))
+                 bg=ACCENT, fg="#E5E7EB", font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 0))
 
         # Input folder status
         folder_frame = tk.Frame(self, bg=BG, padx=30, pady=14)
@@ -128,13 +128,16 @@ class App(tk.Tk):
         email_frame.pack(fill="x", pady=(0, 5))
         tk.Label(email_frame, text="Email:", bg=BG, fg=TEXT, font=("Segoe UI", 9), width=8, anchor="w").pack(side="left")
         self._email_var = tk.StringVar()
-        tk.Entry(email_frame, textvariable=self._email_var, width=30).pack(side="left")
+        
+        entry_style = {"bg": WHITE, "fg": TEXT, "insertbackground": TEXT, "borderwidth": 1, "highlightthickness": 1, "highlightbackground": "#D1D5DB", "highlightcolor": ACCENT, "relief": "flat"}
+        
+        tk.Entry(email_frame, textvariable=self._email_var, width=30, **entry_style).pack(side="left")
         
         pass_frame = tk.Frame(cred_frame, bg=BG)
         pass_frame.pack(fill="x")
         tk.Label(pass_frame, text="Password:", bg=BG, fg=TEXT, font=("Segoe UI", 9), width=8, anchor="w").pack(side="left")
         self._password_var = tk.StringVar()
-        self._password_entry = tk.Entry(pass_frame, textvariable=self._password_var, width=30, show="*")
+        self._password_entry = tk.Entry(pass_frame, textvariable=self._password_var, width=30, show="*", **entry_style)
         self._password_entry.pack(side="left")
         
         eye_lbl = tk.Label(pass_frame, text="👁", bg=BG, fg=MUTED, cursor="hand2")
@@ -179,16 +182,16 @@ class App(tk.Tk):
         
         tk.Label(date_frame, text="From:", bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(side="left")
         if DateEntry:
-            self._date_from_widget = DateEntry(date_frame, width=12, background='darkblue', foreground='white', borderwidth=2, date_pattern='mm/dd/yyyy')
+            self._date_from_widget = DateEntry(date_frame, width=12, background=ACCENT, foreground=WHITE, fieldbackground=WHITE, borderwidth=1, date_pattern='mm/dd/yyyy')
             self._date_from_widget.pack(side="left", padx=(5, 15))
             self._date_from_widget.set_date(yesterday)
         else:
             self._date_from_var = tk.StringVar(value=yesterday.strftime("%m/%d/%Y"))
-            tk.Entry(date_frame, textvariable=self._date_from_var, width=12).pack(side="left", padx=(5, 15))
+            tk.Entry(date_frame, textvariable=self._date_from_var, width=12, **entry_style).pack(side="left", padx=(5, 15))
         
         tk.Label(date_frame, text="To:", bg=BG, fg=TEXT, font=("Segoe UI", 9)).pack(side="left")
         if DateEntry:
-            self._date_to_widget = DateEntry(date_frame, width=12, background='darkblue', foreground='white', borderwidth=2, date_pattern='mm/dd/yyyy')
+            self._date_to_widget = DateEntry(date_frame, width=12, background=ACCENT, foreground=WHITE, fieldbackground=WHITE, borderwidth=1, date_pattern='mm/dd/yyyy')
             self._date_to_widget.pack(side="left", padx=(5, 0))
             self._date_to_widget.set_date(yesterday)
             
@@ -205,7 +208,7 @@ class App(tk.Tk):
             self._date_to_widget.bind("<<DateEntrySelected>>", _validate_dates)
         else:
             self._date_to_var = tk.StringVar(value=yesterday.strftime("%m/%d/%Y"))
-            tk.Entry(date_frame, textvariable=self._date_to_var, width=12).pack(side="left", padx=(5, 0))
+            tk.Entry(date_frame, textvariable=self._date_to_var, width=12, **entry_style).pack(side="left", padx=(5, 0))
 
 
         # ── Action Toolbar (Single Row) ──
@@ -213,39 +216,39 @@ class App(tk.Tk):
         action_frame.pack(fill="x", pady=(5, 10))
         
         # Style sangat compact
-        btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "flat", "cursor": "hand2", "padx": 12, "pady": 6}
+        btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "flat", "cursor": "hand2", "padx": 16, "pady": 8, "borderwidth": 1, "highlightbackground": "#D1D5DB"}
         
         self._upload_btn = tk.Button(
-            action_frame, text="📤 Upload",
-            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
+            action_frame, text="Upload",
+            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
             command=self._on_upload, **btn_style
         )
         self._upload_btn.pack(side="left", padx=(0, 6))
 
         self._download_btn = tk.Button(
-            action_frame, text="📥 Download",
-            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
+            action_frame, text="Download",
+            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
             command=self._on_download, **btn_style
         )
         self._download_btn.pack(side="left", padx=(0, 6))
 
         self._cleanse_btn = tk.Button(
-            action_frame, text="🧹 Clean",
-            bg=WARN, fg=WHITE, activebackground="#E67E22", activeforeground=WHITE,
+            action_frame, text="Clean",
+            bg=WHITE, fg=WARN, activebackground="#F3F4F6", activeforeground=WARN,
             command=self._on_cleanse, **btn_style
         )
         self._cleanse_btn.pack(side="left", padx=(0, 6))
 
         self._run_btn = tk.Button(
-            action_frame, text="▶ Reconciliation",
-            bg=SUCCESS, fg=WHITE, activebackground="#219653", activeforeground=WHITE,
+            action_frame, text="Reconciliation",
+            bg=WHITE, fg=SUCCESS, activebackground="#F3F4F6", activeforeground=SUCCESS,
             command=self._on_run, **btn_style
         )
         self._run_btn.pack(side="left")
 
         self._journal_btn = tk.Button(
-            action_frame, text="📝 Generate Journal",
-            bg=ACCENT, fg=WHITE, activebackground=ACCENT_DARK, activeforeground=WHITE,
+            action_frame, text="Generate Journal",
+            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
             command=self._on_journal, **btn_style
         )
         self._journal_btn.pack(side="left", padx=(6, 0))
@@ -255,34 +258,34 @@ class App(tk.Tk):
         util_frame.pack(fill="x", pady=(0, 14))
 
         self._scan_btn = tk.Button(
-            util_frame, text="🔍  Scan Data",
-            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2",
-            padx=14, pady=4, command=self._on_scan,
+            util_frame, text="Scan Data",
+            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
+            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            padx=14, pady=6, command=self._on_scan,
         )
         self._scan_btn.pack(side="left", padx=(0, 10))
 
         self._open_input_btn = tk.Button(
-            util_frame, text="📂  Open Merchant",
-            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2",
-            padx=14, pady=4, command=self._open_input,
+            util_frame, text="Open Merchant",
+            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
+            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            padx=14, pady=6, command=self._open_input,
         )
         self._open_input_btn.pack(side="left", padx=(0, 10))
 
         self._open_mutation_btn = tk.Button(
-            util_frame, text="📂  Open Mutation",
-            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2",
-            padx=14, pady=4, command=self._open_mutation,
+            util_frame, text="Open Mutation",
+            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
+            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            padx=14, pady=6, command=self._open_mutation,
         )
         self._open_mutation_btn.pack(side="left", padx=(0, 10))
 
         self._open_btn = tk.Button(
-            util_frame, text="📁  Open Result",
-            bg=PANEL, fg=TEXT, activebackground=ACCENT, activeforeground=WHITE,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2",
-            padx=14, pady=4, command=self._open_output, state="normal",
+            util_frame, text="Open Result",
+            bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
+            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            padx=14, pady=6, command=self._open_output, state="normal",
         )
         self._open_btn.pack(side="left")
 
@@ -297,12 +300,12 @@ class App(tk.Tk):
                  font=("Segoe UI", 10)).pack(side="left", padx=(6, 0))
 
         # Log area
-        log_frame = tk.Frame(self, bg=PANEL, padx=2, pady=2)
+        log_frame = tk.Frame(self, bg=ACCENT, padx=1, pady=1) # Thin Odoo color border
         log_frame.pack(fill="both", expand=True, padx=30, pady=(0, 20))
         self._log = scrolledtext.ScrolledText(
-            log_frame, bg="#0F1623", fg=TEXT, insertbackground=TEXT,
+            log_frame, bg="#F9FAFB", fg=TEXT, insertbackground=TEXT,
             font=("Consolas", 11), relief="flat", state="disabled",
-            width=90, height=28, wrap="word",
+            width=90, height=28, wrap="word", borderwidth=0, highlightthickness=0,
         )
         self._log.pack(fill="both", expand=True)
         self._log.tag_config("ok",   foreground=SUCCESS)
@@ -787,7 +790,7 @@ class App(tk.Tk):
         top.title("Confirm Journal Creation")
         
         window_width = 1100
-        window_height = 650
+        window_height = 800
         screen_width = top.winfo_screenwidth()
         screen_height = top.winfo_screenheight()
         center_x = int(screen_width/2 - window_width / 2)
