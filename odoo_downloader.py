@@ -35,7 +35,16 @@ def run_downloader():
     print("[+] Mengecek dan menginstall browser (butuh waktu beberapa menit pada run pertama)...")
     try:
         import subprocess
-        subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+        import os
+        
+        if getattr(sys, "frozen", False):
+            from playwright._impl._driver import compute_driver_executable, get_driver_env
+            driver_executable = str(compute_driver_executable())
+            env = get_driver_env()
+            use_shell = (os.name == 'nt' and driver_executable.endswith('.cmd'))
+            subprocess.run([driver_executable, "install", "chromium"], env=env, check=True, shell=use_shell)
+        else:
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
     except Exception as e:
         print(f"[!] Gagal mengecek/menginstall browser: {e}")
 
