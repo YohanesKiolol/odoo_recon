@@ -36,6 +36,13 @@ if "--worker" in sys.argv:
     sys.exit(0)
 
 # ── GUI-only imports (skipped in worker mode) ─────────────────────────────────
+if IS_WINDOWS:
+    try:
+        from ctypes import windll
+        windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+        pass
+
 import threading
 import subprocess
 import shutil
@@ -216,7 +223,7 @@ class App(tk.Tk):
         action_frame.pack(fill="x", pady=(5, 10))
         
         # Style sangat compact
-        btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "flat", "cursor": "hand2", "padx": 16, "pady": 8, "borderwidth": 1, "highlightbackground": "#D1D5DB"}
+        btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "solid", "cursor": "hand2", "padx": 16, "pady": 8, "borderwidth": 1, "highlightbackground": "#D1D5DB"}
         
         self._upload_btn = tk.Button(
             action_frame, text="Upload",
@@ -260,7 +267,7 @@ class App(tk.Tk):
         self._scan_btn = tk.Button(
             util_frame, text="Scan Data",
             bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            font=("Segoe UI", 9), relief="solid", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
             padx=14, pady=6, command=self._on_scan,
         )
         self._scan_btn.pack(side="left", padx=(0, 10))
@@ -268,7 +275,7 @@ class App(tk.Tk):
         self._open_input_btn = tk.Button(
             util_frame, text="Open Merchant",
             bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            font=("Segoe UI", 9), relief="solid", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
             padx=14, pady=6, command=self._open_input,
         )
         self._open_input_btn.pack(side="left", padx=(0, 10))
@@ -276,7 +283,7 @@ class App(tk.Tk):
         self._open_mutation_btn = tk.Button(
             util_frame, text="Open Mutation",
             bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            font=("Segoe UI", 9), relief="solid", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
             padx=14, pady=6, command=self._open_mutation,
         )
         self._open_mutation_btn.pack(side="left", padx=(0, 10))
@@ -284,7 +291,7 @@ class App(tk.Tk):
         self._open_btn = tk.Button(
             util_frame, text="Open Result",
             bg=WHITE, fg=ACCENT, activebackground="#F3F4F6", activeforeground=ACCENT,
-            font=("Segoe UI", 9), relief="flat", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
+            font=("Segoe UI", 9), relief="solid", cursor="hand2", borderwidth=1, highlightbackground="#D1D5DB",
             padx=14, pady=6, command=self._open_output, state="normal",
         )
         self._open_btn.pack(side="left")
@@ -818,21 +825,25 @@ class App(tk.Tk):
         ITEMS_PER_PAGE = 15
         current_page = [0]
         
-        header_frame = tk.Frame(top, bg=BG)
-        header_frame.pack(fill="x", padx=10, pady=10)
+        header_frame = tk.Frame(top, bg=ACCENT, padx=30, pady=20)
+        header_frame.pack(fill="x")
         
-        tk.Label(header_frame, text="Journal Creation", bg=BG, fg=TEXT, font=("Segoe UI", 12, "bold")).pack(side="left")
+        title_wrapper = tk.Frame(header_frame, bg=ACCENT)
+        title_wrapper.pack(side="left")
         
-        pagination_frame = tk.Frame(header_frame, bg=BG)
+        tk.Label(title_wrapper, text="Journal Creation", bg=ACCENT, fg=WHITE, font=("Segoe UI", 20, "bold")).pack(anchor="w")
+        tk.Label(title_wrapper, text="Review and select transactions to post", bg=ACCENT, fg="#E5E7EB", font=("Segoe UI", 11)).pack(anchor="w", pady=(4, 0))
+        
+        pagination_frame = tk.Frame(header_frame, bg=ACCENT)
         pagination_frame.pack(side="right")
         
-        btn_prev = tk.Button(pagination_frame, text="< Previous", bg=PANEL, fg=TEXT)
+        btn_prev = tk.Button(pagination_frame, text="< Previous", bg=WHITE, fg=ACCENT, relief="solid", borderwidth=1)
         btn_prev.pack(side="left", padx=5)
         
-        lbl_page = tk.Label(pagination_frame, text="", bg=BG, fg=TEXT, font=("Segoe UI", 10))
+        lbl_page = tk.Label(pagination_frame, text="", bg=ACCENT, fg=WHITE, font=("Segoe UI", 10))
         lbl_page.pack(side="left", padx=10)
         
-        btn_next = tk.Button(pagination_frame, text="Next >", bg=PANEL, fg=TEXT)
+        btn_next = tk.Button(pagination_frame, text="Next >", bg=WHITE, fg=ACCENT, relief="solid", borderwidth=1)
         btn_next.pack(side="left", padx=5)
         
         list_frame = tk.Frame(top, bg=BG)
@@ -869,7 +880,7 @@ class App(tk.Tk):
             for col, h in enumerate(headers):
                 anchor = "w" if col in [2, 3] else "e" if col in [4, 5, 6, 7] else ""
                 pad_x = (10, 25) if col == 9 else 10
-                tk.Label(scrollable_frame, text=h, bg=BG, fg=TEXT, font=("Segoe UI", 10, "bold")).grid(row=0, column=col, sticky=anchor, padx=pad_x, pady=5)
+                tk.Label(scrollable_frame, text=h, bg=BG, fg=ACCENT, font=("Segoe UI", 10, "bold")).grid(row=0, column=col, sticky=anchor, padx=pad_x, pady=5)
                 
             start_idx = page_idx * ITEMS_PER_PAGE
             end_idx = min(start_idx + ITEMS_PER_PAGE, len(journal_state))
@@ -1212,15 +1223,19 @@ class App(tk.Tk):
                 v["var_ar"].set(False)
             render_page(current_page[0])
                 
-        tk.Button(btn_frame, text="Select All", command=_select_all, bg=PANEL, fg=TEXT).pack(side="left", padx=10)
-        tk.Button(btn_frame, text="Deselect All", command=_deselect_all, bg=PANEL, fg=TEXT).pack(side="left")
+        mod_btn_style = {"bg": ACCENT, "fg": WHITE, "font": ("Segoe UI", 9, "bold"), "relief": "solid", "borderwidth": 1, "cursor": "hand2", "padx": 10, "pady": 4}
+        
+        tk.Button(btn_frame, text="Select All", command=_select_all, **mod_btn_style).pack(side="left", padx=10)
+        tk.Button(btn_frame, text="Deselect All", command=_deselect_all, **mod_btn_style).pack(side="left")
         
         # Export Buttons
-        tk.Button(btn_frame, text="Export EDC", command=lambda: _export("edc"), bg=PANEL, fg=TEXT).pack(side="left", padx=15)
-        tk.Button(btn_frame, text="Export AR", command=lambda: _export("ar"), bg=PANEL, fg=TEXT).pack(side="left", padx=5)
+        tk.Button(btn_frame, text="Export EDC", command=lambda: _export("edc"), **mod_btn_style).pack(side="left", padx=15)
+        tk.Button(btn_frame, text="Export AR", command=lambda: _export("ar"), **mod_btn_style).pack(side="left", padx=5)
         
-        tk.Button(btn_frame, text="Submit", command=_process, bg=ACCENT, fg=WHITE, font=("Segoe UI", 10, "bold")).pack(side="right", padx=20)
-        tk.Button(btn_frame, text="Cancel", command=top.destroy, bg=PANEL, fg=TEXT).pack(side="right")
+        tk.Button(btn_frame, text="Submit", command=_process, **{**mod_btn_style, "font": ("Segoe UI", 10, "bold")}).pack(side="right", padx=20)
+        
+        cancel_style = {**mod_btn_style, "bg": WHITE, "fg": ACCENT}
+        tk.Button(btn_frame, text="Cancel", command=top.destroy, **cancel_style).pack(side="right")
 
     def _open_output(self):
         path = self._last_output
