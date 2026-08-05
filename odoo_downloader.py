@@ -6,7 +6,7 @@ from playwright.sync_api import sync_playwright
 # Import configs
 from config import (
     ODOO_URL, ODOO_DASHBOARD_URL, ODOO_PAYMENTS_URL, ODO_EXCEL_PATH,
-    ODO_GROUP_BCA, ODO_GROUP_MANDIRI, ODO_GROUP_BRI
+    BANK_ACCOUNTS
 )
 
 
@@ -181,25 +181,42 @@ def run_downloader():
         to_loc = dialog.locator(f"xpath={xpath_to}")
         to_loc.wait_for(state="visible", timeout=5000)
         to_loc.fill(args.date_to)
+        to_loc.press("Enter")
         page.wait_for_timeout(500)
 
         # Langkah 6.5: Tambahkan filter Journal jika tidak semua bank dipilih
-        if len(selected_banks) < 3 and selected_banks:
+        is_all_banks = any(b.lower() == "all" for b in selected_banks) or len(selected_banks) >= 3
+        if not is_all_banks and selected_banks:
             print(f"[+] Menambahkan filter Journal untuk bank: {', '.join(selected_banks)}...")
             
             # Click '+' icon to add a new rule row
-            xpath_add_rule = "./div/div/div/div[2]/div/div[2]/button[1]"
-            dialog.locator(f"xpath={xpath_add_rule}").click()
-            page.wait_for_timeout(500)
+            print("    -> Meng-klik tombol '+' (Add Condition)...")
+            try:
+                # Odoo 17 uses i.fa-plus for the add condition button
+                add_btn = dialog.locator("i.fa-plus").last
+                add_btn.wait_for(state="visible", timeout=3000)
+                add_btn.click()
+            except Exception as e:
+                print(f"    [!] Fallback klik '+' menggunakan XPath: {e}")
+                xpath_add_rule = "./div/div/div/div[2]/div/div[2]/button[1]"
+                dialog.locator(f"xpath={xpath_add_rule}").click()
+                
+            page.wait_for_timeout(1500) # Tunggu render baris baru
             
             # Ensure 'Match ALL' is selected
             print("    -> Memastikan rule matching diset ke 'all'...")
             xpath_match_btn = "./div/div/div/div[1]/div/div/div/button"
-            dialog.locator(f"xpath={xpath_match_btn}").click()
-            page.wait_for_timeout(500)
-            xpath_match_all = "./div/div/div/div[1]/div/div/div/div/span[1]"
-            dialog.locator(f"xpath={xpath_match_all}").click()
-            page.wait_for_timeout(500)
+            try:
+                match_btn = dialog.locator(f"xpath={xpath_match_btn}")
+                match_btn.wait_for(state="visible", timeout=3000)
+                match_btn.click(timeout=3000)
+                page.wait_for_timeout(500)
+                
+                xpath_match_all = "./div/div/div/div[1]/div/div/div/div/span[1]"
+                dialog.locator(f"xpath={xpath_match_all}").click(timeout=3000)
+                page.wait_for_timeout(500)
+            except Exception as e:
+                print(f"    [!] Skip klik Match ALL: {e}")
             
             # Select 'Journal' field
             xpath_field_2 = "./div/div/div/div[3]/div/div[1]/div[1]/div/div"
@@ -227,15 +244,15 @@ def run_downloader():
             xpath_value_input = "./div/div/div/div[3]/div/div[1]/div[3]/div/div/input"
             val_input = dialog.locator(f"xpath={xpath_value_input}")
             
-            journal_map = {
-                "BCA": ODO_GROUP_BCA,
-                "Mandiri": ODO_GROUP_MANDIRI,
-                "BRI": ODO_GROUP_BRI
-            }
-            
+            journal_names = []
             for bank in selected_banks:
-                j_name = journal_map.get(bank)
-                if j_name:
+                bk = bank.lower()
+                for alias, acc_info in BANK_ACCOUNTS.get(bk, {}).items():
+                    grp = acc_info.get("group")
+                    if grp:
+                        journal_names.append(grp)
+                        
+            for j_name in journal_names:
                     print(f"    -> Memasukkan '{j_name}'")
                     val_input.click()
                     val_input.fill(j_name)

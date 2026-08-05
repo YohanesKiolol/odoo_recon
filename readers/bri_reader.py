@@ -158,13 +158,19 @@ def _parse_pdf_table(
                 date_idx = None
                 desc_idx = None
                 number_idx = None
+                payment_date_idx = None
+                admin_fee_idx = None
                 for i, h in enumerate(headers):
                     hu = h.upper()
-                    if date_idx is None and any(k in hu for k in ("DATE", "TGL", "TANGGAL")):
+                    if date_idx is None and "TGL" in hu and "TRX" in hu:
                         date_idx = i
-                    if desc_idx is None and any(k in hu for k in ("DESC", "KET", "REMARK", "TRX_DESC", "KETERANGAN")):
+                    if desc_idx is None and "REMARK" in hu and "RK" in hu:
                         desc_idx = i
-                    if number_idx is None and number_col and hu == number_col.upper():
+                    if payment_date_idx is None and "TGL" in hu and "RK" in hu and "REMARK" not in hu:
+                        payment_date_idx = i
+                    if admin_fee_idx is None and "DISC" in hu and "AMT" in hu:
+                        admin_fee_idx = i
+                    if number_idx is None and ("AAPPRR" in hu or "RREEFF" in hu):
                         number_idx = i
 
                 # Parse data rows
@@ -187,6 +193,7 @@ def _parse_pdf_table(
                     date_val   = str(row[date_idx]).strip()   if date_idx   is not None and row[date_idx]   else ""
                     desc_val   = str(row[desc_idx]).strip()   if desc_idx   is not None and row[desc_idx]   else ""
                     number_val = str(row[number_idx]).strip() if number_idx is not None and row[number_idx] else ""
+                    pay_val    = str(row[payment_date_idx]).strip() if payment_date_idx is not None and row[payment_date_idx] else ""
 
                     # Date filter
                     txn_date = _parse_any_date(date_val)
@@ -196,11 +203,31 @@ def _parse_pdf_table(
                             continue
                             
                     final_date = str(txn_date) if txn_date else date_val
+                    
+                    # Parse Payment Date
+                    pay_date = _parse_any_date(pay_val)
+                    
+                    # Fallback to H+1 if payment date is missing
+                    if not pay_date and txn_date:
+                        from datetime import date as dt_date, timedelta
+                        if isinstance(txn_date, dt_date):
+                            pay_date = txn_date + timedelta(days=1)
+                            
+                    final_pay_date = str(pay_date) if pay_date else pay_val
+                    
+                    # Admin fee
+                    admin_fee_val = str(row[admin_fee_idx]).strip() if admin_fee_idx is not None and len(row) > admin_fee_idx and row[admin_fee_idx] else ""
+                    try:
+                        admin_fee = parse_amount(admin_fee_val) if admin_fee_val else Decimal("0")
+                    except:
+                        admin_fee = Decimal("0")
 
                     txns.append({
                         "amount":      amount,
                         "amount_raw":  raw_amount,
+                        "admin_fee":   admin_fee,
                         "date":        final_date,
+                        "payment_date": final_pay_date,
                         "description": desc_val,
                         "number":      number_val,
                         "filename":    source_file,

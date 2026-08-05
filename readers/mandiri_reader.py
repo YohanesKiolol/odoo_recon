@@ -55,6 +55,11 @@ def _read_csv_from_bytes(
     header_line = lines[5]
     data_lines  = lines[6:]
 
+    file_category = "QR"
+    header_upper = header_line.upper()
+    if "CARD" in header_upper and "PRINCIPAL" in header_upper:
+        file_category = "Debit Card"
+
     reader = csv.DictReader(
         [header_line] + data_lines,
         skipinitialspace=True,
@@ -127,14 +132,40 @@ def _read_csv_from_bytes(
                         number_val = v
                         break
 
+        # Payment Date
+        payment_date_val = (
+            row.get("PAYMENT DATE") or
+            row.get("TANGGAL BAYAR") or
+            ""
+        )
+        payment_date = _parse_any_date(payment_date_val)
+        
+        # Fallback to H+1 if payment date is missing
+        if not payment_date and txn_date:
+            from datetime import date as dt_date, timedelta
+            if isinstance(txn_date, dt_date):
+                payment_date = txn_date + timedelta(days=1)
+                
+        final_payment_date = str(payment_date) if payment_date else payment_date_val
+
+        # Admin fee
+        admin_fee_val = row.get("MDR Amount") or row.get("MDR AMOUNT") or row.get("mdr amount") or ""
+        try:
+            admin_fee = parse_amount(admin_fee_val) if admin_fee_val else Decimal("0")
+        except ValueError:
+            admin_fee = Decimal("0")
+
         txns.append({
             "amount":      amount,
             "amount_raw":  raw,
+            "admin_fee":   admin_fee,
             "date":        final_date,
+            "payment_date": final_payment_date,
             "description": desc_val,
             "number":      number_val,
             "filename":    source_file,
             "source":      "Bank (Mandiri)",
+            "category":    file_category,
         })
 
     if skipped:

@@ -19,9 +19,9 @@ from collections import Counter, defaultdict
 from decimal import Decimal
 
 
-STATUS_DONE        = "Done"
-STATUS_BANK_ONLY   = "Cuma ada di Bank"
-STATUS_ODO_ONLY    = "Cuma ada di ODO"
+STATUS_DONE        = "Match"
+STATUS_BANK_ONLY   = "Only in Bank"
+STATUS_ODO_ONLY    = "Only in Odoo"
 
 
 def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
@@ -76,7 +76,10 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
             "amount":        amt,
             "amount_raw":    txn.get("amount_raw", ""),
             "date":          bank_d,
+            "payment_date":  txn.get("payment_date", ""),
+            "admin_fee":     txn.get("admin_fee", Decimal("0")),
             "description":   txn.get("description", ""),
+            "category":      txn.get("category", "Unknown"),
             "source":        "Bank",
             "status":        status,
             "number_odo":    odo_num,
@@ -98,6 +101,8 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
                     "amount":        amt,
                     "amount_raw":    txn.get("amount_raw", ""),
                     "date":          txn.get("date", ""),
+                    "payment_date":  txn.get("payment_date", ""),
+                    "admin_fee":     txn.get("admin_fee", Decimal("0")),
                     "description":   txn.get("description", ""),
                     "source":        "Odoo",
                     "status":        STATUS_ODO_ONLY,

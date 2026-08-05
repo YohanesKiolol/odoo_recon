@@ -48,6 +48,7 @@ from readers.odoo_reader    import read_odoo
 from readers.mandiri_reader import read_mandiri
 from readers.bca_reader     import read_bca
 from readers.bri_reader     import read_bri
+from readers.mutation_reader import read_all_mutations
 from reconciler             import reconcile, summary
 from excel_writer           import write_report
 
@@ -65,6 +66,10 @@ def parse_args():
     parser.add_argument(
         "--scan", action="store_true",
         help="Scan files and print a summary of dates and counts, then exit."
+    )
+    parser.add_argument(
+        "--all", action="store_true",
+        help="Process all transactions including unknown groups (e.g., PayPal, Wise) into an 'Other' bucket."
     )
     return parser.parse_args()
 
@@ -100,10 +105,13 @@ def main():
     # ── Step 1: Read ODO ───────────────────────────────────────────────────────
     _banner("Reading Odoo transactions...")
 
+    from config import BANK_ACCOUNTS
     group_map = {}
-    if "bca"     in banks: group_map[ODO_GROUP_BCA]     = "BCA"
-    if "mandiri" in banks: group_map[ODO_GROUP_MANDIRI] = "Mandiri"
-    if "bri"     in banks: group_map[ODO_GROUP_BRI]     = "BRI"
+    for bank_key in banks:
+        for alias, acc_info in BANK_ACCOUNTS.get(bank_key, {}).items():
+            grp = acc_info.get("group")
+            if grp:
+                group_map[grp] = f"{bank_key}_{alias}"
 
     try:
         odo_date, odo_bank_txns = read_odoo(
@@ -111,6 +119,7 @@ def main():
             amount_col  = ODO_AMOUNT_COLUMN,
             number_col  = ODO_NUMBER_COLUMN,
             group_map   = group_map,
+            include_others = args.all,
         )
     except (FileNotFoundError, ValueError) as e:
         if args.scan:
@@ -121,7 +130,8 @@ def main():
             print(f"\n[!] ERROR (ODO): {e}\n")
             sys.exit(1)
 
-    print(f"  [+] ODO date: {odo_date}")
+    if odo_date:
+        print(f"  [+] ODO date: {odo_date}")
     for bank_key, txns in odo_bank_txns.items():
         print(f"     {bank_key:10} → {len(txns)} transactions")
 
@@ -130,79 +140,79 @@ def main():
 
     if "bca" in banks:
         _banner("Reading BCA transactions...")
-        try:
-            # Derive allowed dates from ODO BCA transactions.
-            # Single ODO date  → same filter as original behavior.
-            # Multiple ODO dates → all are allowed automatically.
-            from datetime import datetime as _dt
-            bca_filter_dates = {
-                _dt.strptime(t["date"], "%Y-%m-%d").date()
-                for t in odo_bank_txns.get("BCA", [])
-                if t.get("date")
-            } or None   # None = no filter if ODO has no dates (shouldn't happen)
+        for alias, acc_info in BANK_ACCOUNTS.get("bca", {}).items():
+            acc_key = f"bca_{alias}"
+            target_dir = BCA_EXCEL_DIR / alias
+            if alias == "main" and not target_dir.exists():
+                target_dir = BCA_EXCEL_DIR
+            try:
+                from datetime import datetime as _dt
+                filter_dates = None
 
-            bank_txns["BCA"] = read_bca(
-                excel_dir     = BCA_EXCEL_DIR,
-                excel_pattern = BCA_EXCEL_PATTERN,
-                password      = BCA_EXCEL_PASSWORD,
-                amount_col    = BCA_AMOUNT_COLUMN,
-                date_col      = BCA_DATE_COLUMN,
-                number_col    = BCA_NUMBER_COLUMN,
-                filter_dates  = bca_filter_dates,
-            )
-        except FileNotFoundError as e:
-            print(f"  [!] No BCA files found, skipping BCA.")
-        except Exception as e:
-            print(f"\n[!] ERROR (BCA): {e}\n")
-            sys.exit(1)
+                bank_txns[acc_key] = read_bca(
+                    excel_dir     = target_dir,
+                    excel_pattern = BCA_EXCEL_PATTERN,
+                    password      = BCA_EXCEL_PASSWORD,
+                    amount_col    = BCA_AMOUNT_COLUMN,
+                    date_col      = BCA_DATE_COLUMN,
+                    number_col    = BCA_NUMBER_COLUMN,
+                    filter_dates  = filter_dates,
+                )
+            except FileNotFoundError as e:
+                print(f"  [!] No BCA files found for {alias}, skipping.")
+            except Exception as e:
+                print(f"\n[!] ERROR (BCA {alias}): {e}\n")
+                sys.exit(1)
 
     if "mandiri" in banks:
         _banner("Reading Mandiri transactions...")
-        try:
-            from datetime import datetime as _dt
-            mandiri_filter_dates = {
-                _dt.strptime(t["date"], "%Y-%m-%d").date()
-                for t in odo_bank_txns.get("Mandiri", [])
-                if t.get("date")
-            } or None
-            bank_txns["Mandiri"] = read_mandiri(
-                zip_dir     = MANDIRI_ZIP_DIR,
-                password    = MANDIRI_ZIP_PASSWORD,
-                amount_col  = MANDIRI_AMOUNT_COLUMN,
-                number_col  = MANDIRI_NUMBER_COLUMN,
-                zip_pattern = MANDIRI_ZIP_PATTERN,
-                filter_dates = mandiri_filter_dates,
-            )
-            print(f"  [+] Mandiri: {len(bank_txns['Mandiri'])} transactions loaded")
-        except FileNotFoundError as e:
-            print(f"  [-] No Mandiri files found, skipping Mandiri.")
-        except Exception as e:
-            print(f"\n[!] ERROR (Mandiri): {e}\n")
-            sys.exit(1)
+        for alias, acc_info in BANK_ACCOUNTS.get("mandiri", {}).items():
+            acc_key = f"mandiri_{alias}"
+            target_dir = MANDIRI_ZIP_DIR / alias
+            if alias == "main" and not target_dir.exists():
+                target_dir = MANDIRI_ZIP_DIR
+            try:
+                from datetime import datetime as _dt
+                filter_dates = None
+                bank_txns[acc_key] = read_mandiri(
+                    zip_dir     = target_dir,
+                    password    = MANDIRI_ZIP_PASSWORD,
+                    amount_col  = MANDIRI_AMOUNT_COLUMN,
+                    number_col  = MANDIRI_NUMBER_COLUMN,
+                    zip_pattern = MANDIRI_ZIP_PATTERN,
+                    filter_dates = filter_dates,
+                )
+                print(f"  [+] Mandiri ({alias}): {len(bank_txns.get(acc_key, []))} transactions loaded")
+            except FileNotFoundError as e:
+                print(f"  [-] No Mandiri files found for {alias}, skipping.")
+            except Exception as e:
+                print(f"\n[!] ERROR (Mandiri {alias}): {e}\n")
+                sys.exit(1)
 
     if "bri" in banks:
         _banner("Reading BRI transactions...")
-        try:
-            from datetime import datetime as _dt
-            bri_filter_dates = {
-                _dt.strptime(t["date"], "%Y-%m-%d").date()
-                for t in odo_bank_txns.get("BRI", [])
-                if t.get("date")
-            } or None
-            bank_txns["BRI"] = read_bri(
-                zip_dir      = BRI_ZIP_DIR,
-                zip_pattern  = BRI_ZIP_PATTERN,
-                pdf_pattern  = BRI_PDF_PATTERN,
-                amount_col   = BRI_AMOUNT_COLUMN,
-                number_col   = BRI_NUMBER_COLUMN,
-                filter_dates = bri_filter_dates,
-            )
-            print(f"  [+] BRI: {len(bank_txns['BRI'])} transactions loaded")
-        except FileNotFoundError as e:
-            print(f"  [-] No BRI files found, skipping BRI.")
-        except Exception as e:
-            print(f"\n[!] ERROR (BRI): {e}\n")
-            sys.exit(1)
+        for alias, acc_info in BANK_ACCOUNTS.get("bri", {}).items():
+            acc_key = f"bri_{alias}"
+            target_dir = BRI_ZIP_DIR / alias
+            if alias == "main" and not target_dir.exists():
+                target_dir = BRI_ZIP_DIR
+            try:
+                from datetime import datetime as _dt
+                filter_dates = None
+                bank_txns[acc_key] = read_bri(
+                    zip_dir      = target_dir,
+                    zip_pattern  = acc_info.get("mid", "") or BRI_ZIP_PATTERN,
+                    pdf_pattern  = BRI_PDF_PATTERN,
+                    amount_col   = BRI_AMOUNT_COLUMN,
+                    number_col   = BRI_NUMBER_COLUMN,
+                    filter_dates = filter_dates,
+                )
+                print(f"  [+] BRI ({alias}): {len(bank_txns.get(acc_key, []))} transactions loaded")
+            except FileNotFoundError as e:
+                print(f"  [-] No BRI files found for {alias}, skipping.")
+            except Exception as e:
+                print(f"\n[!] ERROR (BRI {alias}): {e}\n")
+                sys.exit(1)
 
     # ── Handle Scan Mode ───────────────────────────────────────────────────────
     if args.scan:
@@ -220,12 +230,8 @@ def main():
         
         print("\n  [ BANK FILES ]")
         all_dates = []
-        for bank_key in banks:
-            b_key = bank_key.upper()
-            if b_key == "MANDIRI": b_key = "Mandiri"
-            
-            txns = bank_txns.get(b_key, [])
-            print(f"    {b_key}:")
+        for acc_key, txns in bank_txns.items():
+            print(f"    {acc_key}:")
             dates = Counter(t.get("date", "Unknown") for t in txns)
             if not dates:
                 print("      (No transactions)")
@@ -252,20 +258,44 @@ def main():
     print(f"\n  {'Bank':<10} {'Done':>6} {'Bank Only':>10} {'ODO Only':>9} {'Total':>7}")
     print(f"  {'─'*10} {'─'*6} {'─'*10} {'─'*9} {'─'*7}")
 
-    for bank_name in ["BCA", "Mandiri", "BRI"]:
-        if bank_name not in bank_txns:
-            continue
+    # Make sure we process "other" if it exists in Odoo txns
+    keys_to_process = list(bank_txns.keys())
+    if "other" in odo_bank_txns and "other" not in keys_to_process:
+        keys_to_process.append("other")
 
-        b_txns = bank_txns[bank_name]
-        o_txns = odo_bank_txns.get(bank_name, [])
+    for acc_key in keys_to_process:
+        b_txns = bank_txns.get(acc_key, [])
+        o_txns = odo_bank_txns.get(acc_key, [])
+        
+        if acc_key == "other":
+            # Don't filter by valid bank dates since we don't have bank files for "other"
+            o_txns_filtered = o_txns
+        else:
+            # Filter Odoo transactions: only keep dates that actually exist in the uploaded Bank files
+            valid_bank_dates = {str(t.get("date")) for t in b_txns if t.get("date")}
+            valid_odoo_dates = {str(t.get("date")) for t in o_txns if t.get("date")}
+            
+            missing_in_odoo = valid_bank_dates - valid_odoo_dates
+            if missing_in_odoo:
+                missing_str = ", ".join(sorted(missing_in_odoo))
+                print(f"  [!] WARNING: {acc_key} has Bank data for {missing_str} but No Odoo data exists!")
 
-        results = reconcile(b_txns, o_txns)
+            o_txns_filtered = [t for t in o_txns if str(t.get("date")) in valid_bank_dates]
+
+        results = reconcile(b_txns, o_txns_filtered)
         stats   = summary(results)
-        all_results[bank_name] = results
+        all_results[acc_key] = results
 
-        print(f"  {bank_name:<10} {stats['done']:>6} {stats['bank_only']:>10} {stats['odo_only']:>9} {stats['total']:>7}")
+        print(f"  {acc_key:<10} {stats['done']:>6} {stats['bank_only']:>10} {stats['odo_only']:>9} {stats['total']:>7}")
 
-    # ── Step 4: Write report ───────────────────────────────────────────────────
+    # ── Step 4: Parse Mutations ───────────────────────────────────────────────
+    _banner("Reading Mutations...")
+    mutations, unknown_mutations = read_all_mutations()
+    print(f"  [+] Loaded {len(mutations)} recognized mutations")
+    if unknown_mutations:
+        print(f"  [!] Found {len(unknown_mutations)} unknown mutation patterns")
+
+    # ── Step 5: Write report ───────────────────────────────────────────────────
     _banner("Writing Excel report...")
 
     try:
@@ -275,6 +305,8 @@ def main():
             OUTPUT_DIR,
             bank_txns=bank_txns,
             odo_bank_txns=odo_bank_txns,
+            mutations=mutations,
+            unknown_mutations=unknown_mutations,
         )
     except Exception as e:
         print(f"\n[!] ERROR writing report: {e}\n")

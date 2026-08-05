@@ -1,80 +1,104 @@
 """
-odoo_journal_creator.py — Script to automate Odoo journal creation.
-Phase 1: Testing and Navigation only.
+odoo_journal_creator.py — Script to automate Odoo journal creation via Excel Import.
+Phase 2: Uploads the generated Excel file to the Odoo Import page.
 """
 
 import os
 import sys
 import argparse
 from pathlib import Path
-from openpyxl import load_workbook
 from playwright.sync_api import sync_playwright
 
 # Import configs
 from config import (
-    ODOO_URL, ODOO_DASHBOARD_URL, ODOO_JOURNAL_CREATE_URL, OUTPUT_DIR
+    ODOO_URL, ODOO_DASHBOARD_URL, ODOO_JOURNAL_IMPORT_URL, OUTPUT_DIR
 )
-
-# Konfigurasi format referensi jurnal per bank
-REF_FORMATS = {
-    "BCA": "Settlement Journal EDC BCA for {tanggal}",
-    "Mandiri": "Settlement Journal EDC MANDIRI for {tanggal}",
-    "BRI": "Settlement Journal EDC BRI for {tanggal}"
-}
+from journal_generator import generate_journal_import
 
 
 def get_latest_excel_file() -> Path:
     """Find the most recently created .xlsx file in the output directory."""
     excel_files = list(OUTPUT_DIR.glob("reconciliation_*.xlsx"))
     if not excel_files:
-        print(f"❌ Tidak ada file Excel yang ditemukan di '{OUTPUT_DIR}'.")
+        print(f"❌ No Excel file found in '{OUTPUT_DIR}'.")
         sys.exit(1)
     # Sort by modification time, newest last
     latest_file = max(excel_files, key=os.path.getmtime)
     return latest_file
 
 
-def read_sesuai_dates(filepath: Path) -> list[dict]:
-    """Read 'Ringkasan Harian' and extract rows with 'Sesuai' status."""
-    wb = load_workbook(filepath, data_only=True)
-    if "Ringkasan Harian" not in wb.sheetnames:
-        print("❌ Sheet 'Ringkasan Harian' tidak ditemukan di file Excel.")
-        sys.exit(1)
+def update_recon_file_status(recon_file: Path, config_path: Path):
+    """Update Journal Status column in the Daily Summary sheet based on config."""
+    from openpyxl import load_workbook
+    import json
+    
+    try:
+        if not config_path or not config_path.exists():
+            print("⚠️ No config path provided, skipping excel status update.")
+            return
 
-    ws = wb["Ringkasan Harian"]
-    results = []
+        with open(config_path, "r") as f:
+            selected_items = json.load(f)
+            
+        wb = load_workbook(recon_file)
+        if "Daily Summary" in wb.sheetnames:
+            ws = wb["Daily Summary"]
+            updated = 0
+            
+            for item in selected_items:
+                row_idx = item.get("row")
+                if not row_idx:
+                    continue
+                
+                created_edc = item.get("create_edc", False)
+                created_ar = item.get("create_ar", False)
+                
+                new_status = ""
+                if created_edc and created_ar:
+                    new_status = "✅ Both"
+                elif created_edc:
+                    new_status = "✅ EDC"
+                elif created_ar:
+                    new_status = "✅ AR"
+                else:
+                    continue
+                    
+                current_val = str(ws.cell(row=row_idx, column=10).value)
+                
+                # Merge status
+                if "EDC" in current_val and created_ar:
+                    new_status = "✅ Both"
+                elif "AR" in current_val and created_edc:
+                    new_status = "✅ Both"
+                elif "Both" in current_val:
+                    new_status = "✅ Both"
+                
+                ws.cell(row=row_idx, column=10, value=new_status)
+                
+                # Keep original checkmark logic
+                status9 = ws.cell(row=row_idx, column=9).value
+                if status9 and "Match" in str(status9):
+                    ws.cell(row=row_idx, column=9, value="✅ Journal Created")
+                    
+                updated += 1
+                
+            if updated > 0:
+                wb.save(recon_file)
+                print(f"✅ Successfully updated {updated} rows in '{recon_file.name}' with Journal Status.")
+    except Exception as e:
+        print(f"⚠️ Failed to update status in reconciliation file: {e}")
 
-    # Start reading from row 4 (where data begins)
-    for row in range(4, ws.max_row + 1):
-        bank = ws.cell(row=row, column=2).value
-        tanggal = ws.cell(row=row, column=3).value
-        status = ws.cell(row=row, column=7).value
-
-        if not bank or not status:
-            continue
-
-        if "Sesuai" in str(status):
-            results.append({
-                "bank": bank,
-                "tanggal": tanggal,
-                "status": status
-            })
-
-    return results
-
-
-def run_automation(selected_items: list[dict]):
-    """Launch Playwright and navigate to Odoo."""
-    if not ODOO_URL or not ODOO_DASHBOARD_URL or not ODOO_JOURNAL_CREATE_URL:
-        print("❌ ODOO_URL, ODOO_DASHBOARD_URL, atau ODOO_JOURNAL_CREATE_URL tidak ada di .env")
+def run_import_automation(import_file: Path, recon_file: Path, config_path: Path = None):
+    """Launch Playwright, navigate to Odoo, and upload the import file."""
+    if not ODOO_URL or not ODOO_DASHBOARD_URL or not ODOO_JOURNAL_IMPORT_URL:
+        print("❌ ODOO_URL, ODOO_DASHBOARD_URL, or ODOO_JOURNAL_IMPORT_URL missing from .env")
         sys.exit(1)
 
     with sync_playwright() as p:
         user_data_dir = os.path.abspath("playwright_profile")
         
         try:
-            # Gunakan persistent context agar cookie & HSTS cache tersimpan.
-            # Ini mencegah Nginx 404 loop karena HTTP/HTTPS dan menghindari harus login tiap saat.
+            # Use persistent context to save cookies & HSTS cache
             context = p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
                 headless=False,
@@ -92,10 +116,7 @@ def run_automation(selected_items: list[dict]):
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
             )
 
-        # The persistent context automatically has one page
         page = context.pages[0] if context.pages else context.new_page()
-        
-        # Hide webdriver flag to bypass bot detection
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
         # -------------------------------------------------------------
@@ -104,26 +125,19 @@ def run_automation(selected_items: list[dict]):
         def upgrade_to_https(route, request):
             if request.url.startswith("http://"):
                 secure_url = request.url.replace("http://", "https://", 1)
-                # Playwright doesn't allow protocol change in route.continue_()
-                # So we mock a 301 Redirect to force the browser to HTTPS
-                route.fulfill(
-                    status=301,
-                    headers={"Location": secure_url}
-                )
+                route.fulfill(status=301, headers={"Location": secure_url})
             else:
                 route.continue_()
 
-        # Apply the interceptor to ALL requests to guarantee HTTP -> HTTPS upgrade
         page.route("**/*", upgrade_to_https)
         # -------------------------------------------------------------
 
-        print(f"🌐 Membuka {ODOO_URL}")
+        print(f"🌐 Opening {ODOO_URL}")
         page.goto(ODOO_URL)
 
-        print("\n⏳ Menunggu Anda login secara manual...")
-        print(f"Script akan lanjut setelah URL mengandung:\n{ODOO_DASHBOARD_URL}")
+        print("\n⏳ Waiting for manual login...")
+        print(f"Script will continue after URL includes:\n{ODOO_DASHBOARD_URL}")
         
-        # Wait until the URL contains the dashboard URL string
         page.wait_for_function(
             "dashboardUrl => window.location.href.includes(dashboardUrl)",
             arg=ODOO_DASHBOARD_URL,
@@ -131,54 +145,81 @@ def run_automation(selected_items: list[dict]):
         )
         print("✅ Dashboard terdeteksi!")
 
-        print(f"\n➡️ Mengarahkan ke form pembuatan jurnal: {ODOO_JOURNAL_CREATE_URL}")
-        page.goto(ODOO_JOURNAL_CREATE_URL)
+        print(f"\n➡️ Mengarahkan ke form Import Jurnal: {ODOO_JOURNAL_IMPORT_URL}")
+        page.goto(ODOO_JOURNAL_IMPORT_URL)
         
-        print("\n🎉 Mulai Mengisi Form Jurnal (General Info)...")
+        # Tunggu sampai halaman import termuat sepenuhnya
+        page.wait_for_load_state("domcontentloaded")
+        page.locator("xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/span/span/button").wait_for(state="visible", timeout=30000)
+
+        # Klik tombol Upload File (menggunakan FileChooser API Playwright)
+        print(f"\n📤 Mengunggah file: {import_file.name} ...")
+        xpath_upload_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/span/span/button"
         
-        # XPaths provided by user
-        xpath_ref = "/html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[2]/div[1]/div/div[2]/div/input"
-        xpath_date = "/html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[2]/div[2]/div[1]/div[2]/div/div/input"
-        xpath_journal = "/html/body/div[1]/div/div/div[2]/div/div[1]/div[2]/div[2]/div[2]/div[3]/div[2]/div/div[1]/div/div/input"
+        try:
+            with page.expect_file_chooser(timeout=10000) as fc_info:
+                page.locator(xpath_upload_btn).click()
+            
+            file_chooser = fc_info.value
+            file_chooser.set_files(str(import_file.resolve()))
+            print("✅ File berhasil diunggah!")
+        except Exception as e:
+            print(f"❌ Gagal mengunggah file. Pastikan tombol 'Upload File' terlihat.\nError: {e}")
+            input("\n[Tekan Enter untuk menutup browser]")
+            context.close()
+            return
 
-        for idx, item in enumerate(selected_items):
-            bank = item["bank"]
-            tanggal = item["tanggal"]  # expected string like 'YYYY-MM-DD' or similar
+        # 4. Automate Test & Import
+        print("🔍 Melakukan Test Validasi...")
+        xpath_test_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[2]"
+        xpath_valid_msg = "xpath=/html/body/div[1]/div/div[2]/div[2]/div/p"
+        xpath_import_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[1]"
+        
+        try:
+            # Tunggu tombol test muncul setelah upload file selesai diparse
+            page.locator(xpath_test_btn).wait_for(state="visible", timeout=30000)
             
-            # Use the global format dict, or a fallback if bank not in dict
-            fmt = REF_FORMATS.get(bank, f"Settlement Journal EDC {bank.upper()} for {{tanggal}}")
-            ref_text = fmt.format(tanggal=tanggal)
+            # Click Test
+            page.locator(xpath_test_btn).click()
             
-            print(f"\n📝 Memproses: {bank} - {tanggal}")
+            # Wait for validation message
+            valid_locator = page.locator(xpath_valid_msg)
+            valid_locator.wait_for(state="visible", timeout=15000)
             
-            # 1. Wait for the form fields to be visible
-            page.wait_for_selector(f"xpath={xpath_ref}", state="visible", timeout=30000)
+            msg_text = valid_locator.inner_text()
+            if "Everything seems valid" in msg_text:
+                print("✅ Validasi sukses: 'Everything seems valid.'")
+                print("🚀 Melakukan Import...")
+                page.locator(xpath_import_btn).click()
+                
+                
+                # Wait for page to redirect to Journal Entries list (action=account.action_move_journal_line)
+                try:
+                    page.wait_for_url("**/web#action=*", timeout=15000)
+                    print("✅ Berhasil dialihkan ke halaman Journal Entries.")
+                    # Update status in Excel since import is successful
+                    update_recon_file_status(recon_file, config_path)
+                except Exception as e:
+                    print(f"⚠️ Import mungkin sukses, tapi timeout saat menunggu dialihkan ke Journal Entries: {e}")
+                    
+                print("🎉 Proses import selesai!")
+                page.wait_for_timeout(2000)
+            else:
+                print(f"⚠️ Validasi Odoo menampilkan pesan lain: {msg_text}")
+                print("Tolong periksa manual di browser.")
+                input("\n[Tekan Enter di terminal ini untuk menutup browser]")
+        except Exception as e:
+            print(f"❌ Terjadi kesalahan saat melakukan Test/Import.\nError: {e}")
+            input("\n[Tekan Enter di terminal ini untuk menutup browser]")
             
-            # 2. Fill Reference
-            page.locator(f"xpath={xpath_ref}").fill(ref_text)
-            
-            # 3. Fill Accounting Date
-            # Odoo datepickers sometimes require clearing or pressing Enter
-            page.locator(f"xpath={xpath_date}").fill(tanggal)
-            page.keyboard.press("Escape") # close datepicker if open
-            
-            # 4. Fill Journal Selection
-            # Clear existing, type, and press enter/click dropdown
-            page.locator(f"xpath={xpath_journal}").fill("EDC Settlement Journal")
-            # Wait for Odoo's dynamic dropdown to show matching result, then press enter
-            page.wait_for_timeout(1000) 
-            page.keyboard.press("Enter")
-            
-            print(f"✅ Selesai mengisi info untuk {bank}. (Hanya 1 item untuk testing)")
-            break # STOP after 1 item for user verification
-
-        input("\n[Cek browser. Tekan Enter di terminal ini untuk menutup browser dan keluar]")
-        browser.close()
+        context.close()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Automate Odoo Journal Creation")
+    parser = argparse.ArgumentParser(description="Automate Odoo Journal Creation via Import")
     parser.add_argument("--file", type=str, help="Path ke file Excel rekonsiliasi (opsional)")
+    parser.add_argument("--config", type=str, help="Path ke file JSON konfigurasi jurnal (opsional)")
+    parser.add_argument("--import-file", type=str, help="Path ke file import Excel yang sudah siap upload (opsional)")
     args = parser.parse_args()
 
     # 1. Get File
@@ -190,42 +231,24 @@ def main():
     else:
         file_path = get_latest_excel_file()
     
-    print(f"📁 Menggunakan file: {file_path.name}")
+    print(f"📁 Memproses data dari: {file_path.name}")
 
-    # 2. Extract Data
-    sesuai_items = read_sesuai_dates(file_path)
-    if not sesuai_items:
-        print("ℹ️ Tidak ada data dengan status 'Sesuai' di Ringkasan Harian.")
-        sys.exit(0)
+    config_path = Path(args.config) if args.config else None
 
-    # 3. Present CLI Selection
-    print("\n📋 Data yang sesuai dan siap dibuat jurnal:")
-    for idx, item in enumerate(sesuai_items, 1):
-        print(f"  [{idx}] {item['bank']:<10} - {item['tanggal']}")
-
-    print("\n💡 Secara default, semua data di atas akan diproses.")
-    exclude_input = input("Masukkan nomor yang INGIN DIKECUALIKAN (pisahkan dengan koma), atau tekan Enter untuk lanjut semua: ")
-    
-    excludes = []
-    if exclude_input.strip():
-        try:
-            excludes = [int(x.strip()) for x in exclude_input.split(",")]
-        except ValueError:
-            print("❌ Input tidak valid. Pastikan hanya memasukkan angka yang dipisah koma.")
+    # 2. Generate Import Excel or use existing
+    if args.import_file:
+        import_file = Path(args.import_file)
+        if not import_file.exists():
+            print(f"❌ File import tidak ditemukan: {import_file}")
+            sys.exit(1)
+    else:
+        import_file = generate_journal_import(file_path, config_path)
+        
+        if not import_file:
             sys.exit(1)
 
-    # 4. Filter selected items
-    selected_items = []
-    for idx, item in enumerate(sesuai_items, 1):
-        if idx not in excludes:
-            selected_items.append(item)
-
-    if not selected_items:
-        print("ℹ️ Tidak ada data yang dipilih.")
-        sys.exit(0)
-
-    # 5. Run Automation
-    run_automation(selected_items)
+    # 3. Run Browser Automation
+    run_import_automation(import_file, file_path, config_path)
 
 
 if __name__ == "__main__":

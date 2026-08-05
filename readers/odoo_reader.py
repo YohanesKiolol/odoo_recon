@@ -59,6 +59,7 @@ def read_odoo(
     amount_col: str,
     group_map: dict[str, str],      # {odo_group_name: bank_key}
     number_col: str = "",           # e.g. 'Number'
+    include_others: bool = False,   # Capture unknown groups into "other"
 ) -> tuple[date, dict[str, list[dict]]]:
     """
     Read ODO Payments Excel.
@@ -120,7 +121,10 @@ def read_odoo(
 
     # ── Parse rows ────────────────────────────────────────────────────────────
     bank_txns: dict[str, list[dict]] = {v: [] for v in group_map.values()}
+    if include_others:
+        bank_txns["other"] = []
     current_bank_key: str | None = None
+    current_group_name: str = ""
 
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not any(c is not None for c in row):
@@ -145,12 +149,18 @@ def read_odoo(
 
             if matched:
                 current_bank_key = group_map[matched]
+                current_group_name = val
                 print(f"  [ODO] Group → {current_bank_key}: '{val}'")
             else:
-                # Unknown group (PayPal, Petty Cash, etc.) — stop collecting
-                if current_bank_key is not None:
-                    print(f"  [ODO] Unknown group '{val}' — stopping {current_bank_key} collection")
-                current_bank_key = None
+                # Unknown group (PayPal, Petty Cash, etc.)
+                if include_others:
+                    current_bank_key = "other"
+                    current_group_name = val
+                    print(f"  [ODO] Group → {current_bank_key}: '{val}'")
+                else:
+                    if current_bank_key is not None:
+                        print(f"  [ODO] Unknown group '{val}' — stopping {current_bank_key} collection")
+                    current_bank_key = None
             continue  # group header row itself is never a data row
 
         # ── Data row (col A is a date) ─────────────────────────────────────────
@@ -176,7 +186,7 @@ def read_odoo(
         bank_txns[current_bank_key].append({
             "amount":      amount,
             "amount_raw":  raw_amount,
-            "description": desc,
+            "description": desc if current_bank_key != "other" else f"{current_group_name}",
             "number":      number,
             "date":        str(txn_date).split()[0],   # "2026-07-20" (drop time part)
             "source":      "Odoo",

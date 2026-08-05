@@ -22,6 +22,7 @@ dist/
 
 # Input/output data — personal bank files and reports
 input/
+mutation/
 output/
 recap/
 *.log

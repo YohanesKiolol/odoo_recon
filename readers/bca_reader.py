@@ -133,6 +133,10 @@ def _read_one_bca(
         raw_date = row[date_idx] if date_idx < len(row) else None
         txn_date = _parse_bca_date(raw_date)
 
+        if txn_date is None:
+            skipped_empty += 1
+            continue
+
         # Date filter: skip rows whose date is not in the allowed set
         if filter_dates is not None and txn_date not in filter_dates:
             continue
@@ -143,6 +147,12 @@ def _read_one_bca(
             print(f"  [WARN] BCA row {row_num}: {e} — skipped")
             skipped_empty += 1
             continue
+
+        from datetime import date as dt_date, timedelta
+        if isinstance(txn_date, dt_date):
+            payment_date = txn_date + timedelta(days=1)
+        else:
+            payment_date = ""
 
         desc = ""
         for desc_col_name in ("Transaction Remark", "Keterangan", "Description", "Remark"):
@@ -160,7 +170,8 @@ def _read_one_bca(
         txns.append({
             "amount":      amount,
             "amount_raw":  raw_amount,
-            "date":        str(txn_date) if txn_date else "",
+            "date":        str(txn_date) if txn_date else str(raw_date or ""),
+            "payment_date": str(payment_date) if payment_date else "",
             "description": desc,
             "number":      number,
             "filename":    excel_path.name,
