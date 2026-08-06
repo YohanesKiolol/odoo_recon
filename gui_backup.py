@@ -740,10 +740,154 @@ class App(tk.Tk):
             return
         latest_file = max(output_files, key=os.path.getctime)
         
+        try:
+            wb = load_workbook(latest_file, data_only=True)
+            if "Daily Summary" not in wb.sheetnames:
+                self._set_status("'Daily Summary' sheet not found", ERROR)
+                return
+            def get_col_map(sheet, row_idx=3):
+                return {str(sheet.cell(row=row_idx, column=c).value).strip().lower(): c for c in range(1, sheet.max_column + 1) if sheet.cell(row=row_idx, column=c).value}
+
+            if "Mutation Summary" in wb.sheetnames:
+                ws_mut = wb["Mutation Summary"]
+                col_map = get_col_map(ws_mut)
+                c_date = col_map.get("payment date", 3)
+                c_bank = col_map.get("bank", 4)
+                c_group = col_map.get("journal", 5)
+                c_cat = col_map.get("transaction category", 7)
+                c_amt = col_map.get("total amount", 8)
+                
+                # Dictionary to hold mutation sums: (tanggal_string, group_string) -> total_amount
+                from collections import defaultdict
+                self._mutation_totals = defaultdict(float)
+                self._mutation_raw = []
+                for row in range(4, ws_mut.max_row + 1):
+                    tanggal = ws_mut.cell(row=row, column=c_date).value
+                    bank = ws_mut.cell(row=row, column=c_bank).value
+                    group = ws_mut.cell(row=row, column=c_group).value
+                    cat = ws_mut.cell(row=row, column=c_cat).value
+                    amount = ws_mut.cell(row=row, column=c_amt).value
+                    if tanggal and group and amount:
+                        self._mutation_raw.append({"payment_date": tanggal, "bank": bank, "group": group, "category": cat, "amount": float(amount)})
+                        try:
+                            self._mutation_totals[(str(tanggal).strip(), str(group).strip())] += float(amount)
+                        except ValueError:
+                            pass
+            else:
+                self._mutation_totals = {}
+                
+            if "Admin Fee" in wb.sheetnames:
+                ws_adm = wb["Admin Fee"]
+                col_map = get_col_map(ws_adm)
+                c_date = col_map.get("payment date", 3)
+                c_bank = col_map.get("bank", 4)
+                c_group = col_map.get("journal", 5)
+                c_cat = col_map.get("transaction category", 7)
+                c_amt = col_map.get("total amount", 8)
+                
+                from collections import defaultdict
+                self._admin_totals = defaultdict(float)
+                self._admin_raw = []
+                for row in range(4, ws_adm.max_row + 1):
+                    tanggal = ws_adm.cell(row=row, column=c_date).value
+                    bank = ws_adm.cell(row=row, column=c_bank).value
+                    group = ws_adm.cell(row=row, column=c_group).value
+                    cat = ws_adm.cell(row=row, column=c_cat).value
+                    amount = ws_adm.cell(row=row, column=c_amt).value
+                    if tanggal and group and amount:
+                        self._admin_raw.append({"payment_date": tanggal, "bank": bank, "group": group, "category": cat, "amount": float(amount)})
+                        try:
+                            self._admin_totals[(str(tanggal).strip(), str(group).strip())] += float(amount)
+                        except ValueError:
+                            pass
+            else:
+                self._admin_totals = {}
+
+            ws = wb["Daily Summary"]
+            col_map = get_col_map(ws)
+            c_date = col_map.get("date", 2)
+            c_pdate = col_map.get("payment date", 3)
+            c_bank = col_map.get("bank", 4)
+            c_group = col_map.get("journal", 5)
+            c_tbank = col_map.get("total bank", 6)
+            c_todoo = col_map.get("total odoo", 7)
+            c_diff = col_map.get("difference", 8)
+            c_recon = col_map.get("reconciled", 9)
+            c_status = col_map.get("status", 10)
+            c_jstatus = col_map.get("journal status", 11)
+            
+            items = []
+            for row in range(4, ws.max_row + 1):
+                bank = ws.cell(row=row, column=c_bank).value
+                group = ws.cell(row=row, column=c_group).value
+                tanggal = ws.cell(row=row, column=c_date).value
+                payment_date = ws.cell(row=row, column=c_pdate).value
+                total_bank = ws.cell(row=row, column=c_tbank).value
+                total_odoo = ws.cell(row=row, column=c_todoo).value
+                selisih = ws.cell(row=row, column=c_diff).value
+                reconciled = ws.cell(row=row, column=c_recon).value
+                status = ws.cell(row=row, column=c_status).value
+                journal_status = ws.cell(row=row, column=c_jstatus).value
+                if not bank or not status: continue
+                
+                try:
+                    diff = abs(float(selisih)) if selisih is not None else 0
+                except:
+                    diff = 0
+                    
+                from config import JOURNAL_TOLERANCE
+                
+                status_str = str(status).strip()
+                status_valid = ("Match" in status_str) or (diff <= JOURNAL_TOLERANCE)
+                
+                # Use actual Payment Date for mutation check
+                from datetime import datetime, timedelta
+                mutation_found = False
+                mutation_matched = False
+                mut_total = 0.0
+                try:
+                    d_mut_str = str(payment_date).strip()
+                    
+                    mut_amount = self._mutation_totals.get((d_mut_str, str(group).strip()), 0.0)
+                    adm_amount = self._admin_totals.get((d_mut_str, str(group).strip()), 0.0)
+                    mut_total = mut_amount + adm_amount
+                    
+                    if mut_amount > 0:
+                        mutation_found = True
+                        mut_diff = abs(mut_total - float(total_bank)) if total_bank else 0
+                        if mut_diff <= JOURNAL_TOLERANCE:
+                            mutation_matched = True
+                except Exception as e:
+                    pass
+
+                items.append({
+                    "row": row,
+                    "bank": bank,
+                    "group": group,
+                    "tanggal": tanggal,
+                    "payment_date": payment_date,
+                    "merchant_amount": total_bank,
+                    "odoo_amount": total_odoo,
+                    "amount": total_bank,
+                    "selisih": selisih,
+                    "mutation_found": mutation_found,
+                    "mutation_matched": mutation_matched,
+                    "mutation_amount": mut_total,
+                    "reconciled": reconciled,
+                    "journal_status": journal_status,
+                    "status_valid": status_valid
+                })
+            if not items:
+                self._set_status(f"No data with difference <= {JOURNAL_TOLERANCE}", ERROR)
+                return
+        except Exception as e:
+            self._set_status(f"Error reading excel: {e}", ERROR)
+            return
+            
         top = tk.Toplevel(self)
         top.title("Confirm Journal Creation")
         
-        window_width = 1220
+        window_width = 1200
         window_height = 850
         screen_width = top.winfo_screenwidth()
         screen_height = top.winfo_screenheight()
@@ -753,209 +897,52 @@ class App(tk.Tk):
         top.configure(bg=BG)
         top.transient(self)
         top.grab_set()
-
-        items = []
-        journal_state = []
         
-        def _load_data():
-            nonlocal items, journal_state
-            import glob
-            import os
-            output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
-            if not output_files: return
-            latest_file = max(output_files, key=os.path.getctime)
-            try:
-                wb = load_workbook(latest_file, data_only=True)
-                if "Daily Summary" not in wb.sheetnames:
-                    self._set_status("'Daily Summary' sheet not found", ERROR)
-                    return
-                def get_col_map(sheet, row_idx=3):
-                    return {str(sheet.cell(row=row_idx, column=c).value).strip().lower(): c for c in range(1, sheet.max_column + 1) if sheet.cell(row=row_idx, column=c).value}
-
-                if "Mutation Summary" in wb.sheetnames:
-                    ws_mut = wb["Mutation Summary"]
-                    col_map = get_col_map(ws_mut)
-                    c_date = col_map.get("payment date", 3)
-                    c_bank = col_map.get("bank", 4)
-                    c_group = col_map.get("journal", 5)
-                    c_cat = col_map.get("transaction category", 7)
-                    c_amt = col_map.get("total amount", 8)
-                
-                    # Dictionary to hold mutation sums: (tanggal_string, group_string) -> total_amount
-                    from collections import defaultdict
-                    self._mutation_totals = defaultdict(float)
-                    self._mutation_raw = []
-                    for row in range(4, ws_mut.max_row + 1):
-                        tanggal = ws_mut.cell(row=row, column=c_date).value
-                        bank = ws_mut.cell(row=row, column=c_bank).value
-                        group = ws_mut.cell(row=row, column=c_group).value
-                        cat = ws_mut.cell(row=row, column=c_cat).value
-                        amount = ws_mut.cell(row=row, column=c_amt).value
-                        if tanggal and group and amount:
-                            self._mutation_raw.append({"payment_date": tanggal, "bank": bank, "group": group, "category": cat, "amount": float(amount)})
-                            try:
-                                self._mutation_totals[(str(tanggal).strip(), str(group).strip())] += float(amount)
-                            except ValueError:
-                                pass
-                else:
-                    self._mutation_totals = {}
-                
-                if "Admin Fee" in wb.sheetnames:
-                    ws_adm = wb["Admin Fee"]
-                    col_map = get_col_map(ws_adm)
-                    c_date = col_map.get("payment date", 3)
-                    c_bank = col_map.get("bank", 4)
-                    c_group = col_map.get("journal", 5)
-                    c_cat = col_map.get("transaction category", 7)
-                    c_amt = col_map.get("total amount", 8)
-                
-                    from collections import defaultdict
-                    self._admin_totals = defaultdict(float)
-                    self._admin_raw = []
-                    for row in range(4, ws_adm.max_row + 1):
-                        tanggal = ws_adm.cell(row=row, column=c_date).value
-                        bank = ws_adm.cell(row=row, column=c_bank).value
-                        group = ws_adm.cell(row=row, column=c_group).value
-                        cat = ws_adm.cell(row=row, column=c_cat).value
-                        amount = ws_adm.cell(row=row, column=c_amt).value
-                        if tanggal and group and amount:
-                            self._admin_raw.append({"payment_date": tanggal, "bank": bank, "group": group, "category": cat, "amount": float(amount)})
-                            try:
-                                self._admin_totals[(str(tanggal).strip(), str(group).strip())] += float(amount)
-                            except ValueError:
-                                pass
-                else:
-                    self._admin_totals = {}
-
-                ws = wb["Daily Summary"]
-                col_map = get_col_map(ws)
-                c_date = col_map.get("date", 2)
-                c_pdate = col_map.get("payment date", 3)
-                c_bank = col_map.get("bank", 4)
-                c_group = col_map.get("journal", 5)
-                c_tbank = col_map.get("total bank", 6)
-                c_todoo = col_map.get("total odoo", 7)
-                c_diff = col_map.get("difference", 8)
-                c_recon = col_map.get("reconciled", 9)
-                c_status = col_map.get("status", 10)
-                c_jstatus = col_map.get("journal information", 11)
+        # State Initialization
+        journal_state = []
+        for item in items:
+            is_reconciled = str(item.get("reconciled", "")).strip().lower() == "yes"
+            status_valid = item.get("status_valid", True)
             
-                items.clear()
-                for row in range(4, ws.max_row + 1):
-                    bank = ws.cell(row=row, column=c_bank).value
-                    group = ws.cell(row=row, column=c_group).value
-                    tanggal = ws.cell(row=row, column=c_date).value
-                    payment_date = ws.cell(row=row, column=c_pdate).value
-                    total_bank = ws.cell(row=row, column=c_tbank).value
-                    total_odoo = ws.cell(row=row, column=c_todoo).value
-                    selisih = ws.cell(row=row, column=c_diff).value
-                    reconciled = ws.cell(row=row, column=c_recon).value
-                    status = ws.cell(row=row, column=c_status).value
-                    journal_status = ws.cell(row=row, column=c_jstatus).value
-                    if not bank or not status: continue
-                
-                    try:
-                        diff = abs(float(selisih)) if selisih is not None else 0
-                    except:
-                        diff = 0
-                    
-                    from config import JOURNAL_TOLERANCE
-                
-                    status_str = str(status).strip()
-                    status_valid = ("Match" in status_str) or (diff <= JOURNAL_TOLERANCE)
-                
-                    # Use actual Payment Date for mutation check
-                    from datetime import datetime, timedelta
-                    mutation_found = False
-                    mutation_matched = False
-                    mut_total = 0.0
-                    try:
-                        d_mut_str = str(payment_date).strip()
-                    
-                        mut_amount = self._mutation_totals.get((d_mut_str, str(group).strip()), 0.0)
-                        adm_amount = self._admin_totals.get((d_mut_str, str(group).strip()), 0.0)
-                        mut_total = mut_amount + adm_amount
-                    
-                        if mut_amount > 0:
-                            mutation_found = True
-                            mut_diff = abs(mut_total - float(total_bank)) if total_bank else 0
-                            if mut_diff <= JOURNAL_TOLERANCE:
-                                mutation_matched = True
-                    except Exception as e:
-                        pass
-
-                    items.append({
-                        "row": row,
-                        "bank": bank,
-                        "group": group,
-                        "tanggal": tanggal,
-                        "payment_date": payment_date,
-                        "merchant_amount": total_bank,
-                        "odoo_amount": total_odoo,
-                        "amount": total_bank,
-                        "selisih": selisih,
-                        "mutation_found": mutation_found,
-                        "mutation_matched": mutation_matched,
-                        "mutation_amount": mut_total,
-                        "reconciled": reconciled,
-                        "journal_status": journal_status,
-                        "status_valid": status_valid
-                    })
-                if not items:
-                    self._set_status(f"No data with difference <= {JOURNAL_TOLERANCE}", ERROR)
-                    return
-            except Exception as e:
-                self._set_status(f"Error reading excel: {e}", ERROR)
-                return
-            # State Initialization
-            journal_state.clear()
-            for item in items:
-                is_reconciled = str(item.get("reconciled", "")).strip().lower() == "yes"
-                status_valid = item.get("status_valid", True)
+            disabled_edc = False
+            disabled_ar = False
             
-                disabled_edc = False
-                disabled_ar = False
+            if not is_reconciled or not status_valid:
+                disabled_edc = True
+                disabled_ar = True
             
-                if not is_reconciled or not status_valid:
-                    disabled_edc = True
-                    disabled_ar = True
-            
-                if not item.get("mutation_matched", False):
-                    disabled_ar = True
+            if not item.get("mutation_matched", False):
+                disabled_ar = True
                 
-                j_status = item.get("journal_status")
-                if j_status:
-                    j_status_str = str(j_status).strip()
-                    if j_status_str not in ["", "None", "Not Yet"]:
-                        parts = [p.strip() for p in j_status_str.split("|")]
-                        for p in parts:
-                            if "(Both" in p:
-                                if "Posted" in p:
-                                    disabled_edc = True
-                                    disabled_ar = True
-                            elif "(EDC" in p:
-                                if "Posted" in p:
-                                    disabled_edc = True
-                            elif "(AR" in p:
-                                if "Posted" in p:
-                                    disabled_ar = True
+            j_status = item.get("journal_status")
+            if j_status:
+                j_status_str = str(j_status).strip()
+                if j_status_str not in ["", "None", "Not Yet", "⏳ Not Yet"]:
+                    parts = [p.strip() for p in j_status_str.split("|")]
+                    for p in parts:
+                        if "(Both" in p or p == "✅ Both":
+                            if "✅ Posted" in p or "✅ Both" in p:
+                                disabled_edc = True
+                                disabled_ar = True
+                        elif "(EDC" in p or p == "✅ EDC":
+                            if "✅ Posted" in p or "✅ EDC" in p:
+                                disabled_edc = True
+                        elif "(AR" in p or p == "✅ AR":
+                            if "✅ Posted" in p or "✅ AR" in p:
+                                disabled_ar = True
 
-                var_item = tk.BooleanVar(value=not (disabled_edc and disabled_ar))
-                var_edc = tk.BooleanVar(value=not disabled_edc)
-                var_ar = tk.BooleanVar(value=not disabled_ar)
+            var_item = tk.BooleanVar(value=not (disabled_edc and disabled_ar))
+            var_edc = tk.BooleanVar(value=not disabled_edc)
+            var_ar = tk.BooleanVar(value=not disabled_ar)
 
-                journal_state.append({
-                    "item": item,
-                    "var_item": var_item,
-                    "var_edc": var_edc,
-                    "var_ar": var_ar,
-                    "disabled_edc": disabled_edc,
-                    "disabled_ar": disabled_ar
-                })
-
-        # Initial load
-        _load_data()
-
+            journal_state.append({
+                "item": item,
+                "var_item": var_item,
+                "var_edc": var_edc,
+                "var_ar": var_ar,
+                "disabled_edc": disabled_edc,
+                "disabled_ar": disabled_ar
+            })
             
         ITEMS_PER_PAGE = 15
         current_page = [0]
@@ -970,8 +957,8 @@ class App(tk.Tk):
         tk.Label(left_header, text="Review and select transactions to post. Expand a row to preview journal entries.", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
         
         def _refresh_modal():
-            _load_data()
-            render_page(current_page[0])
+            top.destroy()
+            self.after(50, self._on_journal)
             
         tk.Button(header_frame, text="↻ Refresh", bg=WHITE, fg=TEXT, relief="solid", borderwidth=1, highlightbackground=BORDER, font=("Segoe UI", 9, "bold"), cursor="hand2", command=_refresh_modal, padx=12, pady=4).pack(side="right")
         
@@ -1229,32 +1216,32 @@ class App(tk.Tk):
                 j_status = item.get("journal_status")
                 if j_status:
                     j_status_str = str(j_status).strip()
-                    if j_status_str not in ["", "None", "Not Yet"]:
+                    if j_status_str not in ["", "None", "Not Yet", "⏳ Not Yet"]:
                         parts = [p.strip() for p in j_status_str.split("|")]
                         for p in parts:
-                            if "(Both" in p:
-                                stripped = p.replace("(Both Difference)", "(Diff)").replace("(Both)", "").replace("Posted", "✅ Posted").replace("Draft", "📌 Draft").strip()
+                            if "(Both" in p or p == "✅ Both":
+                                stripped = p.replace("(Both Difference)", "(Diff)").replace("(Both)", "").replace("✅ Both", "✅ Imported").strip()
                                 if not edc_info_texts:
                                     edc_info_texts.append(stripped)
                                 if not ar_info_texts:
                                     ar_info_texts.append(stripped)
-                            elif "(EDC" in p:
-                                stripped = p.replace("(EDC Difference)", "(Diff)").replace("(EDC)", "").replace("Posted", "✅ Posted").replace("Draft", "📌 Draft").strip()
+                            elif "(EDC" in p or p == "✅ EDC":
+                                stripped = p.replace("(EDC Difference)", "(Diff)").replace("(EDC)", "").replace("✅ EDC", "✅ Imported").strip()
                                 if not edc_info_texts:
                                     edc_info_texts.append(stripped)
-                            elif "(AR" in p:
-                                stripped = p.replace("(AR Difference)", "(Diff)").replace("(AR)", "").replace("Posted", "✅ Posted").replace("Draft", "📌 Draft").strip()
+                            elif "(AR" in p or p == "✅ AR":
+                                stripped = p.replace("(AR Difference)", "(Diff)").replace("(AR)", "").replace("✅ AR", "✅ Imported").strip()
                                 if not ar_info_texts:
                                     ar_info_texts.append(stripped)
                     
                 if edc_info_texts:
-                    lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in edc_info_texts) else WARN
+                    lbl_color = WARN if any("⚠️" in t for t in edc_info_texts) else SUCCESS
                     tk.Label(scrollable_frame, text="\n".join(edc_info_texts), bg=PANEL, fg=lbl_color, font=("Segoe UI", 8)).grid(row=r_main, column=9, sticky="w", padx=10)
                     
                 cb_ar.grid(row=r_main, column=10, padx=15)
                 
                 if ar_info_texts:
-                    lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in ar_info_texts) else WARN
+                    lbl_color = WARN if any("⚠️" in t for t in ar_info_texts) else SUCCESS
                     tk.Label(scrollable_frame, text="\n".join(ar_info_texts), bg=PANEL, fg=lbl_color, font=("Segoe UI", 8)).grid(row=r_main, column=11, sticky="w", padx=10)
                 
             total_pages = max(1, (len(journal_state) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)

@@ -131,7 +131,9 @@ def _fmt_amount_str(val) -> str:
 
 def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     ws.title = bank_name[:31]
-    ncols = 9
+    
+    COL_HEADERS = ["No", "Date", "Payment Date", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status"]
+    ncols = len(COL_HEADERS)
 
     done_count  = sum(1 for r in rows if r["status"] == STATUS_DONE)
     bank_count  = sum(1 for r in rows if r["status"] == STATUS_BANK_ONLY)
@@ -149,7 +151,6 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     ], ncols, row=2)
 
     # ── Column headers (row 3) ───────────────────────────────────────
-    COL_HEADERS = ["No", "Date", "Payment Date", "Odoo Number", "Bank Number", "Filename", "Amount", "Source", "Status"]
     for col, h in enumerate(COL_HEADERS, 1):
         _hdr(ws.cell(row=3, column=col), h)
     ws.row_dimensions[3].height = 28
@@ -163,20 +164,22 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
         _cell(ws.cell(rn, 2), _fmt_date(r.get("date", "")),         st, "center")
         _cell(ws.cell(rn, 3), _fmt_date(r.get("payment_date", "")), st, "center")
         _cell(ws.cell(rn, 4), r.get("number_odo",  ""),         st)
-        _cell(ws.cell(rn, 5), r.get("number_bank", ""),         st)
-        _cell(ws.cell(rn, 6), r.get("filename_bank", ""),       st)
+        _cell(ws.cell(rn, 5), r.get("invoice_no",  ""),         st)
+        _cell(ws.cell(rn, 6), r.get("number_bank", ""),         st)
+        _cell(ws.cell(rn, 7), r.get("filename_bank", ""),       st)
         
-        c_amt = ws.cell(rn, 7)
+        c_amt = ws.cell(rn, 8)
         _cell(c_amt, float(r["amount"]), st, "right")
         c_amt.number_format = '#,##0.00'
         
-        _cell(ws.cell(rn, 8), r.get("source", ""),              st, "center")
-        sc = ws.cell(rn, 9)
+        _cell(ws.cell(rn, 9), r.get("source", ""),              st, "center")
+        _cell(ws.cell(rn, 10), r.get("is_reconciled", ""),      st, "center")
+        sc = ws.cell(rn, 11)
         _cell(sc, st, st, "center")
         sc.font = Font(bold=True, size=10)
         ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 15, 20, 20, 40, 20, 15, 15], start=1):
+    for col, width in enumerate([6, 15, 15, 18, 20, 20, 30, 20, 15, 15, 15], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{len(rows) + 3}"
@@ -185,7 +188,8 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
 
 def _write_other_sheet(ws, rows: list[dict], odo_date=None):
     ws.title = "Other Payment"
-    ncols = 6
+    COL_HEADERS = ["No", "Date", "Journal", "Odoo Number", "Reference", "Amount", "Source", "Reconciled"]
+    ncols = len(COL_HEADERS)
     
     date_str    = odo_date.strftime("%d %B %Y") if odo_date else "-"
     total_amount = sum(float(r.get("amount", 0)) for r in rows)
@@ -199,7 +203,6 @@ def _write_other_sheet(ws, rows: list[dict], odo_date=None):
     ], ncols, row=2)
 
     # ── Column headers (row 3) ───────────────────────────────────────
-    COL_HEADERS = ["No", "Date", "Journal", "Odoo Number", "Amount", "Source"]
     for col, h in enumerate(COL_HEADERS, 1):
         _hdr(ws.cell(row=3, column=col), h)
     ws.row_dimensions[3].height = 28
@@ -213,15 +216,17 @@ def _write_other_sheet(ws, rows: list[dict], odo_date=None):
         _cell(ws.cell(rn, 2), _fmt_date(r.get("date", "")),     st, "center")
         _cell(ws.cell(rn, 3), r.get("description", ""),         st, "center")
         _cell(ws.cell(rn, 4), r.get("number_odo",  ""),         st)
+        _cell(ws.cell(rn, 5), r.get("invoice_no",  ""),         st)
         
-        c_amt = ws.cell(rn, 5)
+        c_amt = ws.cell(rn, 6)
         _cell(c_amt, float(r["amount"]), st, "right")
         c_amt.number_format = '#,##0.00'
         
-        _cell(ws.cell(rn, 6), r.get("source", ""),              st, "center")
+        _cell(ws.cell(rn, 7), r.get("source", ""),              st, "center")
+        _cell(ws.cell(rn, 8), r.get("is_reconciled", ""),       st, "center")
         ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 20, 20, 20, 15], start=1):
+    for col, width in enumerate([6, 15, 20, 20, 20, 20, 15, 15], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{len(rows) + 3}"
@@ -230,7 +235,9 @@ def _write_other_sheet(ws, rows: list[dict], odo_date=None):
 
 def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=None):
     ws.title = "Differences"
-    ncols = 10
+    COL_HEADERS = ["No", "Date", "Bank", "Journal", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status"]
+    ncols = len(COL_HEADERS)
+    
     date_str   = odo_date.strftime("%d %B %Y") if odo_date else "-"
     
     rows_data = [
@@ -249,7 +256,6 @@ def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=No
     ], ncols, row=2)
 
     # ── Column headers (row 3) ─────────────────────────────────────
-    COL_HEADERS = ["No", "Date", "Bank", "Journal", "Odoo Number", "Bank Number", "Filename", "Amount", "Source", "Status"]
     for col, h in enumerate(COL_HEADERS, 1):
         _hdr(ws.cell(3, col), h)
     ws.row_dimensions[3].height = 28
@@ -273,20 +279,22 @@ def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=No
             _cell(ws.cell(rn, 3), bank_label,                     st, "center")
             _cell(ws.cell(rn, 4), acc_name,                       st, "center")
             _cell(ws.cell(rn, 5), r.get("number_odo",  ""),       st)
-            _cell(ws.cell(rn, 6), r.get("number_bank", ""),       st)
-            _cell(ws.cell(rn, 7), r.get("filename_bank", ""),     st)
+            _cell(ws.cell(rn, 6), r.get("invoice_no",  ""),       st)
+            _cell(ws.cell(rn, 7), r.get("number_bank", ""),       st)
+            _cell(ws.cell(rn, 8), r.get("filename_bank", ""),     st)
             
-            c_amt = ws.cell(rn, 8)
+            c_amt = ws.cell(rn, 9)
             _cell(c_amt, float(r["amount"]), st, "right")
             c_amt.number_format = '#,##0.00'
             
-            _cell(ws.cell(rn, 9), r.get("source", ""),            st, "center")
-            sc = ws.cell(rn, 10)
+            _cell(ws.cell(rn, 10), r.get("source", ""),            st, "center")
+            _cell(ws.cell(rn, 11), r.get("is_reconciled", ""),     st, "center")
+            sc = ws.cell(rn, 12)
             _cell(sc, st, st, "center")
             sc.font = Font(bold=True, size=10)
             ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 10, 18, 20, 20, 40, 20, 15, 15], start=1):
+    for col, width in enumerate([6, 15, 10, 18, 20, 20, 20, 40, 20, 15, 15, 15], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{total_disc + 3}"
     ws.freeze_panes = "A4"
@@ -327,13 +335,13 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
     from decimal import Decimal
 
     ws.title = "Daily Summary"
-    ncols = 10
+    COL_HEADERS = ["No", "Date", "Payment Date", "Bank", "Journal", "Total Bank", "Total Odoo", "Difference", "Reconciled", "Status", "Journal Information"]
+    ncols = len(COL_HEADERS)
     date_str = odo_date.strftime("%d %B %Y") if odo_date else "-"
 
     _merge_title(ws, "DAILY SUMMARY — BANK vs ODO", ncols, row=1)
     _write_info_row(ws, [("Date", date_str)], ncols, row=2)
 
-    COL_HEADERS = ["No", "Date", "Payment Date", "Bank", "Journal", "Total Bank", "Total Odoo", "Difference", "Status", "Journal Status"]
     for col, h in enumerate(COL_HEADERS, 1):
         _hdr(ws.cell(3, col), h)
     ws.row_dimensions[3].height = 28
@@ -341,7 +349,8 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
     bank_sums: dict = defaultdict(lambda: defaultdict(Decimal))
     odo_sums:  dict = defaultdict(lambda: defaultdict(Decimal))
     payment_dates = {}
-
+    reconciled_status = {}
+    
     all_banks = sorted([k for k in all_results.keys() if k != "other"])
 
     for bank in all_banks:
@@ -350,6 +359,14 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
             pd  = r.get("payment_date", "")
             if pd:
                 payment_dates[(bank, d)] = pd
+                
+            recon = r.get("is_reconciled", "")
+            if recon in ("Yes", "No"):
+                prev = reconciled_status.get((bank, d))
+                if prev is None:
+                    reconciled_status[(bank, d)] = recon
+                elif prev != recon and prev != "Mixed":
+                    reconciled_status[(bank, d)] = "Mixed"
             amt = r.get("amount", Decimal(0))
             st  = r.get("status", "")
             if st == STATUS_DONE:
@@ -361,22 +378,20 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
                 odo_sums[bank][d]  += amt
 
     rows = []
-    for acc_key in all_banks:
-        bank_label, acc_name = _get_account_info(acc_key)
-        all_dates = sorted(
-            set(list(bank_sums[acc_key].keys()) + list(odo_sums[acc_key].keys()))
-        )
-        for d in all_dates:
-            b_sum = bank_sums[acc_key].get(d, Decimal(0))
-            o_sum = odo_sums[acc_key].get(d, Decimal(0))
-            pd = payment_dates.get((acc_key, d), "")
-            rows.append((bank_label, acc_name, d, pd, b_sum, o_sum))
+    for bank in all_banks:
+        for d in sorted(set(list(bank_sums[bank].keys()) + list(odo_sums[bank].keys()))):
+            b_sum = bank_sums[bank][d]
+            o_sum = odo_sums[bank][d]
+            pd    = payment_dates.get((bank, d), "")
+            recon = reconciled_status.get((bank, d), "-")
+            bank_clean, acc_name = _get_account_info(bank)
+            rows.append((bank_clean, acc_name, d, pd, b_sum, o_sum, recon))
 
     COLOR_MATCH   = "E2EFDA"
-    COLOR_DIFF    = "FCE4D6"
+    COLOR_DIFF    = "F8CBAD"
     COLOR_MISSING = "FFF2CC"
 
-    for idx, (bank, acc_name, d, pd, b_sum, o_sum) in enumerate(rows, 1):
+    for idx, (bank, acc_name, d, pd, b_sum, o_sum, recon) in enumerate(rows, 1):
         rn  = idx + 3
         sel = b_sum - o_sum
 
@@ -385,10 +400,10 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
             label = "Incomplete Data"
         elif sel == 0:
             bg = COLOR_MATCH
-            label = "✅ Match"
+            label = "Match"
         else:
             bg = COLOR_DIFF
-            label = "⚠️ Difference"
+            label = "Difference"
 
         def _sc(cell, val, align="left", _bg=bg):
             cell.value = val
@@ -419,20 +434,80 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
         _num(ws.cell(rn, 6), b_sum)
         _num(ws.cell(rn, 7), o_sum)
         _num(ws.cell(rn, 8), sel, _bg=COLOR_DIFF if sel != 0 else bg)
-        lc = ws.cell(rn, 9)
+        rc = ws.cell(rn, 9)
+        _sc(rc, recon, "center")
+        rc.font = Font(size=10, bold=True)
+        lc = ws.cell(rn, 10)
         _sc(lc, label, "center")
         lc.font = Font(size=10, bold=True)
         
-        jc = ws.cell(rn, 10)
-        _sc(jc, "⏳ Not Yet", "center")
+        # Journal status defaults to "Not Yet" until checked by journal_checker.py
+        j_stat_label = "Not Yet"
+            
+        jc = ws.cell(rn, 11)
+        _sc(jc, j_stat_label, "center")
         jc.font = Font(size=10, bold=True)
         ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 15, 10, 18, 20, 20, 20, 15, 15], start=1):
+    for col, width in enumerate([6, 15, 15, 18, 30, 20, 20, 20, 15, 20, 15], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{len(rows) + 3}"
     ws.freeze_panes = "A4"
+
+
+def _auto_adjust_headers(wb):
+    for ws in wb.worksheets:
+        ncols = ws.max_column
+        if ncols <= 1:
+            continue
+            
+        for m in list(ws.merged_cells.ranges):
+            if m.min_row in (1, 2) and m.max_row in (1, 2):
+                ws.unmerge_cells(str(m))
+                
+        title_cell = ws.cell(row=1, column=1)
+        if title_cell.value:
+            ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=ncols)
+            bg = title_cell.fill.fgColor
+            if bg and getattr(bg, "rgb", None):
+                for c in range(1, ncols + 1):
+                    ws.cell(row=1, column=c).fill = PatternFill("solid", fgColor=bg.rgb)
+                    
+        info_cell = ws.cell(row=2, column=1)
+        if info_cell.value:
+            ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=ncols)
+            bg = info_cell.fill.fgColor
+            if bg and getattr(bg, "rgb", None):
+                border = Border(bottom=Side(style="medium", color="4F81BD"))
+                for c in range(1, ncols + 1):
+                    cell = ws.cell(row=2, column=c)
+                    cell.fill = PatternFill("solid", fgColor=bg.rgb)
+                    cell.border = border
+                    
+        if ws.auto_filter.ref:
+            max_row = ws.max_row
+            ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{max_row}"
+
+def _auto_adjust_col_widths(wb):
+    for ws in wb.worksheets:
+        for col_idx in range(1, ws.max_column + 1):
+            max_length = 0
+            for row_idx in range(1, ws.max_row + 1):
+                # Skip first two rows since they often contain merged title cells which can distort the width
+                if row_idx <= 2:
+                    continue
+                cell = ws.cell(row=row_idx, column=col_idx)
+                if cell.value is not None:
+                    try:
+                        max_length = max(max_length, len(str(cell.value)))
+                    except:
+                        pass
+            
+            adjusted_width = min(max_length + 2, 60)
+            if adjusted_width < 10:
+                adjusted_width = 10
+            ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
 
 
 def write_report(
@@ -445,10 +520,55 @@ def write_report(
     unknown_mutations: list[dict] = None,
     excluded_txns: list[dict] = None,
 ) -> Path:
-    date_str = odo_date.strftime("%d%m%Y") if odo_date else "unknown"
     company_str = ODOO_COMPANY_NAME.replace(" ", "_") if ODOO_COMPANY_NAME else "Company"
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    out_path = output_dir / f"Reconciliation_{company_str}_{date_str}_{timestamp}.xlsx"
+    
+    banks = set()
+    for acc_key in all_results.keys():
+        if acc_key != "other":
+            bank, _ = _get_account_info(acc_key)
+            banks.add(bank)
+    banks_str = "_".join(sorted(banks)) if banks else "Banks"
+    
+    all_dates = []
+    for rows in all_results.values():
+        for r in rows:
+            for date_field in ["date", "payment_date"]:
+                d_val = r.get(date_field)
+                if not d_val: continue
+                if isinstance(d_val, (date, datetime)):
+                    all_dates.append(d_val)
+                else:
+                    s = str(d_val).strip()
+                    if len(s) >= 10 and s[4] == '-' and s[7] == '-':
+                        try:
+                            all_dates.append(datetime.strptime(s[:10], "%Y-%m-%d").date())
+                        except:
+                            pass
+                    elif len(s) >= 10 and s[2] == '/' and s[5] == '/':
+                        try:
+                            all_dates.append(datetime.strptime(s[:10], "%d/%m/%Y").date())
+                        except:
+                            pass
+                            
+    if all_dates:
+        min_date = min(all_dates).strftime("%d%m%Y")
+        max_date = max(all_dates).strftime("%d%m%Y")
+        date_range_str = f"{min_date}_to_{max_date}"
+    else:
+        date_range_str = "unknown"
+
+    odo_date_str = odo_date.strftime("%d%m%Y") if odo_date else "unknown"
+    prefix = f"Reconciliation_{company_str}_{odo_date_str}__"
+    
+    if output_dir.exists():
+        for existing_file in output_dir.iterdir():
+            if existing_file.is_file() and existing_file.name.startswith(prefix) and existing_file.name.endswith(".xlsx"):
+                try:
+                    existing_file.unlink()
+                except Exception:
+                    pass
+
+    out_path = output_dir / f"{prefix}{banks_str}__{date_range_str}.xlsx"
 
     wb = openpyxl.Workbook()
     
@@ -462,13 +582,14 @@ def write_report(
     _write_discrepancy_sheet(ws_disc, all_results, odo_date=odo_date)
     
     # 3. Mutation Summary
-    if mutations is not None:
+    if mutations:
         ws_mut = wb.create_sheet(title="Mutation Summary")
         _write_mutation_summary(ws_mut, all_results, mutations, odo_date=odo_date)
         
     # 4. Admin Fee
-    ws_admin_fee = wb.create_sheet(title="Admin Fee")
-    _write_admin_fee_sheet(ws_admin_fee, all_results, mutations, odo_date=odo_date)
+    if mutations:
+        ws_admin_fee = wb.create_sheet(title="Admin Fee")
+        _write_admin_fee_sheet(ws_admin_fee, all_results, mutations, odo_date=odo_date)
 
     # 5. Excluded Payment
     if excluded_txns is not None and excluded_txns:
@@ -490,13 +611,15 @@ def write_report(
         _write_other_sheet(ws_other, other_rows, odo_date=odo_date)
         
     # 8. Other Mutation
-    if unknown_mutations is not None:
+    if unknown_mutations:
         ws_unmapped = wb.create_sheet(title="Other Mutation")
         _write_unmapped_mutations(ws_unmapped, all_results, unknown_mutations, odo_date=odo_date)
         
     ws_legend = wb.create_sheet(title="Legend")
     _write_legend(ws_legend)
 
+    _auto_adjust_headers(wb)
+    _auto_adjust_col_widths(wb)
     wb.save(out_path)
     return out_path
 

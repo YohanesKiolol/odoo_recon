@@ -1,1 +1,1 @@
-[{"row": 6, "edc": true, "ar": true}]
+[{"row": 5, "edc": true, "ar": false}, {"row": 7, "edc": false, "ar": true}, {"row": 10, "edc": false, "ar": true}, {"row": 13, "edc": false, "ar": true}, {"row": 15, "edc": false, "ar": true}, {"row": 19, "edc": true, "ar": true}, {"row": 27, "edc": true, "ar": false}, {"row": 30, "edc": true, "ar": false}]

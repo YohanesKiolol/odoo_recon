@@ -6,6 +6,10 @@ Script never hardcodes any value; everything is user-configurable.
 import os
 import sys
 from pathlib import Path
+import warnings
+
+# Suppress openpyxl stylesheet warnings globally
+warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 def _load_dotenv(dotenv_path):
     try:
@@ -58,6 +62,8 @@ ODOO_COMPANY_NAME       = _optional("ODOO_COMPANY_NAME", "Eyerizz Eyewear")
 ODOO_JOURNAL_EDC        = _optional("ODOO_JOURNAL_EDC", "EDC Settlement Journal")
 ODOO_JOURNAL_AR         = _optional("ODOO_JOURNAL_AR", "MDR Fees Journal")
 JOURNAL_TOLERANCE       = float(_optional("JOURNAL_TOLERANCE", "200"))
+ODOO_JOURNAL_ENTRIES_URL = _optional("ODOO_JOURNAL_ENTRIES_URL")
+ODO_JOURNAL_EXCEL_PATH  = _base / _optional("ODO_JOURNAL_EXCEL_PATH", "input/Journal Entries (account.move).xlsx")
 
 JOURNAL_TEMPLATE_DIR    = _optional("JOURNAL_TEMPLATE_DIR", "")
 JOURNAL_EXCEL_PATTERN   = _optional("JOURNAL_EXCEL_PATTERN", "Journal Entry (account.move).xlsx")

@@ -45,13 +45,18 @@ def update_recon_file_status(recon_file: Path, config_path: Path):
             ws = wb["Daily Summary"]
             updated = 0
             
+            # Map column indices from row 3
+            col_map = {str(ws.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws.max_column + 1) if ws.cell(row=3, column=c).value}
+            c_status = col_map.get("status", 10)
+            c_jstatus = col_map.get("journal status", 11)
+            
             for item in selected_items:
                 row_idx = item.get("row")
                 if not row_idx:
                     continue
                 
-                created_edc = item.get("create_edc", False)
-                created_ar = item.get("create_ar", False)
+                created_edc = item.get("edc", False)
+                created_ar = item.get("ar", False)
                 
                 new_status = ""
                 if created_edc and created_ar:
@@ -63,7 +68,7 @@ def update_recon_file_status(recon_file: Path, config_path: Path):
                 else:
                     continue
                     
-                current_val = str(ws.cell(row=row_idx, column=10).value)
+                current_val = str(ws.cell(row=row_idx, column=c_jstatus).value)
                 
                 # Merge status
                 if "EDC" in current_val and created_ar:
@@ -73,12 +78,12 @@ def update_recon_file_status(recon_file: Path, config_path: Path):
                 elif "Both" in current_val:
                     new_status = "✅ Both"
                 
-                ws.cell(row=row_idx, column=10, value=new_status)
+                ws.cell(row=row_idx, column=c_jstatus, value=new_status)
                 
                 # Keep original checkmark logic
-                status9 = ws.cell(row=row_idx, column=9).value
+                status9 = ws.cell(row=row_idx, column=c_status).value
                 if status9 and "Match" in str(status9):
-                    ws.cell(row=row_idx, column=9, value="✅ Journal Created")
+                    ws.cell(row=row_idx, column=c_status, value="✅ Journal Created")
                     
                 updated += 1
                 
@@ -87,6 +92,80 @@ def update_recon_file_status(recon_file: Path, config_path: Path):
                 print(f"✅ Successfully updated {updated} rows in '{recon_file.name}' with Journal Status.")
     except Exception as e:
         print(f"⚠️ Failed to update status in reconciliation file: {e}")
+
+def log_journal_creation(recon_file: Path, config_path: Path):
+    """Append created journals to a master tracking log."""
+    from openpyxl import load_workbook, Workbook
+    import json
+    from datetime import datetime
+
+    log_file = OUTPUT_DIR / "journal_creation_log.xlsx"
+    
+    try:
+        if not config_path or not config_path.exists():
+            return
+
+        with open(config_path, "r") as f:
+            selected_items = json.load(f)
+            
+        wb_recon = load_workbook(recon_file, data_only=True)
+        ws_recon = wb_recon["Daily Summary"]
+        col_map = {str(ws_recon.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws_recon.max_column + 1) if ws_recon.cell(row=3, column=c).value}
+        
+        # Open or create log file
+        if log_file.exists():
+            wb_log = load_workbook(log_file)
+            ws_log = wb_log.active
+        else:
+            wb_log = Workbook()
+            ws_log = wb_log.active
+            ws_log.title = "Journal Log"
+            headers = ["Created At", "Original Recon File", "Bank", "Journal", "Transaction Date", "Merchant Amt", "Odoo Amt", "Created"]
+            ws_log.append(headers)
+            
+        added = 0
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        for item in selected_items:
+            row_idx = item.get("row")
+            if not row_idx:
+                continue
+                
+            created_edc = item.get("edc", False)
+            created_ar = item.get("ar", False)
+            
+            if not created_edc and not created_ar:
+                continue
+                
+            created_str = "Both" if (created_edc and created_ar) else ("EDC" if created_edc else "AR")
+            
+            bank = ws_recon.cell(row=row_idx, column=col_map.get("bank", 4)).value
+            journal = ws_recon.cell(row=row_idx, column=col_map.get("journal", 5)).value
+            date_val = ws_recon.cell(row=row_idx, column=col_map.get("date", 2)).value
+            merch_amt = ws_recon.cell(row=row_idx, column=col_map.get("total bank", 6)).value
+            odoo_amt = ws_recon.cell(row=row_idx, column=col_map.get("total odoo", 7)).value
+            
+            ws_log.append([
+                now_str,
+                recon_file.name,
+                str(bank) if bank else "",
+                str(journal) if journal else "",
+                str(date_val) if date_val else "",
+                merch_amt,
+                odoo_amt,
+                created_str
+            ])
+            added += 1
+            
+        if added > 0:
+            # Protect the sheet from manual edits in Excel GUI
+            ws_log.protection.sheet = True
+            ws_log.protection.password = "ODOO_AUTO_SYSTEM_LOCK"
+            wb_log.save(log_file)
+            print(f"📝 Appended {added} records to Journal Tracker Log ({log_file.name}).")
+            
+    except Exception as e:
+        print(f"⚠️ Failed to write to journal tracker log: {e}")
 
 def run_import_automation(import_file: Path, recon_file: Path, config_path: Path = None):
     """Launch Playwright, navigate to Odoo, and upload the import file."""
@@ -162,15 +241,15 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
             
             file_chooser = fc_info.value
             file_chooser.set_files(str(import_file.resolve()))
-            print("✅ File berhasil diunggah!")
+            print("✅ File uploaded successfully!")
         except Exception as e:
-            print(f"❌ Gagal mengunggah file. Pastikan tombol 'Upload File' terlihat.\nError: {e}")
-            input("\n[Tekan Enter untuk menutup browser]")
+            print(f"❌ Failed to upload file. Ensure 'Upload File' button is visible.\nError: {e}")
+            input("\n[Press Enter to close browser]")
             context.close()
             return
 
         # 4. Automate Test & Import
-        print("🔍 Melakukan Test Validasi...")
+        print("🔍 Running Validation Test...")
         xpath_test_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[2]"
         xpath_valid_msg = "xpath=/html/body/div[1]/div/div[2]/div[2]/div/p"
         xpath_import_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[1]"
@@ -188,29 +267,28 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
             
             msg_text = valid_locator.inner_text()
             if "Everything seems valid" in msg_text:
-                print("✅ Validasi sukses: 'Everything seems valid.'")
-                print("🚀 Melakukan Import...")
+                print("✅ Validation successful: 'Everything seems valid.'")
+                print("🚀 Executing Import...")
                 page.locator(xpath_import_btn).click()
                 
-                
-                # Wait for page to redirect to Journal Entries list (action=account.action_move_journal_line)
                 try:
                     page.wait_for_url("**/web#action=*", timeout=15000)
-                    print("✅ Berhasil dialihkan ke halaman Journal Entries.")
+                    print("✅ Successfully redirected to Journal Entries.")
                     # Update status in Excel since import is successful
                     update_recon_file_status(recon_file, config_path)
+                    log_journal_creation(recon_file, config_path)
                 except Exception as e:
-                    print(f"⚠️ Import mungkin sukses, tapi timeout saat menunggu dialihkan ke Journal Entries: {e}")
+                    print(f"⚠️ Import likely succeeded, but timeout occurred waiting for redirect: {e}")
                     
-                print("🎉 Proses import selesai!")
+                print("🎉 Import process finished!")
                 page.wait_for_timeout(2000)
             else:
-                print(f"⚠️ Validasi Odoo menampilkan pesan lain: {msg_text}")
-                print("Tolong periksa manual di browser.")
-                input("\n[Tekan Enter di terminal ini untuk menutup browser]")
+                print(f"⚠️ Odoo validation returned a different message: {msg_text}")
+                print("Please review manually in browser.")
+                input("\n[Press Enter in terminal to close browser]")
         except Exception as e:
-            print(f"❌ Terjadi kesalahan saat melakukan Test/Import.\nError: {e}")
-            input("\n[Tekan Enter di terminal ini untuk menutup browser]")
+            print(f"❌ Error during Test/Import.\nError: {e}")
+            input("\n[Press Enter in terminal to close browser]")
             
         context.close()
 
@@ -226,14 +304,14 @@ def main():
     if args.file:
         file_path = Path(args.file)
         if not file_path.exists():
-            print(f"❌ File tidak ditemukan: {file_path}")
+            print(f"❌ File not found: {file_path}")
             sys.exit(1)
     else:
         file_path = get_latest_excel_file()
         if not file_path:
             sys.exit(1)
     
-    print(f"📁 Memproses data dari: {file_path.name}")
+    print(f"📁 Processing data from: {file_path.name}")
 
     config_path = Path(args.config) if args.config else None
 
@@ -241,7 +319,7 @@ def main():
     if args.import_file:
         import_file = Path(args.import_file)
         if not import_file.exists():
-            print(f"❌ File import tidak ditemukan: {import_file}")
+            print(f"❌ Import file not found: {import_file}")
             sys.exit(1)
     else:
         import_file = generate_journal_import(file_path, config_path)

@@ -59,6 +59,7 @@ def read_odoo(
     amount_col: str,
     group_map: dict[str, str],      # {odo_group_name: bank_key}
     number_col: str = "",           # e.g. 'Number'
+    reference_col: str = "Reference",
     include_others: bool = False,   # Capture unknown groups into "other"
 ) -> tuple[date, dict[str, list[dict]]]:
     """
@@ -114,6 +115,7 @@ def read_odoo(
 
     amount_idx = _col_idx(amount_col, required=True)
     number_idx = _col_idx(number_col, required=False)
+    reference_idx = _col_idx(reference_col, required=False)
 
     assert amount_idx is not None  # guaranteed by required=True above
 
@@ -125,6 +127,7 @@ def read_odoo(
         bank_txns["other"] = []
     current_bank_key: str | None = None
     current_group_name: str = ""
+    current_is_reconciled: str | None = None
 
     for row in ws.iter_rows(min_row=2, values_only=True):
         if not any(c is not None for c in row):
@@ -139,6 +142,15 @@ def read_odoo(
             val = str(col_a).strip() if col_a is not None else ""
             if not val:
                 continue  # empty col A, blank-ish row
+
+            # Odoo sometimes appends counts like "True (26)"
+            import re
+            clean_val = re.sub(r"\(\d+\)$", "", val).strip()
+
+            if clean_val.lower() in ("true", "false"):
+                current_is_reconciled = "Yes" if clean_val.lower() == "true" else "No"
+                print(f"  [ODO] Reconciled status → {current_is_reconciled}")
+                continue
 
             # Check if it matches a known bank group
             matched = None
@@ -182,12 +194,18 @@ def read_odoo(
         number = ""
         if number_idx is not None and number_idx < len(row):
             number = str(row[number_idx]).strip() if row[number_idx] is not None else ""
+            
+        reference = ""
+        if reference_idx is not None and reference_idx < len(row):
+            reference = str(row[reference_idx]).strip() if row[reference_idx] is not None else ""
 
         bank_txns[current_bank_key].append({
             "amount":      amount,
             "amount_raw":  raw_amount,
             "description": desc if current_bank_key != "other" else f"{current_group_name}",
             "number":      number,
+            "reference":   reference,
+            "is_reconciled": current_is_reconciled or "Unknown",
             "date":        str(txn_date).split()[0],   # "2026-07-20" (drop time part)
             "source":      "Odoo",
         })

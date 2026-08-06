@@ -49,45 +49,71 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
         return None
     ws_source = wb_source["Daily Summary"]
     
+    def get_col_map(sheet, row_idx=3):
+        return {str(sheet.cell(row=row_idx, column=c).value).strip().lower(): c for c in range(1, sheet.max_column + 1) if sheet.cell(row=row_idx, column=c).value}
+
     # Extract Mutations
     mutations_data = []
     if "Mutation Summary" in wb_source.sheetnames:
         ws_mut = wb_source["Mutation Summary"]
+        col_map = get_col_map(ws_mut)
+        c_date = col_map.get("payment date", 3)
+        c_bank = col_map.get("bank", 4)
+        c_group = col_map.get("journal", 5)
+        c_cat = col_map.get("transaction category", 7)
+        c_amt = col_map.get("total amount", 8)
+        
         for r in range(4, ws_mut.max_row + 1):
-            if not ws_mut.cell(row=r, column=4).value: continue
+            if not ws_mut.cell(row=r, column=c_bank).value: continue
             mutations_data.append({
-                "payment_date": ws_mut.cell(row=r, column=3).value,
-                "bank": ws_mut.cell(row=r, column=4).value,
-                "group": ws_mut.cell(row=r, column=5).value,
-                "category": ws_mut.cell(row=r, column=7).value,
-                "amount": ws_mut.cell(row=r, column=8).value
+                "payment_date": ws_mut.cell(row=r, column=c_date).value,
+                "bank": ws_mut.cell(row=r, column=c_bank).value,
+                "group": ws_mut.cell(row=r, column=c_group).value,
+                "category": ws_mut.cell(row=r, column=c_cat).value,
+                "amount": ws_mut.cell(row=r, column=c_amt).value
             })
 
     # Extract Admin Fees
     admin_fees_data = []
     if "Admin Fee" in wb_source.sheetnames:
         ws_adm = wb_source["Admin Fee"]
+        col_map = get_col_map(ws_adm)
+        c_date = col_map.get("payment date", 3)
+        c_bank = col_map.get("bank", 4)
+        c_group = col_map.get("journal", 5)
+        c_cat = col_map.get("transaction category", 7)
+        c_amt = col_map.get("total amount", 8)
+        
         for r in range(4, ws_adm.max_row + 1):
-            if not ws_adm.cell(row=r, column=4).value: continue
+            if not ws_adm.cell(row=r, column=c_bank).value: continue
             admin_fees_data.append({
-                "payment_date": ws_adm.cell(row=r, column=3).value,
-                "bank": ws_adm.cell(row=r, column=4).value,
-                "group": ws_adm.cell(row=r, column=5).value,
-                "category": ws_adm.cell(row=r, column=7).value,
-                "amount": ws_adm.cell(row=r, column=8).value
+                "payment_date": ws_adm.cell(row=r, column=c_date).value,
+                "bank": ws_adm.cell(row=r, column=c_bank).value,
+                "group": ws_adm.cell(row=r, column=c_group).value,
+                "category": ws_adm.cell(row=r, column=c_cat).value,
+                "amount": ws_adm.cell(row=r, column=c_amt).value
             })
 
     
     # Extract "Sesuai" items
     items = []
+    col_map = get_col_map(ws_source)
+    c_date = col_map.get("date", 2)
+    c_pdate = col_map.get("payment date", 3)
+    c_bank = col_map.get("bank", 4)
+    c_group = col_map.get("journal", 5)
+    c_todoo = col_map.get("total odoo", 7)
+    c_diff = col_map.get("difference", 8)
+    c_status = col_map.get("status", 9)
+    
     for row in range(4, ws_source.max_row + 1):
-        odoo_date = ws_source.cell(row=row, column=2).value    # Odoo Date
-        payment_date = ws_source.cell(row=row, column=3).value # Payment Date
-        bank = ws_source.cell(row=row, column=4).value         # Bank
-        group = ws_source.cell(row=row, column=5).value        # Journal
-        total_odo = ws_source.cell(row=row, column=7).value    # Total Odoo
-        selisih = ws_source.cell(row=row, column=8).value      # Difference
-        status = ws_source.cell(row=row, column=9).value       # Status
+        odoo_date = ws_source.cell(row=row, column=c_date).value    # Odoo Date
+        payment_date = ws_source.cell(row=row, column=c_pdate).value # Payment Date
+        bank = ws_source.cell(row=row, column=c_bank).value         # Bank
+        group = ws_source.cell(row=row, column=c_group).value        # Journal
+        total_odo = ws_source.cell(row=row, column=c_todoo).value    # Total Odoo
+        selisih = ws_source.cell(row=row, column=c_diff).value      # Difference
+        status = ws_source.cell(row=row, column=c_status).value       # Status
         
         if not bank or not status:
             continue
@@ -196,7 +222,7 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
         
         alias = get_alias_by_group(bank_name, group_name)
         if not alias:
-            print(f"⚠️ Peringatan: Alias tidak ditemukan untuk Bank={bank_name}, Account Name={group_name}. Lewati.")
+            print(f"⚠️ Warning: Alias not found for Bank={bank_name}, Account Name={group_name}. Skipping.")
             continue
             
         # Get Accounts from config
@@ -205,23 +231,14 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
         credit_acc = props.get("edc_credit")
         
         if not debit_acc or not credit_acc:
-            print(f"⚠️ Peringatan: EDC Debit/Credit belum diset di .env untuk {bank_name.upper()} {alias}. Lewati.")
+            print(f"⚠️ Peringatan: EDC Debit/Credit belum diset di .env untuk {bank_name.upper()} {alias}. Skipping.")
             continue
             
         # Format Reference (e.g. Settlement EDC BCA Main 8 Juli 26)
         formatted_date = format_date_indo(odoo_date)
         
-        ref_bank_alias = f"{bank_name.upper()} {alias.capitalize()}"
-        if bank_name.upper() == "BCA" and alias == "main":
-            ref_bank_alias = "BCA Main"
-        elif bank_name.upper() == "MANDIRI" and alias == "main":
-            ref_bank_alias = "Mandiri"
-        elif bank_name.upper() == "BRI" and alias == "lbf":
-            ref_bank_alias = "BRI LBF"
-        elif bank_name.upper() == "BRI" and alias == "frans":
-            ref_bank_alias = "BRI Frans (Sanur)"
-        elif bank_name.upper() == "BRI" and alias == "nara":
-            ref_bank_alias = "BRI Nara"
+        # Pull the reference alias directly from the .env config (or fallback to Capitalized Bank + Alias)
+        ref_bank_alias = props.get("alias", f"{bank_name.upper()} {alias.capitalize()}")
 
         reference = f"Settlement EDC {ref_bank_alias} {formatted_date}"
         
@@ -343,7 +360,7 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
                 ])
 
     if ws_out.max_row <= 1:
-        print("❌ Tidak ada jurnal yang berhasil dibuat. Periksa pengaturan .env")
+        print("❌ No journals created successfully. Check .env settings")
         return None
     # Auto-adjust column widths
     from openpyxl.utils import get_column_letter
@@ -375,7 +392,7 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
         
     out_path = journal_dir / out_filename
     wb_out.save(out_path)
-    print(f"✅ File Import Jurnal berhasil dibuat: {out_path.name}")
+    print(f"✅ Journal Import File created successfully: {out_path.name}")
     return out_path
 
 if __name__ == "__main__":

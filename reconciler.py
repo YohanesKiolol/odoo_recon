@@ -67,10 +67,14 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
             used       = odo_used[bank_d][amt]
             candidates = odo_by_date.get(bank_d, {}).get(amt, [])
             odo_num    = candidates[used]["number"] if used < len(candidates) else ""
+            odo_ref    = candidates[used].get("reference", "") if used < len(candidates) else ""
+            odo_recon  = candidates[used].get("is_reconciled", "") if used < len(candidates) else ""
             odo_used[bank_d][amt] = used + 1
         else:
             status  = STATUS_BANK_ONLY
             odo_num = ""
+            odo_ref = ""
+            odo_recon = ""
 
         results.append({
             "amount":        amt,
@@ -83,6 +87,8 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
             "source":        "Bank",
             "status":        status,
             "number_odo":    odo_num,
+            "invoice_no":    odo_ref,
+            "is_reconciled": odo_recon,
             "number_bank":   bank_num,
             "filename_bank": txn.get("filename", ""),
         })
@@ -107,6 +113,8 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
                     "source":        "Odoo",
                     "status":        STATUS_ODO_ONLY,
                     "number_odo":    txn.get("number", ""),
+                    "invoice_no":    txn.get("reference", ""),
+                    "is_reconciled": txn.get("is_reconciled", ""),
                     "number_bank":   "",
                     "filename_bank": "",
                 })
@@ -121,6 +129,8 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
                     "source":        "Odoo",
                     "status":        STATUS_ODO_ONLY,
                     "number_odo":    "",
+                    "invoice_no":    "",
+                    "is_reconciled": "",
                     "number_bank":   "",
                     "filename_bank": "",
                 })

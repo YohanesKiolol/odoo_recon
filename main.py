@@ -71,6 +71,10 @@ def parse_args():
         "--all", action="store_true",
         help="Process all transactions including unknown groups (e.g., PayPal, Wise) into an 'Other' bucket."
     )
+    parser.add_argument(
+        "--no-open", action="store_true",
+        help="Do not auto-open the generated Excel file at the end."
+    )
     return parser.parse_args()
 
 
@@ -331,13 +335,14 @@ def main():
     else:
         print("\n[+] All transactions matched across all banks!")
 
-    print()
-    import subprocess
-    import os
-    if os.name == 'nt':
-        os.startfile(out_path)
-    else:
-        subprocess.run(["open", str(out_path)])
+    if not args.no_open:
+        print()
+        import subprocess
+        import os
+        if os.name == 'nt':
+            os.startfile(out_path)
+        else:
+            subprocess.run(["open", str(out_path)])
 
 
 if __name__ == "__main__":

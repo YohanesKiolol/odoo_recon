@@ -6,7 +6,8 @@ from playwright.sync_api import sync_playwright
 # Import configs
 from config import (
     ODOO_URL, ODOO_DASHBOARD_URL, ODOO_PAYMENTS_URL, ODO_EXCEL_PATH,
-    BANK_ACCOUNTS
+    BANK_ACCOUNTS, ODOO_JOURNAL_ENTRIES_URL, ODO_JOURNAL_EXCEL_PATH,
+    ODOO_JOURNAL_EDC, ODOO_JOURNAL_AR
 )
 
 
@@ -17,8 +18,26 @@ def run_downloader():
     parser.add_argument("--email", type=str, default="", help="Odoo Email (opsional untuk auto-login)")
     parser.add_argument("--password", type=str, default="", help="Odoo Password (opsional untuk auto-login)")
     parser.add_argument("--banks", type=str, default="BCA,Mandiri,BRI", help="Comma separated list of banks")
+    parser.add_argument("--mode", type=str, choices=["payments", "journals", "both", "auto_recon"], default="both", help="Pilih mode download (payments/journals/both/auto_recon)")
     args = parser.parse_args()
     
+    if args.mode == "auto_recon":
+        import subprocess
+        from datetime import datetime
+        print("\n[+] Mode Auto-Recon: Mendeteksi tanggal bank secara otomatis...")
+        try:
+            cmd_scan = [sys.executable, "main.py", "--scan"]
+            scan_result = subprocess.run(cmd_scan, capture_output=True, text=True)
+            for line in scan_result.stdout.splitlines():
+                if line.startswith("[DATE_RANGE]|"):
+                    parts = line.split("|")
+                    if len(parts) == 3:
+                        args.date_from = datetime.strptime(parts[1], "%Y-%m-%d").strftime("%m/%d/%Y")
+                        args.date_to = datetime.strptime(parts[2], "%Y-%m-%d").strftime("%m/%d/%Y")
+                        print(f"[+] Tanggal otomatis terdeteksi: {args.date_from} s.d {args.date_to}")
+        except Exception as e:
+            print(f"[!] Failed auto-scan ({e}).")
+            
     is_headless = bool(args.email and args.password)
     
     selected_banks = [b.strip() for b in args.banks.split(",")] if args.banks else []
@@ -50,7 +69,7 @@ def run_downloader():
         else:
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
     except Exception as e:
-        print(f"[!] Gagal mengecek/menginstall browser: {e}")
+        print(f"[!] Failed to check/install browser: {e}")
 
     print("[+] Menyiapkan browser (Playwright)...")
     
@@ -107,9 +126,9 @@ def run_downloader():
             page.fill("#login", args.email)
             page.fill("#password", args.password)
             page.press("#password", "Enter")
-            print("[+] Login disubmit, menunggu proses...")
+            print("[+] Login submitted, waiting...")
         else:
-            print("\n[+] Menunggu Anda login secara manual...")
+            print("\n[+] Waiting for manual login...")
         
         # Strip protocol so it matches exactly
         dashboard_path = odoo_dash_https.split("://")[-1]
@@ -121,213 +140,445 @@ def run_downloader():
         )
         print("[+] Dashboard terdeteksi!")
 
-        print(f"\n[+] Mengarahkan ke halaman Payments: {odoo_pay_https}")
-        page.goto(odoo_pay_https)
-
-        # Tunggu loading SPA Odoo secara dinamis berdasarkan elemen tabel data
-        print("[+] Menunggu tabel data Odoo termuat sepenuhnya...")
-        page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=30000)
-        page.wait_for_timeout(2000) # Tambahan jeda 2 detik agar event listener Odoo siap
-
-        print("\n[+] Memulai otomatisasi filter (hingga langkah 5)...")
-        
-        # Langkah 1: Click dropdown Filter
-        print("[+] Membuka menu Filter...")
+        # -------------------------------------------------------------
+        # ── Define XPaths ──
+        # -------------------------------------------------------------
         xpath_filter_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[2]/div/div[2]/button"
-        page.wait_for_selector(xpath_filter_btn, state="visible", timeout=15000)
-        page.locator(xpath_filter_btn).click()
-        page.wait_for_timeout(1000)
-        
-        # Langkah 1.5: Click Favorites Filter
-        print("[+] Memilih Favorites Filter...")
         xpath_favorites_filter = "xpath=/html/body/div[1]/div/div[1]/div/div[2]/div/div[2]/div/div[3]/span"
-        page.wait_for_selector(xpath_favorites_filter, state="visible", timeout=5000)
-        page.locator(xpath_favorites_filter).click()
-        page.wait_for_timeout(2000) # Tunggu filter favorit diaplikasikan dan tabel reload
-
-        # Langkah 2: Click Add Custom Filter
-        print("[+] Memilih 'Add Custom Filter'...")
         xpath_custom_filter = "xpath=/html/body/div[1]/div/div[1]/div/div[2]/div/div[2]/div/div[1]/span[10]"
-        page.wait_for_selector(xpath_custom_filter, state="visible", timeout=5000)
-        page.locator(xpath_custom_filter).click()
-        page.wait_for_timeout(1000) # Beri jeda agar popover muncul
-
-        # Langkah 3: Tunggu Pop Up Modal (Di Odoo 17 ini adalah popover dengan tag <main>)
-        print("[+] Menunggu Pop-up Modal...")
-        dialog = page.locator("main").last
-        dialog.wait_for(state="visible", timeout=10000)
-
-        # Langkah 4: Pilih Field Date
-        print("[+] Mengisi field filter dengan 'Date'...")
-        # Path relatif dari tag <main>
         xpath_field = "./div/div/div/div[2]/div/div[1]/div[1]/div/div"
-        
-        field_loc = dialog.locator(f"xpath={xpath_field}")
-        field_loc.click()
-        page.wait_for_timeout(500)
-        
-        page.keyboard.type("Date")
-        page.wait_for_timeout(500)
-        page.keyboard.press("Enter")
-
-        # Langkah 5: Ganti separator menjadi 'is between'
-        print("[+] Mengganti separator menjadi 'is between'...")
         xpath_operator = "./div/div/div/div[2]/div/div[1]/div[2]/select"
-        operator_loc = dialog.locator(f"xpath={xpath_operator}")
-        operator_loc.wait_for(state="visible", timeout=5000)
-        
-        try:
-            operator_loc.select_option(label="is between")
-        except Exception as e:
-            print(f"[!] Gagal memilih 'is between' dengan label: {e}")
-            print("[+] Mencoba fallback klik dan keyboard arrow...")
-            operator_loc.click()
-            page.keyboard.type("between")
-            page.keyboard.press("Enter")
-            
-        # Langkah 6: Input Tanggal (From & To)
-        print(f"[+] Mengisi rentang tanggal: {args.date_from} sampai {args.date_to}...")
-        # Mengubah path menjadi relatif terhadap <main> agar aman dari perubahan DOM
         xpath_from = "./div/div/div/div[2]/div/div[1]/div[3]/div/div[1]/input"
         xpath_to   = "./div/div/div/div[2]/div/div[1]/div[3]/div/div[2]/input"
-        
-        from_loc = dialog.locator(f"xpath={xpath_from}")
-        from_loc.wait_for(state="visible", timeout=5000)
-        from_loc.fill(args.date_from)
-        page.wait_for_timeout(500)
-        
-        to_loc = dialog.locator(f"xpath={xpath_to}")
-        to_loc.wait_for(state="visible", timeout=5000)
-        to_loc.fill(args.date_to)
-        to_loc.press("Enter")
-        page.wait_for_timeout(500)
+        xpath_add = "./footer/button[1]"
+        xpath_gear = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[2]/div[2]/div"
+        xpath_export_all = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[2]/div[2]/div/div/div/span[2]"
 
-        # Langkah 6.5: Tambahkan filter Journal jika tidak semua bank dipilih
-        is_all_banks = any(b.lower() == "all" for b in selected_banks) or len(selected_banks) >= 3
-        if not is_all_banks and selected_banks:
-            print(f"[+] Menambahkan filter Journal untuk bank: {', '.join(selected_banks)}...")
+        # -------------------------------------------------------------
+        # ── Download Payments (account.payment) ──
+        # -------------------------------------------------------------
+        if args.mode in ["payments", "both", "auto_recon"]:
+            print(f"\n[+] Redirecting to page Payments: {odoo_pay_https}")
+            page.goto(odoo_pay_https)
+
+            # Tunggu loading SPA Odoo secara dinamis berdasarkan elemen tabel data
+            print("[+] Waiting for Odoo data table to fully load...")
+            page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=30000)
+            page.wait_for_timeout(2000) # Tambahan jeda 2 detik agar event listener Odoo siap
+
+            print("\n[+] Starting filter automation (hingga langkah 5)...")
             
-            # Click '+' icon to add a new rule row
-            print("    -> Meng-klik tombol '+' (Add Condition)...")
+            # Langkah 1: Click dropdown Filter
+            print("[+] Opening Filter menu...")
+            print("[+] Opening Filter menu...")
+            page.locator(xpath_filter_btn).click()
+            page.wait_for_timeout(1000)
+            
+            # Langkah 1.5: Click Favorites Filter
+            print("[+] Selecting Favorites Filter...")
+            print("[+] Selecting Favorites Filter...")
+            page.wait_for_selector(xpath_favorites_filter, state="visible", timeout=5000)
+            page.locator(xpath_favorites_filter).click()
+            page.wait_for_timeout(2000) # Tunggu filter favorit diaplikasikan dan tabel reload
+
+            # Langkah 2: Click Add Custom Filter
+            print("[+] Selecting 'Add Custom Filter'...")
+            print("[+] Selecting 'Add Custom Filter'...")
+            page.wait_for_selector(xpath_custom_filter, state="visible", timeout=5000)
+            page.locator(xpath_custom_filter).click()
+            page.wait_for_timeout(1000) # Beri jeda agar popover muncul
+
+            # Langkah 3: Tunggu Pop Up Modal (Di Odoo 17 ini adalah popover dengan tag <main>)
+            print("[+] Waiting for Pop-up Modal...")
+            dialog = page.locator("main").last
+            dialog.wait_for(state="visible", timeout=10000)
+
+            # Langkah 4: Pilih Field Date
+            print("[+] Filling filter field with 'Date'...")
+            print("[+] Filling filter field with 'Date'...")
+            field_loc = dialog.locator(f"xpath={xpath_field}")
+            field_loc.click()
+            page.wait_for_timeout(500)
+            
+            page.keyboard.type("Date")
+            page.wait_for_timeout(500)
+            page.keyboard.press("Enter")
+
+            # Langkah 5: Ganti separator menjadi 'is between'
+            print("[+] Changing separator to 'is between'...")
+            print("[+] Changing separator to 'is between'...")
+            operator_loc = dialog.locator(f"xpath={xpath_operator}")
+            operator_loc.wait_for(state="visible", timeout=5000)
+            
             try:
-                # Odoo 17 uses i.fa-plus for the add condition button
-                add_btn = dialog.locator("i.fa-plus").last
-                add_btn.wait_for(state="visible", timeout=3000)
-                add_btn.click()
+                operator_loc.select_option(label="is between")
             except Exception as e:
-                print(f"    [!] Fallback klik '+' menggunakan XPath: {e}")
-                xpath_add_rule = "./div/div/div/div[2]/div/div[2]/button[1]"
-                dialog.locator(f"xpath={xpath_add_rule}").click()
+                print(f"[!] Failed to select 'is between': {e}")
+                print("[+] Trying click/arrow fallback...")
+                operator_loc.click()
+                page.keyboard.type("between")
+                page.keyboard.press("Enter")
                 
-            page.wait_for_timeout(1500) # Tunggu render baris baru
+            # Langkah 6: Input Tanggal (From & To)
+            print(f"[+] Filling date range: {args.date_from} to {args.date_to}...")
+            print(f"[+] Filling date range: {args.date_from} to {args.date_to}...")
             
-            # Ensure 'Match ALL' is selected
-            print("    -> Memastikan rule matching diset ke 'all'...")
-            xpath_match_btn = "./div/div/div/div[1]/div/div/div/button"
-            try:
-                match_btn = dialog.locator(f"xpath={xpath_match_btn}")
-                match_btn.wait_for(state="visible", timeout=3000)
-                match_btn.click(timeout=3000)
+            from_loc = dialog.locator(f"xpath={xpath_from}")
+            from_loc.wait_for(state="visible", timeout=5000)
+            from_loc.fill(args.date_from)
+            page.wait_for_timeout(500)
+            
+            to_loc = dialog.locator(f"xpath={xpath_to}")
+            to_loc.wait_for(state="visible", timeout=5000)
+            to_loc.fill(args.date_to)
+            to_loc.press("Enter")
+            page.wait_for_timeout(500)
+
+            # Langkah 6.5: Tambahkan filter Journal jika tidak semua bank dipilih
+            is_all_banks = any(b.lower() == "all" for b in selected_banks) or len(selected_banks) >= 3
+            if not is_all_banks and selected_banks:
+                print(f"[+] Adding Journal filter for bank: {', '.join(selected_banks)}...")
+                
+                # Click '+' icon to add a new rule row
+                print("    -> Clicking '+' (Add Condition)...")
+                try:
+                    # Odoo 17 uses i.fa-plus for the add condition button
+                    add_btn = dialog.locator("i.fa-plus").last
+                    add_btn.wait_for(state="visible", timeout=3000)
+                    add_btn.click()
+                except Exception as e:
+                    print(f"    [!] Fallback clicking '+' via XPath: {e}")
+                    xpath_add_rule = "./div/div/div/div[2]/div/div[2]/button[1]"
+                    dialog.locator(f"xpath={xpath_add_rule}").click()
+                    
+                page.wait_for_timeout(1500) # Tunggu render baris baru
+                
+                # Ensure 'Match ALL' is selected
+                print("    -> Memastikan rule matching diset ke 'all'...")
+                xpath_match_btn = "./div/div/div/div[1]/div/div/div/button"
+                try:
+                    match_btn = dialog.locator(f"xpath={xpath_match_btn}")
+                    match_btn.wait_for(state="visible", timeout=3000)
+                    match_btn.click(timeout=3000)
+                    page.wait_for_timeout(500)
+                    
+                    xpath_match_all = "./div/div/div/div[1]/div/div/div/div/span[1]"
+                    dialog.locator(f"xpath={xpath_match_all}").click(timeout=3000)
+                    page.wait_for_timeout(500)
+                except Exception as e:
+                    print(f"    [!] Skip klik Match ALL: {e}")
+                
+                # Select 'Journal' field
+                xpath_field_2 = "./div/div/div/div[3]/div/div[1]/div[1]/div/div"
+                dialog.locator(f"xpath={xpath_field_2}").click()
+                page.wait_for_timeout(500)
+                page.keyboard.type("Journal")
+                page.wait_for_timeout(500)
+                page.keyboard.press("Enter")
+                
+                # Select operator 'is in'
+                xpath_operator_2 = "./div/div/div/div[3]/div/div[1]/div[2]/select"
+                op_loc = dialog.locator(f"xpath={xpath_operator_2}")
+                op_loc.wait_for(state="visible", timeout=5000)
+                try:
+                    op_loc.select_option(label="is in")
+                except Exception as e:
+                    print(f"[!] Failed to select 'is in': {e}")
+                    op_loc.click()
+                    page.keyboard.type("in")
+                    page.keyboard.press("Enter")
+                
                 page.wait_for_timeout(500)
                 
-                xpath_match_all = "./div/div/div/div[1]/div/div/div/div/span[1]"
-                dialog.locator(f"xpath={xpath_match_all}").click(timeout=3000)
-                page.wait_for_timeout(500)
-            except Exception as e:
-                print(f"    [!] Skip klik Match ALL: {e}")
+                # Input journal values
+                xpath_value_input = "./div/div/div/div[3]/div/div[1]/div[3]/div/div/input"
+                val_input = dialog.locator(f"xpath={xpath_value_input}")
+                
+                journal_names = []
+                for bank in selected_banks:
+                    bk = bank.lower()
+                    for alias, acc_info in BANK_ACCOUNTS.get(bk, {}).items():
+                        grp = acc_info.get("group")
+                        if grp:
+                            journal_names.append(grp)
+                            
+                for j_name in journal_names:
+                        print(f"    -> Memasukkan '{j_name}'")
+                        val_input.click()
+                        val_input.fill(j_name)
+                        # Tunggu dropdown Odoo muncul
+                        page.wait_for_timeout(1000)
+                        
+                        # Opsi dropdown biasanya di dalam popover UI
+                        # Cari elemen <a> (opsi) yang textnya mengandung j_name lalu click
+                        try:
+                            dropdown_opt = page.locator("a", has_text=j_name).first
+                            dropdown_opt.wait_for(state="visible", timeout=3000)
+                            dropdown_opt.click()
+                        except Exception:
+                            print(f"    [!] Dropdown option not found for '{j_name}', trying Enter fallback")
+                            page.keyboard.press("Enter")
+                            
+                        page.wait_for_timeout(500)
+
+            # Langkah 7: Klik tombol 'Add'
+            print("[+] Mengklik tombol 'Add'...")
+            # Path absolut dari user: /html/body/div[2]/div[2]/div/div/div/div/footer/button[1]
+            # Karena kita menggunakan locator `main`, footernya sejajar dengan main. Jadi kita cari tombol Add di parent popover.
+            popover = dialog.locator("..")
+            add_loc = popover.locator(f"xpath={xpath_add}")
+            add_loc.click()
             
-            # Select 'Journal' field
-            xpath_field_2 = "./div/div/div/div[3]/div/div[1]/div[1]/div/div"
-            dialog.locator(f"xpath={xpath_field_2}").click()
+            print("[+] Menunggu tabel data Odoo termuat dengan filter baru...")
+            page.wait_for_timeout(2000) # Tunggu animasi modal tutup
+            page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=30000)
+
+            # Langkah 7.5: Tambahkan Group By "Is Reconciled"
+            print("[+] Menambahkan Group By 'Is Reconciled'...")
+            try:
+                # Re-open the search bar dropdown
+                page.locator(xpath_filter_btn).click()
+                page.wait_for_timeout(1000)
+                
+                # Select 'Is Reconciled' from the native select dropdown directly
+                group_select = page.locator("select.o_add_custom_group_menu").last
+                group_select.wait_for(state="visible", timeout=3000)
+                
+                # Click the select box first ("Add Custom Group") so Odoo registers the interaction
+                group_select.click()
+                page.wait_for_timeout(500)
+                
+                # Then select 'Is Reconciled'
+                group_select.select_option(value="is_reconciled")
+                
+                # In Odoo, selecting from the custom group dropdown usually triggers the reload immediately.
+                page.wait_for_timeout(2000)
+                print("    -> Group By Is Reconciled successful!")
+            except Exception as e:
+                print(f"    [!] Failed to add Group By: {e}")
+
+            # Langkah 8: Klik Icon Gear (Action Menu)
+            print("[+] Opening Action menu (⚙️)...")
+            page.wait_for_selector(xpath_gear, state="visible", timeout=10000)
+            page.locator(xpath_gear).click()
+            page.wait_for_timeout(1000) # Tunggu menu dropdown terbuka
+
+            # Langkah 9: Klik 'Export All' dan Tangkap Download
+            print("[+] Mengklik 'Export All' dan mendownload file...")
+            print("[+] Mengklik 'Export All' dan mendownload file...")
+            # Bersiap menangkap event download dari browser
+            with page.expect_download(timeout=60000) as download_info:
+                page.locator(xpath_export_all).click()
+                
+            download = download_info.value
+            
+            # Pastikan direktori tujuan ada
+            ODO_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Simpan file yang didownload ke lokasi yang ditentukan di .env
+            download.save_as(str(ODO_EXCEL_PATH))
+            # -------------------------------------------------------------
+            # ── Auto Recon Middle Step (Run main.py & extract journal dates) ──
+            # -------------------------------------------------------------
+            if args.mode == "auto_recon":
+                import glob, subprocess, os
+                print("\n[+] Menjalankan rekonsiliasi (main.py)...")
+                recon_cmd = [sys.executable, "main.py", "--no-open"]
+                if selected_banks and "all" not in [b.lower() for b in selected_banks]:
+                    for b in selected_banks:
+                        recon_cmd.extend(["--bank", b])
+                        
+                subprocess.run(recon_cmd, check=True)
+                
+                list_of_files = glob.glob('output/Reconciliation_*.xlsx')
+                if not list_of_files:
+                    print("[!] Failed to find Reconciliation file!")
+                    context.close()
+                    sys.exit(1)
+                    
+                latest_file = max(list_of_files, key=os.path.getctime)
+                print(f"[+] Mengekstrak tanggal dari {latest_file} untuk filter Journal...")
+                
+                try:
+                    date_res = subprocess.run([sys.executable, "journal_checker.py", latest_file, "--get-dates"], capture_output=True, text=True)
+                    for line in date_res.stdout.splitlines():
+                        if line.startswith("[DATE_RANGE]|"):
+                            parts = line.split("|")
+                            if len(parts) == 3:
+                                args.date_from = parts[1]
+                                args.date_to = parts[2]
+                                print(f"[+] Tanggal Journal terdeteksi: {args.date_from} s.d {args.date_to}")
+                except Exception as e:
+                    print(f"[!] Failed to extract Journal date ({e}).")
+                    
+                print("\n[+] Melanjutkan download Journal Entries di browser yang sama...")
+
+        # -------------------------------------------------------------
+        # ── Download Journal Entries (account.move) ──
+        # -------------------------------------------------------------
+        if args.mode in ["journals", "both", "auto_recon"] and ODOO_JOURNAL_ENTRIES_URL:
+            odoo_journal_https = ODOO_JOURNAL_ENTRIES_URL.replace("http://", "https://")
+            print(f"\n[+] Navigasi ke halaman Journal Entries: {odoo_journal_https}")
+            page.goto(odoo_journal_https)
+            
+            # Tunggu redirect dan load table
+            journal_path = odoo_journal_https.split("://")[-1]
+            page.wait_for_function(
+                "path => window.location.href.includes(path)",
+                arg=journal_path,
+                timeout=15000
+            )
+            page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=30000)
+            page.wait_for_timeout(2000)
+            
+            print("[+] Membersihkan filter default (misal: Posted)...")
+            try:
+                remove_btns = page.locator("button.o_facet_remove")
+                count = remove_btns.count()
+                for _ in range(count):
+                    remove_btns.first.click(timeout=2000)
+                    page.wait_for_timeout(500)
+            except Exception as e:
+                print(f"    [!] Failed to clear filter: {e}")
+            
+            print("[+] Opening Filter menu for Journal Entries...")
+            page.locator(xpath_filter_btn).click()
+            page.wait_for_timeout(1000)
+            
+            print("[+] Selecting 'Add Custom Filter'...")
+            page.locator(xpath_custom_filter).click()
+            page.wait_for_timeout(1000)
+            
+            print("[+] Mengatur filter Date...")
+            dialog_j = page.locator("main").last
+            dialog_j.wait_for(state="visible", timeout=10000)
+            
+            field_loc_j = dialog_j.locator(f"xpath={xpath_field}")
+            field_loc_j.click()
+            page.wait_for_timeout(500)
+            page.keyboard.type("Date")
+            page.wait_for_timeout(500)
+            page.keyboard.press("Enter")
+            
+            operator_loc_j = dialog_j.locator(f"xpath={xpath_operator}")
+            operator_loc_j.wait_for(state="visible", timeout=5000)
+            try:
+                operator_loc_j.select_option(label="is between")
+            except:
+                operator_loc_j.click()
+                page.keyboard.type("between")
+                page.keyboard.press("Enter")
+                
+            print(f"[+] Filling date range: {args.date_from} to {args.date_to}...")
+            from_loc_j = dialog_j.locator(f"xpath={xpath_from}")
+            from_loc_j.wait_for(state="visible", timeout=5000)
+            from_loc_j.fill(args.date_from)
+            page.wait_for_timeout(500)
+            
+            to_loc_j = dialog_j.locator(f"xpath={xpath_to}")
+            to_loc_j.wait_for(state="visible", timeout=5000)
+            to_loc_j.fill(args.date_to)
+            to_loc_j.press("Enter")
+            page.wait_for_timeout(500)
+            
+            print("[+] Menambahkan filter Journal (EDC & AR)...")
+            try:
+                add_btn_j = dialog_j.locator("i.fa-plus").last
+                add_btn_j.wait_for(state="visible", timeout=3000)
+                add_btn_j.click()
+            except:
+                xpath_add_rule_j = "./div/div/div/div[2]/div/div[2]/button[1]"
+                dialog_j.locator(f"xpath={xpath_add_rule_j}").click()
+                
+            page.wait_for_timeout(1500)
+            
+            # Ensure Match ALL is selected
+            xpath_match_btn_j = "./div/div/div/div[1]/div/div/div/button"
+            try:
+                match_btn_j = dialog_j.locator(f"xpath={xpath_match_btn_j}")
+                match_btn_j.wait_for(state="visible", timeout=3000)
+                match_btn_j.click(timeout=3000)
+                page.wait_for_timeout(500)
+                xpath_match_all_j = "./div/div/div/div[1]/div/div/div/div/span[1]"
+                dialog_j.locator(f"xpath={xpath_match_all_j}").click(timeout=3000)
+                page.wait_for_timeout(500)
+            except:
+                pass
+                
+            # Select Journal field
+            xpath_field_2_j = "./div/div/div/div[3]/div/div[1]/div[1]/div/div"
+            dialog_j.locator(f"xpath={xpath_field_2_j}").click()
             page.wait_for_timeout(500)
             page.keyboard.type("Journal")
             page.wait_for_timeout(500)
             page.keyboard.press("Enter")
             
             # Select operator 'is in'
-            xpath_operator_2 = "./div/div/div/div[3]/div/div[1]/div[2]/select"
-            op_loc = dialog.locator(f"xpath={xpath_operator_2}")
-            op_loc.wait_for(state="visible", timeout=5000)
+            xpath_operator_2_j = "./div/div/div/div[3]/div/div[1]/div[2]/select"
+            op_loc_j = dialog_j.locator(f"xpath={xpath_operator_2_j}")
+            op_loc_j.wait_for(state="visible", timeout=5000)
             try:
-                op_loc.select_option(label="is in")
-            except Exception as e:
-                print(f"[!] Gagal memilih 'is in' via select_option: {e}")
-                op_loc.click()
+                op_loc_j.select_option(label="is in")
+            except:
+                op_loc_j.click()
                 page.keyboard.type("in")
                 page.keyboard.press("Enter")
-            
+                
             page.wait_for_timeout(500)
             
             # Input journal values
-            xpath_value_input = "./div/div/div/div[3]/div/div[1]/div[3]/div/div/input"
-            val_input = dialog.locator(f"xpath={xpath_value_input}")
+            xpath_value_input_j = "./div/div/div/div[3]/div/div[1]/div[3]/div/div/input"
+            val_input_j = dialog_j.locator(f"xpath={xpath_value_input_j}")
             
-            journal_names = []
-            for bank in selected_banks:
-                bk = bank.lower()
-                for alias, acc_info in BANK_ACCOUNTS.get(bk, {}).items():
-                    grp = acc_info.get("group")
-                    if grp:
-                        journal_names.append(grp)
-                        
-            for j_name in journal_names:
+            for j_name in [ODOO_JOURNAL_EDC, ODOO_JOURNAL_AR]:
+                if j_name:
                     print(f"    -> Memasukkan '{j_name}'")
-                    val_input.click()
-                    val_input.fill(j_name)
-                    # Tunggu dropdown Odoo muncul
+                    val_input_j.click()
+                    val_input_j.fill(j_name)
                     page.wait_for_timeout(1000)
-                    
-                    # Opsi dropdown biasanya di dalam popover UI
-                    # Cari elemen <a> (opsi) yang textnya mengandung j_name lalu click
                     try:
                         dropdown_opt = page.locator("a", has_text=j_name).first
                         dropdown_opt.wait_for(state="visible", timeout=3000)
                         dropdown_opt.click()
-                    except Exception:
-                        print(f"    [!] Tidak menemukan opsi dropdown untuk '{j_name}', mencoba fallback Enter")
+                    except:
                         page.keyboard.press("Enter")
-                        
                     page.wait_for_timeout(500)
-
-        # Langkah 7: Klik tombol 'Add'
-        print("[+] Mengklik tombol 'Add'...")
-        # Path absolut dari user: /html/body/div[2]/div[2]/div/div/div/div/footer/button[1]
-        # Karena kita menggunakan locator `main`, footernya sejajar dengan main. Jadi kita cari tombol Add di parent popover.
-        popover = dialog.locator("..")
-        xpath_add = "./footer/button[1]"
-        add_loc = popover.locator(f"xpath={xpath_add}")
-        add_loc.click()
-        
-        print("[+] Menunggu tabel data Odoo termuat dengan filter baru...")
-        page.wait_for_timeout(2000) # Tunggu animasi modal tutup
-        page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=30000)
-
-        # Langkah 8: Klik Icon Gear (Action Menu)
-        print("[+] Membuka menu Action (⚙️)...")
-        xpath_gear = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[2]/div[2]/div"
-        page.wait_for_selector(xpath_gear, state="visible", timeout=10000)
-        page.locator(xpath_gear).click()
-        page.wait_for_timeout(1000) # Tunggu menu dropdown terbuka
-
-        # Langkah 9: Klik 'Export All' dan Tangkap Download
-        print("[+] Mengklik 'Export All' dan mendownload file...")
-        xpath_export_all = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[2]/div[2]/div/div/div/span[2]"
-        
-        # Bersiap menangkap event download dari browser
-        with page.expect_download(timeout=60000) as download_info:
-            page.locator(xpath_export_all).click()
             
-        download = download_info.value
-        
-        # Pastikan direktori tujuan ada
-        ODO_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-        
-        # Simpan file yang didownload ke lokasi yang ditentukan di .env
-        download.save_as(str(ODO_EXCEL_PATH))
-        print(f"[+] File berhasil didownload dan disimpan ke: {ODO_EXCEL_PATH}")
+            print("[+] Mengklik tombol 'Add'...")
+            popover_j = dialog_j.locator("..")
+            add_loc_j = popover_j.locator(f"xpath={xpath_add}")
+            add_loc_j.click()
+            
+            page.wait_for_timeout(2000)
+            page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=30000)
+            
+            print("[+] Opening Action menu (⚙️)...")
+            page.locator(xpath_gear).click()
+            page.wait_for_timeout(1000)
+            
+            print("[+] Mengklik 'Export All' untuk Journal Entries...")
+            with page.expect_download(timeout=60000) as download_info_j:
+                page.locator(xpath_export_all).click()
+                
+            download_j = download_info_j.value
+            ODO_JOURNAL_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            download_j.save_as(str(ODO_JOURNAL_EXCEL_PATH))
+            print(f"[+] Journal Entries downloaded successfully to: {ODO_JOURNAL_EXCEL_PATH}")
 
         context.close()
-
+        
+        # -------------------------------------------------------------
+        # ── Auto Recon Final Step (Run journal checker) ──
+        # -------------------------------------------------------------
+        if args.mode == "auto_recon":
+            print("\n[+] Menjalankan Journal Checker...")
+            subprocess.run([sys.executable, "journal_checker.py", latest_file, "--skip-download"], check=True)
+            
+            print(f"\n[+] Opening file {latest_file}...")
+            if os.name == 'nt':
+                os.startfile(latest_file)
+            else:
+                subprocess.run(["open", latest_file])
 
 if __name__ == "__main__":
     run_downloader()
