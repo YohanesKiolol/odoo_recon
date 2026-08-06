@@ -12,6 +12,13 @@ from config import (
 
 
 def run_downloader():
+    # Force UTF-8 — Windows CP1252 can't encode ──, ✅, ❌ etc.
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Odoo Payment Downloader")
     parser.add_argument("--date-from", type=str, default="08/01/2026", help="Format: MM/DD/YYYY")
     parser.add_argument("--date-to", type=str, default="08/01/2026", help="Format: MM/DD/YYYY")
@@ -26,11 +33,16 @@ def run_downloader():
         from datetime import datetime
         print("\n[+] Mode Auto-Recon: Mendeteksi tanggal bank secara otomatis...")
         try:
+            import os
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
+            
             if getattr(sys, "frozen", False):
                 cmd_scan = [sys.executable, "--worker", "--scan"]
             else:
                 cmd_scan = [sys.executable, "main.py", "--scan"]
-            scan_result = subprocess.run(cmd_scan, capture_output=True, text=True)
+            scan_result = subprocess.run(cmd_scan, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
             for line in scan_result.stdout.splitlines():
                 if line.startswith("[DATE_RANGE]|"):
                     parts = line.split("|")
@@ -385,13 +397,17 @@ def run_downloader():
             # -------------------------------------------------------------
             if args.mode == "auto_recon":
                 import glob, subprocess, os
+                env = os.environ.copy()
+                env["PYTHONIOENCODING"] = "utf-8"
+                env["PYTHONUTF8"] = "1"
+                
                 print("\n[+] Menjalankan rekonsiliasi (main.py)...")
-                recon_cmd = [sys.executable, "main.py", "--no-open"]
+                recon_cmd = [sys.executable, "--worker", "--no-open"] if getattr(sys, "frozen", False) else [sys.executable, "main.py", "--no-open"]
                 if selected_banks and "all" not in [b.lower() for b in selected_banks]:
                     for b in selected_banks:
                         recon_cmd.extend(["--bank", b])
                         
-                subprocess.run(recon_cmd, check=True)
+                subprocess.run(recon_cmd, check=True, env=env)
                 
                 list_of_files = glob.glob('output/Reconciliation_*.xlsx')
                 if not list_of_files:
@@ -403,7 +419,7 @@ def run_downloader():
                 print(f"[+] Mengekstrak tanggal dari {latest_file} untuk filter Journal...")
                 
                 try:
-                    date_res = subprocess.run([sys.executable, "journal_checker.py", latest_file, "--get-dates"], capture_output=True, text=True)
+                    date_res = subprocess.run([sys.executable, "journal_checker.py", latest_file, "--get-dates"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
                     for line in date_res.stdout.splitlines():
                         if line.startswith("[DATE_RANGE]|"):
                             parts = line.split("|")
@@ -575,7 +591,11 @@ def run_downloader():
         # -------------------------------------------------------------
         if args.mode == "auto_recon":
             print("\n[+] Menjalankan Journal Checker...")
-            subprocess.run([sys.executable, "journal_checker.py", latest_file, "--skip-download"], check=True)
+            # Gunakan text=True, encoding='utf-8' atau jalankan dengan env
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
+            subprocess.run([sys.executable, "journal_checker.py", latest_file, "--skip-download"], check=True, env=env)
             
             print(f"\n[+] Opening file {latest_file}...")
             if os.name == 'nt':

@@ -27,6 +27,12 @@ IS_WINDOWS = platform.system() == "Windows"
 if "--worker" in sys.argv:
     sys.argv = [a for a in sys.argv if a != "--worker"]  # hide flag from main's argparse
     os.chdir(str(BASE_DIR))
+    # Force UTF-8 — Windows CP1252 can't encode ↔, ✅, ❌, ── etc.
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
     import runpy
     if getattr(sys, "frozen", False):
         main_path = str(Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "main.py")
@@ -1403,11 +1409,20 @@ class App(tk.Tk):
             
             def run_script():
                 try:
+                    env = os.environ.copy()
+                    env.pop("TCL_LIBRARY", None)
+                    env.pop("TK_LIBRARY", None)
+                    env["PYTHONIOENCODING"] = "utf-8"
+                    env["PYTHONUTF8"] = "1"
+                    
+                    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
+                    
                     cmd = [_venv_python, "odoo_journal_creator.py", "--file", str(recon_file), "--import-file", str(out_path), "--config", str(config_path)]
                     proc = subprocess.Popen(
                         cmd, cwd=str(BASE_DIR),
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                        text=True, bufsize=1, encoding="utf-8"
+                        text=True, bufsize=1, encoding="utf-8",
+                        env=env, creationflags=flags
                     )
                     if proc.stdout:
                         for line in iter(proc.stdout.readline, ''):

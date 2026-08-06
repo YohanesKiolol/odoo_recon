@@ -8,6 +8,13 @@ import argparse
 from config import ODO_JOURNAL_EXCEL_PATH, ODOO_JOURNAL_EDC, ODOO_JOURNAL_AR
 
 def check_journals(excel_path: str, skip_download: bool = False, debug: bool = False, get_dates: bool = False):
+    # Force UTF-8 — Windows CP1252 can't encode ──, ✅, ❌ etc.
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
     path = Path(excel_path)
     if not path.exists():
         print(f"❌ File not found: {excel_path}")

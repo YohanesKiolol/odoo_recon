@@ -294,6 +294,13 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
 
 
 def main():
+    # Force UTF-8 — Windows CP1252 can't encode ✅, ❌, ⚠️ etc.
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Automate Odoo Journal Creation via Import")
     parser.add_argument("--file", type=str, help="Path ke file Excel rekonsiliasi (opsional)")
     parser.add_argument("--config", type=str, help="Path ke file JSON konfigurasi jurnal (opsional)")

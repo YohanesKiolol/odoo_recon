@@ -43,6 +43,13 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
     Reads the 'Daily Summary' from the reconciliation file and generates 
     an Odoo-compatible Excel file for Settlement EDC import based on config.
     """
+    # Force UTF-8 — Windows CP1252 can't encode ✅, ❌, ⚠️ etc.
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+
     wb_source = load_workbook(reconciliation_file, data_only=True)
     if "Daily Summary" not in wb_source.sheetnames:
         print("❌ Sheet 'Daily Summary' not found.")
