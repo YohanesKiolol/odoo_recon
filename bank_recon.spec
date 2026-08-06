@@ -7,6 +7,16 @@ from pathlib import Path
 block_cipher = None
 ROOT = Path(SPECPATH)
 
+# Find Playwright driver directory to bundle node + cli.js
+import importlib
+_pw_spec = importlib.util.find_spec('playwright')
+_pw_driver = []
+if _pw_spec and _pw_spec.submodule_search_locations:
+    _pw_root = Path(list(_pw_spec.submodule_search_locations)[0])
+    _pw_driver_dir = _pw_root / 'driver'
+    if _pw_driver_dir.exists():
+        _pw_driver = [(str(_pw_driver_dir), str(Path('playwright') / 'driver'))]
+
 a = Analysis(
     [str(ROOT / 'gui.py')],
     pathex=[str(ROOT)],
@@ -23,14 +33,16 @@ a = Analysis(
         (str(ROOT / 'journal_generator.py'),'.'),
         (str(ROOT / 'odoo_journal_creator.py'),'.'),
         (str(ROOT / 'readers'),           'readers'),
-    ],
+    ] + _pw_driver,
     hiddenimports=[
         'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
         'journal_checker', 'journal_generator', 'odoo_journal_creator',
         'readers.odoo_reader', 'readers.bca_reader',
         'readers.mandiri_reader', 'readers.bri_reader',
         'openpyxl', 'pdfplumber', 'pdfminer', 'pyzipper',
-        'msoffcrypto', 'playwright', 'playwright.sync_api', 'tkcalendar', 'babel.numbers',
+        'msoffcrypto', 'playwright', 'playwright.sync_api',
+        'playwright._impl._driver', 'playwright._repo_version',
+        'tkcalendar', 'babel.numbers',
     ],
     hookspath=[],
     hooksconfig={},

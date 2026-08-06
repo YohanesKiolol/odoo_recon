@@ -77,10 +77,11 @@ def run_downloader():
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
         
         if getattr(sys, "frozen", False):
-            from playwright._impl._driver import compute_driver_executable
-            driver_executable = str(compute_driver_executable())
-            use_shell = (os.name == 'nt' and driver_executable.endswith('.cmd'))
-            subprocess.run([driver_executable, "install", "chromium"], check=True, shell=use_shell)
+            from playwright._impl._driver import compute_driver_executable, get_driver_env
+            node_exe, cli_js = compute_driver_executable()
+            driver_env = get_driver_env()
+            driver_env["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
+            subprocess.run([node_exe, cli_js, "install", "chromium"], check=True, env=driver_env)
         else:
             subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
     except Exception as e:
