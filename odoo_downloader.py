@@ -1,5 +1,7 @@
 import argparse
 import sys
+import os
+import subprocess
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 
@@ -42,7 +44,9 @@ def run_downloader():
                 cmd_scan = [sys.executable, "--worker", "--scan"]
             else:
                 cmd_scan = [sys.executable, "main.py", "--scan"]
-            scan_result = subprocess.run(cmd_scan, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+            
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == 'nt' else 0
+            scan_result = subprocess.run(cmd_scan, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, creationflags=flags)
             for line in scan_result.stdout.splitlines():
                 if line.startswith("[DATE_RANGE]|"):
                     parts = line.split("|")
@@ -76,14 +80,15 @@ def run_downloader():
         browsers_path = str(Path.home() / ".playwright_browsers")
         os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
         
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == 'nt' else 0
         if getattr(sys, "frozen", False):
             from playwright._impl._driver import compute_driver_executable, get_driver_env
             node_exe, cli_js = compute_driver_executable()
             driver_env = get_driver_env()
             driver_env["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
-            subprocess.run([node_exe, cli_js, "install", "chromium"], check=True, env=driver_env)
+            subprocess.run([node_exe, cli_js, "install", "chromium"], check=True, env=driver_env, creationflags=flags)
         else:
-            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True)
+            subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True, creationflags=flags)
     except Exception as e:
         print(f"[!] Failed to check/install browser: {e}")
 
@@ -408,7 +413,8 @@ def run_downloader():
                     for b in selected_banks:
                         recon_cmd.extend(["--bank", b.lower()])
                         
-                result = subprocess.run(recon_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == 'nt' else 0
+                result = subprocess.run(recon_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, creationflags=flags)
                 print(result.stdout, end="")
                 if result.returncode != 0:
                     print(f"[!] main.py failed (exit {result.returncode}):")
@@ -426,7 +432,8 @@ def run_downloader():
                 print(f"[+] Mengekstrak tanggal dari {latest_file} untuk filter Journal...")
                 
                 try:
-                    date_res = subprocess.run([sys.executable, "journal_checker.py", latest_file, "--get-dates"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+                    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == 'nt' else 0
+                    date_res = subprocess.run([sys.executable, "journal_checker.py", latest_file, "--get-dates"], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, creationflags=flags)
                     for line in date_res.stdout.splitlines():
                         if line.startswith("[DATE_RANGE]|"):
                             parts = line.split("|")
@@ -602,7 +609,8 @@ def run_downloader():
             env = os.environ.copy()
             env["PYTHONIOENCODING"] = "utf-8"
             env["PYTHONUTF8"] = "1"
-            subprocess.run([sys.executable, "journal_checker.py", latest_file, "--skip-download"], check=True, env=env)
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == 'nt' else 0
+            subprocess.run([sys.executable, "journal_checker.py", latest_file, "--skip-download"], check=True, env=env, creationflags=flags)
             
             print(f"\n[+] Opening file {latest_file}...")
             if os.name == 'nt':
