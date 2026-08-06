@@ -449,6 +449,8 @@ class App(tk.Tk):
                     cmd.extend(["--banks", ",".join(selected_banks)])
 
                 env = os.environ.copy()
+                env.pop("TCL_LIBRARY", None)
+                env.pop("TK_LIBRARY", None)
                 env["PYTHONIOENCODING"] = "utf-8"
                 process = subprocess.Popen(
                     cmd,
@@ -574,6 +576,8 @@ class App(tk.Tk):
                     cmd.extend(["--banks", ",".join(banks_for_dl)])
                     
                 env = os.environ.copy()
+                env.pop("TCL_LIBRARY", None)
+                env.pop("TK_LIBRARY", None)
                 env["PYTHONIOENCODING"] = "utf-8"
                 process = subprocess.Popen(
                     cmd,
@@ -626,6 +630,8 @@ class App(tk.Tk):
             cmd.append("--scan")
 
         env = os.environ.copy()
+        env.pop("TCL_LIBRARY", None)
+        env.pop("TK_LIBRARY", None)
         env["PYTHONIOENCODING"] = "utf-8"
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
         proc = subprocess.Popen(
@@ -1497,6 +1503,18 @@ if __name__ == "__main__":
             import runpy
             sys.argv = [sys.argv[0], "install", "chromium"]
             runpy.run_module('playwright', run_name='__main__')
+            sys.exit(0)
+        elif sys.argv[1] == "-m":
+            import runpy
+            module_name = sys.argv[2]
+            sys.argv = [sys.argv[0]] + sys.argv[3:]
+            runpy.run_module(module_name, run_name='__main__')
+            sys.exit(0)
+        elif sys.argv[1].endswith(".py"):
+            import runpy
+            script_name = sys.argv[1][:-3]  # remove .py
+            sys.argv = [sys.argv[0]] + sys.argv[2:]
+            runpy.run_module(script_name, run_name='__main__')
             sys.exit(0)
 
     app = App()

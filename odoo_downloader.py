@@ -26,7 +26,10 @@ def run_downloader():
         from datetime import datetime
         print("\n[+] Mode Auto-Recon: Mendeteksi tanggal bank secara otomatis...")
         try:
-            cmd_scan = [sys.executable, "main.py", "--scan"]
+            if getattr(sys, "frozen", False):
+                cmd_scan = [sys.executable, "--worker", "--scan"]
+            else:
+                cmd_scan = [sys.executable, "main.py", "--scan"]
             scan_result = subprocess.run(cmd_scan, capture_output=True, text=True)
             for line in scan_result.stdout.splitlines():
                 if line.startswith("[DATE_RANGE]|"):
