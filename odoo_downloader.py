@@ -405,9 +405,15 @@ def run_downloader():
                 recon_cmd = [sys.executable, "--worker", "--no-open"] if getattr(sys, "frozen", False) else [sys.executable, "main.py", "--no-open"]
                 if selected_banks and "all" not in [b.lower() for b in selected_banks]:
                     for b in selected_banks:
-                        recon_cmd.extend(["--bank", b])
+                        recon_cmd.extend(["--bank", b.lower()])
                         
-                subprocess.run(recon_cmd, check=True, env=env)
+                result = subprocess.run(recon_cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+                print(result.stdout, end="")
+                if result.returncode != 0:
+                    print(f"[!] main.py failed (exit {result.returncode}):")
+                    if result.stderr:
+                        print(result.stderr, end="")
+                    raise SystemExit(result.returncode)
                 
                 list_of_files = glob.glob('output/Reconciliation_*.xlsx')
                 if not list_of_files:
