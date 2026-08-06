@@ -1481,12 +1481,14 @@ if __name__ == "__main__":
     import sys
     import io
 
-    # Force UTF-8 encoding for subprocesses so emojis don't crash Windows CP1252
-    if len(sys.argv) > 1 and sys.argv[1] in ("--run-downloader", "--run-main", "--worker"):
-        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-
     if len(sys.argv) > 1:
+        # Force UTF-8 encoding for subprocesses so emojis don't crash Windows CP1252
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        except AttributeError:
+            pass
+            
         if sys.argv[1] == "--run-downloader":
             import odoo_downloader
             sys.argv = [sys.argv[0]] + sys.argv[2:]
