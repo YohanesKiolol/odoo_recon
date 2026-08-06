@@ -55,11 +55,17 @@ import shutil
 import fnmatch
 from datetime import datetime, timedelta
 import tkinter as tk
-from tkinter import scrolledtext, filedialog, messagebox
+from tkinter import filedialog, messagebox
+import customtkinter as ctk
+
 try:
     from tkcalendar import DateEntry
 except ImportError:
     DateEntry = None
+
+# Configure CustomTkinter — light mode
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("blue")
 
 # Force PyInstaller to bundle dynamic imports
 try:
@@ -75,24 +81,40 @@ else:
     _venv_python_path = BASE_DIR / ".venv" / "bin" / "python"
 
 _venv_python = (
-    sys.executable if getattr(sys, "frozen", False) 
+    sys.executable if getattr(sys, "frozen", False)
     else str(_venv_python_path)
 )
 
-# ── Color palette ─────────────────────────────────────────────────────────────
-BG          = "#F9FAFB" # Very light modern gray background
-PANEL       = "#FFFFFF" # Pure white for inputs/cards
-PREVIEW_BG  = "#F3F4F6" # Subtle light gray for nested panels
-BORDER      = "#E5E7EB" # Very subtle gray border
-ACCENT      = "#71639E" # Odoo Purple
-ACCENT_DARK = "#5B4F80" # Darker Odoo Purple for hover
-SUCCESS     = "#017E84" # Odoo Teal
-SUCCESS_DARK= "#016064" # Darker Odoo Teal for hover
-ERROR       = "#EF4444" # Modern flat red
-WARN        = "#F59E0B" # Modern flat amber
-TEXT        = "#111827" # Crisp near-black
-MUTED       = "#6B7280" # Standard gray for less important text
+# ── Design System & Color Palette ─────────────────────────────────────────────
+FONT_FAMILY = "Segoe UI" if IS_WINDOWS else "Helvetica Neue"
+FONT_MONO   = "Consolas" if IS_WINDOWS else "Menlo"
+
+# Theme Palette (Modern High-Contrast Clean Light)
+BG          = "#F4F5F8"  # Cool neutral app background
+PANEL       = "#FFFFFF"  # Pure white card background
+SIDEBAR_BG  = "#FAFAFC"  # Soft off-white sidebar background
+PREVIEW_BG  = "#F8FAFC"  # Table/Sub-card background
+BORDER      = "#E2E8F0"  # Crisp subtle border color
+BORDER_DARK = "#CBD5E1"  # Stronger border color for inputs
+
+ACCENT      = "#6D28D9"  # Odoo Deep Violet
+ACCENT_DARK = "#5B21B6"  # Hover Violet
+SUCCESS     = "#059669"  # Vibrant Emerald
+SUCCESS_DARK= "#047857"  # Hover Emerald
+ERROR       = "#DC2626"  # Soft Crimson
+ERROR_LIGHT = "#FEE2E2"
+WARN        = "#D97706"  # Warm Amber
+WARN_LIGHT  = "#FEF3C7"
+
+TEXT        = "#0F172A"  # Deep slate text
+MUTED       = "#64748B"  # Muted slate text
 WHITE       = "#FFFFFF"
+
+# CustomTkinter Color Mappings
+CTK_FG      = ("#0F172A", "#0F172A")
+CTK_ACCENT  = ACCENT
+CTK_SUCCESS = SUCCESS
+CTK_ERROR   = ERROR
 
 
 def _open_path(path: str):
@@ -105,203 +127,491 @@ def _open_path(path: str):
         subprocess.run(["xdg-open", path])
 
 
-class App(tk.Tk):
+class CTkDateInput(ctk.CTkFrame):
+    def __init__(self, master, variable=None, default_date=None, **kwargs):
+        super().__init__(
+            master, fg_color=WHITE, border_color=BORDER_DARK, border_width=1,
+            corner_radius=6, height=34, **kwargs
+        )
+        self.pack_propagate(False)
+        self._var = variable or tk.StringVar()
+        
+        self._cal_icon = tk.Label(
+            self, text="📅", bg=WHITE, fg=MUTED,
+            font=(FONT_FAMILY, 7), cursor="hand2"
+        )
+        self._cal_icon.pack(side="right", padx=(0, 4), pady=2)
+        
+        self._entry = ctk.CTkEntry(
+            self, textvariable=self._var, placeholder_text="MM/DD/YYYY",
+            height=28, border_width=0, fg_color="transparent", text_color=TEXT,
+            font=(FONT_FAMILY, 10)
+        )
+        self._entry.pack(side="left", fill="x", expand=True, padx=(4, 0), pady=2)
+        
+        self._cal_icon.bind("<Button-1>", lambda e: self.open_calendar())
+        self._entry.bind("<Button-1>", lambda e: self.open_calendar())
+        self.bind("<Button-1>", lambda e: self.open_calendar())
+        
+        if default_date:
+            self.set_date(default_date)
+            
+    def get(self):
+        return self._var.get().strip()
+        
+    def set_date(self, d):
+        s = d.strftime("%m/%d/%Y") if hasattr(d, "strftime") else str(d)
+        self._var.set(s)
+        self._entry.delete(0, "end")
+        self._entry.insert(0, s)
+            
+    def open_calendar(self):
+        try:
+            import tkcalendar
+            top = ctk.CTkToplevel(self)
+            top.title("Select Date")
+            top.geometry("260x220")
+            top.configure(fg_color=PANEL)
+            top.transient(self.winfo_toplevel())
+            top.grab_set()
+            
+            x = self.winfo_rootx()
+            y = self.winfo_rooty() + self.winfo_height() + 4
+            top.geometry(f"+{x}+{y}")
+            
+            cal = tkcalendar.Calendar(
+                top, selectmode="day", date_pattern="mm/dd/yyyy",
+                background=ACCENT, foreground=WHITE, headersbackground=PREVIEW_BG,
+                headersforeground=TEXT, selectbackground=ACCENT, selectforeground=WHITE,
+                normalbackground=WHITE, normalforeground=TEXT
+            )
+            cal.pack(fill="both", expand=True, padx=8, pady=8)
+            
+            def _select():
+                self.set_date(cal.get_date())
+                top.destroy()
+                
+            cal.bind("<<CalendarSelected>>", lambda e: _select())
+        except Exception:
+            pass
+
+
+class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Bank Reconciliation Tool")
-        self.configure(bg=BG)
-        self.geometry("900x700")
-        self.minsize(700, 500)
+        self.title("Bank Reconciliation Studio")
+        self.configure(fg_color=BG)
+        self.geometry("1100x740")
+        self.minsize(900, 600)
         self.resizable(True, True)
         self._running = False
         self._last_output: str | None = None
         self._build_ui()
         self._center()
 
-    # ── UI ────────────────────────────────────────────────────────────────────
+    # ── UI Construction ───────────────────────────────────────────────────────
     def _build_ui(self):
-        # Main container with padding
-        main_container = tk.Frame(self, bg=BG)
-        main_container.pack(fill="both", expand=True, padx=40, pady=30)
-        
-        # Header
-        hdr = tk.Frame(main_container, bg=BG)
-        hdr.pack(fill="x", pady=(0, 20))
-        tk.Label(hdr, text="Bank Reconciliation", bg=BG, fg=TEXT, font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        tk.Label(hdr, text="Compare Bank transactions with Odoo automatically", bg=BG, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
+        # DateEntry wrapper compatibility fallback
+        class _DateVar:
+            def __init__(self, var):       self._v = var
+            def get(self):                  return self._v.get()
+            def get_date(self):
+                from datetime import datetime as _dt
+                try:    return _dt.strptime(self._v.get(), "%m/%d/%Y")
+                except: return _dt.now()
+            def set_date(self, d):
+                self._v.set(d.strftime("%m/%d/%Y") if hasattr(d, "strftime") else str(d))
 
-        # --- Card 1: Configuration ---
-        config_card = tk.Frame(main_container, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
-        config_card.pack(fill="x", pady=(0, 15))
+        # Load bank logos from assets folder
+        try:
+            from PIL import Image as _PILImage
+            assets_dir = (
+                Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "assets"
+                if getattr(sys, "frozen", False)
+                else BASE_DIR / "assets"
+            )
+            
+            def _get_ctk_logo(filename, max_w=70, max_h=22):
+                p = assets_dir / filename
+                if not p.exists():
+                    return None
+                img = _PILImage.open(p).convert("RGBA")
+                w_orig, h_orig = img.size
+                scale = min(max_w / w_orig, max_h / h_orig)
+                w = max(1, int(w_orig * scale))
+                h = max(1, int(h_orig * scale))
+                
+                target_size = (w * 3, h * 3)
+                img_scaled = img.resize(target_size, _PILImage.Resampling.LANCZOS)
+                return ctk.CTkImage(light_image=img_scaled, dark_image=img_scaled, size=(w, h))
+
+            self._logos = {
+                "All":     _get_ctk_logo("all_logo.png"),
+                "BCA":     _get_ctk_logo("bca_logo.png"),
+                "Mandiri": _get_ctk_logo("mandiri_logo.png"),
+                "BRI":     _get_ctk_logo("bri_logo.png"),
+            }
+            _has_logos = any(v is not None for v in self._logos.values())
+        except Exception as e:
+            print("LOGO LOAD ERROR:", e)
+            self._logos = {}
+            _has_logos = False
+
+        # ── Sidebar Container ─────────────────────────────────────────────────
+        sidebar_outer = ctk.CTkFrame(
+            self, width=290, corner_radius=0,
+            fg_color=SIDEBAR_BG, border_color=BORDER, border_width=1
+        )
+        sidebar_outer.pack(side="left", fill="y")
+        sidebar_outer.pack_propagate(False)
+
+        # Brand header — Pinned top
+        brand = ctk.CTkFrame(sidebar_outer, fg_color="transparent", height=78)
+        brand.pack(fill="x")
+        brand.pack_propagate(False)
+
+        brand_inner = ctk.CTkFrame(brand, fg_color="transparent")
+        brand_inner.pack(fill="both", expand=True, padx=16, pady=14)
+
+        ctk.CTkLabel(
+            brand_inner, text="🏦 Bank Recon",
+            font=(FONT_FAMILY, 18, "bold"), text_color=ACCENT,
+            fg_color="transparent"
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            brand_inner, text="Odoo Automation Tool",
+            font=(FONT_FAMILY, 11), text_color=MUTED,
+            fg_color="transparent"
+        ).pack(anchor="w")
         
-        config_inner = tk.Frame(config_card, bg=PANEL, padx=25, pady=20)
-        config_inner.pack(fill="both", expand=True)
+        ctk.CTkFrame(sidebar_outer, height=1, fg_color=BORDER).pack(fill="x")
+
+        # Scrollable Sidebar Content
+        scroll = ctk.CTkScrollableFrame(
+            sidebar_outer, fg_color="transparent",
+            scrollbar_button_color=BORDER,
+            scrollbar_button_hover_color=MUTED
+        )
+        scroll.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # ── Credentials Section ───────────────────────────────────────────────
+        sec_cred = ctk.CTkFrame(scroll, fg_color=PANEL, corner_radius=8, border_color=BORDER, border_width=1)
+        sec_cred.pack(fill="x", padx=6, pady=(6, 8))
         
-        # tk.Label(config_inner, text="Configuration", bg=PANEL, fg=TEXT, font=("Segoe UI", 12, "bold")).pack(anchor="w", pady=(0, 15))
+        ctk.CTkLabel(
+            sec_cred, text="CREDENTIALS", font=(FONT_FAMILY, 9, "bold"),
+            text_color=MUTED, fg_color="transparent"
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+
+        ctk.CTkLabel(
+            sec_cred, text="Email", font=(FONT_FAMILY, 10),
+            text_color=TEXT, fg_color="transparent"
+        ).pack(anchor="w", padx=10)
         
-        form_frame = tk.Frame(config_inner, bg=PANEL)
-        form_frame.pack(fill="x")
-        
-        entry_style = {"bg": WHITE, "fg": TEXT, "insertbackground": TEXT, "borderwidth": 1, "highlightthickness": 1, "highlightbackground": BORDER, "highlightcolor": ACCENT, "relief": "flat"}
-        
-        # Row 1: Credentials
-        tk.Label(form_frame, text="Email", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=(0, 5))
         self._email_var = tk.StringVar()
-        tk.Entry(form_frame, textvariable=self._email_var, width=35, **entry_style).grid(row=1, column=0, sticky="w", padx=(0, 25), pady=(0, 15), ipady=4)
+        ctk.CTkEntry(
+            sec_cred, textvariable=self._email_var,
+            placeholder_text="odoo@example.com",
+            height=32, corner_radius=6, border_color=BORDER_DARK, fg_color=WHITE, text_color=TEXT,
+            font=(FONT_FAMILY, 10)
+        ).pack(fill="x", padx=10, pady=(2, 6))
+
+        ctk.CTkLabel(
+            sec_cred, text="Password", font=(FONT_FAMILY, 10),
+            text_color=TEXT, fg_color="transparent"
+        ).pack(anchor="w", padx=10)
         
-        tk.Label(form_frame, text="Password", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).grid(row=0, column=1, sticky="w", pady=(0, 5))
         self._password_var = tk.StringVar()
-        pass_entry_frame = tk.Frame(form_frame, bg=PANEL)
-        pass_entry_frame.grid(row=1, column=1, sticky="w", pady=(0, 15))
-        self._password_entry = tk.Entry(pass_entry_frame, textvariable=self._password_var, width=35, show="*", **entry_style)
-        self._password_entry.pack(side="left", ipady=4)
         
-        eye_lbl = tk.Label(pass_entry_frame, text="👁", bg=PANEL, fg=MUTED, cursor="hand2")
-        eye_lbl.pack(side="left", padx=(10, 0))
-        eye_lbl.bind("<ButtonPress-1>", lambda e: self._password_entry.config(show=""))
-        eye_lbl.bind("<ButtonRelease-1>", lambda e: self._password_entry.config(show="*"))
+        pass_frame = ctk.CTkFrame(sec_cred, fg_color=WHITE, border_color=BORDER_DARK, border_width=1, corner_radius=6, height=34)
+        pass_frame.pack(fill="x", padx=10, pady=(2, 10))
+        pass_frame.pack_propagate(False)
+
+        self._show_pass = False
+        def _toggle_pass():
+            self._show_pass = not self._show_pass
+            self._password_entry.configure(show="" if self._show_pass else "•")
+            _btn_eye.configure(text="🙈" if self._show_pass else "👁")
+            
+        _btn_eye = tk.Label(
+            pass_frame, text="👁", bg=WHITE, fg=MUTED,
+            font=(FONT_FAMILY, 9), cursor="hand2"
+        )
+        _btn_eye.pack(side="right", padx=(4, 10), pady=4)
+        _btn_eye.bind("<Button-1>", lambda e: _toggle_pass())
         
-        # Row 2: Bank Target and Date Range
-        tk.Label(form_frame, text="Bank Target", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=(0, 5))
-        bank_frame = tk.Frame(form_frame, bg=PANEL)
-        bank_frame.grid(row=3, column=0, sticky="w", pady=(0, 5))
-        
+        self._password_entry = ctk.CTkEntry(
+            pass_frame, textvariable=self._password_var,
+            placeholder_text="Password", show="•",
+            height=32, border_width=0, fg_color="transparent", text_color=TEXT,
+            font=(FONT_FAMILY, 10)
+        )
+        self._password_entry.pack(side="left", fill="x", expand=True, padx=(8, 4))
+
+        # ── Bank Target Section ───────────────────────────────────────────────
+        sec_bank = ctk.CTkFrame(scroll, fg_color=PANEL, corner_radius=8, border_color=BORDER, border_width=1)
+        sec_bank.pack(fill="x", padx=6, pady=4)
+
+        ctk.CTkLabel(
+            sec_bank, text="BANK TARGET", font=(FONT_FAMILY, 9, "bold"),
+            text_color=MUTED, fg_color="transparent"
+        ).pack(anchor="w", padx=10, pady=(8, 6))
+
         self._bank_vars = {
-            "BCA": tk.BooleanVar(value=False),
+            "BCA":     tk.BooleanVar(value=False),
             "Mandiri": tk.BooleanVar(value=False),
-            "BRI": tk.BooleanVar(value=False),
-            "All": tk.BooleanVar(value=True)
+            "BRI":     tk.BooleanVar(value=False),
+            "All":     tk.BooleanVar(value=True),
         }
-        
-        def _on_bank_toggle(bank_name):
-            if bank_name == "All" and self._bank_vars["All"].get():
+        _brand_bg = {"All": ACCENT, "BCA": "#0066AE", "Mandiri": "#F0A500", "BRI": "#004B87"}
+        _brand_fg = {"All": WHITE, "BCA": WHITE, "Mandiri": "#1A1A2E", "BRI": WHITE}
+        _bank_btns: dict = {}
+
+        def _on_bank_toggle(name):
+            if name == "All" and self._bank_vars["All"].get():
                 for b in ["BCA", "Mandiri", "BRI"]:
                     self._bank_vars[b].set(False)
-            elif bank_name in ["BCA", "Mandiri", "BRI"] and self._bank_vars[bank_name].get():
+            elif name in ["BCA", "Mandiri", "BRI"] and self._bank_vars[name].get():
                 self._bank_vars["All"].set(False)
-        
-        for b in ["All", "BCA", "Mandiri", "BRI"]:
-            cb = tk.Checkbutton(
-                bank_frame, text=b, variable=self._bank_vars[b],
-                bg=PANEL, fg=TEXT, selectcolor=PANEL, activebackground=PANEL, activeforeground=TEXT,
-                font=("Segoe UI", 10), cursor="hand2", command=lambda name=b: _on_bank_toggle(name)
+            _refresh_bank_btns()
+
+        def _refresh_bank_btns():
+            for bname, btn in _bank_btns.items():
+                sel = self._bank_vars[bname].get()
+                btn.configure(
+                    fg_color=WHITE if sel else PREVIEW_BG,
+                    border_color=_brand_bg[bname] if sel else BORDER_DARK,
+                    border_width=2 if sel else 1,
+                )
+
+        bank_grid = ctk.CTkFrame(sec_bank, fg_color="transparent")
+        bank_grid.pack(fill="x", padx=8, pady=(0, 8))
+        bank_grid.columnconfigure(0, weight=1)
+        bank_grid.columnconfigure(1, weight=1)
+
+        for bname, row, col in [("All", 0, 0), ("BCA", 0, 1),
+                                  ("Mandiri", 1, 0), ("BRI", 1, 1)]:
+            sel = self._bank_vars[bname].get()
+            logo_img = self._logos.get(bname) if _has_logos else None
+
+            def _make_cmd(n=bname):
+                def _cmd():
+                    self._bank_vars[n].set(not self._bank_vars[n].get())
+                    _on_bank_toggle(n)
+                return _cmd
+
+            btn = ctk.CTkButton(
+                bank_grid,
+                text="" if logo_img else bname,
+                image=logo_img,
+                height=42, corner_radius=6,
+                fg_color=WHITE if sel else PREVIEW_BG,
+                hover_color=PREVIEW_BG,
+                border_color=_brand_bg[bname] if sel else BORDER_DARK,
+                border_width=2 if sel else 1,
+                font=(FONT_FAMILY, 10, "bold"),
+                command=_make_cmd(),
             )
-            cb.pack(side="left", padx=(0, 15))
+            btn._logo_ref = logo_img
+            btn.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
+            _bank_btns[bname] = btn
             
-        tk.Label(form_frame, text="Date Range", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).grid(row=2, column=1, sticky="w", pady=(0, 5))
-        date_frame = tk.Frame(form_frame, bg=PANEL)
-        date_frame.grid(row=3, column=1, sticky="w", pady=(0, 5))
-        
+        _refresh_bank_btns()
+
+        # ── Date Range Section ────────────────────────────────────────────────
+        sec_date = ctk.CTkFrame(scroll, fg_color=PANEL, corner_radius=8, border_color=BORDER, border_width=1)
+        sec_date.pack(fill="x", padx=6, pady=4)
+
+        ctk.CTkLabel(
+            sec_date, text="DATE RANGE", font=(FONT_FAMILY, 9, "bold"),
+            text_color=MUTED, fg_color="transparent"
+        ).pack(anchor="w", padx=10, pady=(8, 4))
+
         yesterday = datetime.now() - timedelta(days=1)
-        if DateEntry:
-            self._date_from_widget = DateEntry(date_frame, width=12, background=ACCENT, foreground=WHITE, fieldbackground=WHITE, borderwidth=1, date_pattern='mm/dd/yyyy')
-            self._date_from_widget.pack(side="left", padx=(0, 10))
-            self._date_from_widget.set_date(yesterday)
-            
-            tk.Label(date_frame, text="to", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(0, 10))
-            
-            self._date_to_widget = DateEntry(date_frame, width=12, background=ACCENT, foreground=WHITE, fieldbackground=WHITE, borderwidth=1, date_pattern='mm/dd/yyyy')
-            self._date_to_widget.pack(side="left")
-            self._date_to_widget.set_date(yesterday)
-            
-            def _validate_dates(event=None):
-                d_from = self._date_from_widget.get_date()
-                d_to = self._date_to_widget.get_date()
-                if d_to < d_from:
-                    if event and event.widget == self._date_from_widget:
-                        self._date_to_widget.set_date(d_from)
-                    else:
-                        self._date_from_widget.set_date(d_to)
-            
-            self._date_from_widget.bind("<<DateEntrySelected>>", _validate_dates)
-            self._date_to_widget.bind("<<DateEntrySelected>>", _validate_dates)
-        else:
-            self._date_from_var = tk.StringVar(value=yesterday.strftime("%m/%d/%Y"))
-            tk.Entry(date_frame, textvariable=self._date_from_var, width=12, **entry_style).pack(side="left", padx=(0, 10))
-            tk.Label(date_frame, text="to", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).pack(side="left", padx=(0, 10))
-            self._date_to_var = tk.StringVar(value=yesterday.strftime("%m/%d/%Y"))
-            tk.Entry(date_frame, textvariable=self._date_to_var, width=12, **entry_style).pack(side="left")
+        import tkcalendar
+        
+        self._date_from_var = tk.StringVar()
+        self._date_to_var = tk.StringVar()
 
-        # --- Card 2: Operations ---
-        ops_card = tk.Frame(main_container, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
-        ops_card.pack(fill="x", pady=(0, 15))
-        ops_inner = tk.Frame(ops_card, bg=PANEL, padx=25, pady=20)
-        ops_inner.pack(fill="both", expand=True)
+        date_grid = ctk.CTkFrame(sec_date, fg_color="transparent")
+        date_grid.pack(fill="x", padx=8, pady=(0, 8))
+        date_grid.columnconfigure(0, weight=1)
+        date_grid.columnconfigure(1, weight=1)
         
-        self._folder_label = tk.Label(ops_inner, bg=PANEL, fg=MUTED, font=("Segoe UI", 9), anchor="w")
-        self._folder_label.pack(fill="x", pady=(0, 15))
-        self._refresh_folder_status()
-        
-        action_frame = tk.Frame(ops_inner, bg=PANEL)
-        action_frame.pack(fill="x")
-        
-        sec_btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "solid", "cursor": "hand2", "padx": 16, "pady": 6, "borderwidth": 1, "highlightbackground": BORDER}
-        prim_btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "flat", "cursor": "hand2", "padx": 16, "pady": 7, "borderwidth": 0}
-        
-        left_actions = tk.Frame(action_frame, bg=PANEL)
-        left_actions.pack(side="left")
-        
-        right_actions = tk.Frame(action_frame, bg=PANEL)
-        right_actions.pack(side="right")
-        
-        self._upload_btn = tk.Button(left_actions, text="Upload", bg=WHITE, fg=TEXT, activebackground=PREVIEW_BG, command=self._on_upload, **sec_btn_style)
-        self._upload_btn.pack(side="left", padx=(0, 8))
-        self._download_btn = tk.Button(left_actions, text="Download", bg=WHITE, fg=TEXT, activebackground=PREVIEW_BG, command=self._on_download, **sec_btn_style)
-        self._download_btn.pack(side="left", padx=(0, 8))
-        self._cleanse_btn = tk.Button(left_actions, text="Clean", bg=WHITE, fg=ERROR, activebackground=PREVIEW_BG, command=self._on_cleanse, **sec_btn_style)
-        self._cleanse_btn.pack(side="left", padx=(0, 8))
-        self._scan_btn = tk.Button(left_actions, text="Scan Data", bg=WHITE, fg=TEXT, activebackground=PREVIEW_BG, command=self._on_scan, **sec_btn_style)
-        self._scan_btn.pack(side="left", padx=(0, 8))
-        
-        self._run_btn = tk.Button(right_actions, text="Reconciliation", bg=SUCCESS, fg=WHITE, activebackground=SUCCESS_DARK, activeforeground=WHITE, command=self._on_run, **prim_btn_style)
-        self._run_btn.pack(side="left", padx=(0, 8))
-        self._journal_btn = tk.Button(right_actions, text="Generate Journal", bg=ACCENT, fg=WHITE, activebackground=ACCENT_DARK, activeforeground=WHITE, command=self._on_journal, **prim_btn_style)
-        self._journal_btn.pack(side="left")
-
-        # --- Card 3: Output Logs ---
-        log_card = tk.Frame(main_container, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
-        log_card.pack(fill="both", expand=True)
-        log_inner = tk.Frame(log_card, bg=PANEL, padx=0, pady=0)
-        log_inner.pack(fill="both", expand=True)
-        
-        status_row = tk.Frame(log_inner, bg=PANEL, padx=20, pady=12)
-        status_row.pack(fill="x", side="bottom")
-        
-        tk.Frame(log_inner, bg=BORDER, height=1).pack(fill="x", side="bottom")
-        
-        self._log = scrolledtext.ScrolledText(
-            log_inner, bg=PANEL, fg=TEXT, insertbackground=TEXT,
-            font=("Consolas", 10), relief="flat", state="disabled",
-            wrap="word", borderwidth=0, highlightthickness=0, padx=20, pady=20
+        ctk.CTkLabel(date_grid, text="From", font=(FONT_FAMILY, 9), text_color=MUTED,
+                     fg_color="transparent").grid(row=0, column=0, sticky="w", padx=2)
+        ctk.CTkLabel(date_grid, text="To", font=(FONT_FAMILY, 9), text_color=MUTED,
+                     fg_color="transparent").grid(row=0, column=1, sticky="w", padx=2)
+                     
+        self._date_from_widget = CTkDateInput(
+            date_grid, variable=self._date_from_var, default_date=yesterday
         )
+        self._date_from_widget.grid(row=1, column=0, sticky="ew", padx=(0, 3))
+        
+        self._date_to_widget = CTkDateInput(
+            date_grid, variable=self._date_to_var, default_date=yesterday
+        )
+        self._date_to_widget.grid(row=1, column=1, sticky="ew", padx=(3, 0))
+
+        # ── Quick Folder Links Section ────────────────────────────────────────
+        sec_links = ctk.CTkFrame(scroll, fg_color=PANEL, corner_radius=8, border_color=BORDER, border_width=1)
+        sec_links.pack(fill="x", padx=6, pady=4)
+
+        ctk.CTkLabel(
+            sec_links, text="QUICK ACCESS", font=(FONT_FAMILY, 9, "bold"),
+            text_color=MUTED, fg_color="transparent"
+        ).pack(anchor="w", padx=10, pady=(6, 2))
+
+        def _link_btn(parent, text, cmd):
+            b = ctk.CTkButton(
+                parent, text=text, height=28,
+                fg_color="transparent", hover_color=PREVIEW_BG,
+                text_color=ACCENT, font=(FONT_FAMILY, 10, "bold"),
+                anchor="w", command=cmd
+            )
+            b.pack(fill="x", padx=6, pady=1)
+            return b
+
+        _link_btn(sec_links, "📂 Open Merchant", self._open_input)
+        _link_btn(sec_links, "📁 Open Mutation", self._open_mutation)
+        self._open_btn_sidebar = _link_btn(sec_links, "📊 Open Result", self._open_output)
+
+        # ── Primary CTA Action Stack — Pinned Bottom ─────────────────────────
+        ctk.CTkFrame(sidebar_outer, height=1, fg_color=BORDER).pack(fill="x")
+        _cta = ctk.CTkFrame(sidebar_outer, fg_color="transparent")
+        _cta.pack(fill="x", padx=12, pady=12)
+
+        self._run_btn = ctk.CTkButton(
+            _cta, text="▶  Reconciliation",
+            height=40, fg_color=SUCCESS, hover_color=SUCCESS_DARK,
+            text_color=WHITE, font=(FONT_FAMILY, 11, "bold"),
+            corner_radius=8, command=self._on_run
+        )
+        self._run_btn.pack(fill="x", pady=(0, 6))
+
+        self._journal_btn = ctk.CTkButton(
+            _cta, text="📋  Generate Journal",
+            height=40, fg_color=ACCENT, hover_color=ACCENT_DARK,
+            text_color=WHITE, font=(FONT_FAMILY, 11, "bold"),
+            corner_radius=8, command=self._on_journal
+        )
+        self._journal_btn.pack(fill="x")
+
+        # ── Main Content Area ─────────────────────────────────────────────────
+        main_area = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
+        main_area.pack(side="left", fill="both", expand=True)
+
+        # ── Top Header Toolbar (Input Folder Status) ──────────────────────────
+        topbar = ctk.CTkFrame(main_area, fg_color=SIDEBAR_BG, corner_radius=0, height=78)
+        topbar.pack(fill="x")
+        topbar.pack_propagate(False)
+        
+        tb_wrap = ctk.CTkFrame(topbar, fg_color="transparent")
+        tb_wrap.pack(fill="both", expand=True, padx=20, pady=22)
+
+        self._folder_label = ctk.CTkLabel(
+            tb_wrap, text="",
+            font=(FONT_FAMILY, 11, "bold"), text_color=SUCCESS,
+            fg_color="transparent", anchor="w"
+        )
+        self._folder_label.pack(side="left", anchor="w")
+        self._refresh_folder_status()
+
+        ctk.CTkFrame(main_area, height=1, fg_color=BORDER).pack(fill="x")
+
+        # ── Action Buttons & Console Log Area ─────────────────────────────────
+        card_wrap = ctk.CTkFrame(main_area, fg_color="transparent")
+        card_wrap.pack(fill="both", expand=True, padx=16, pady=14)
+
+        # Action Buttons Toolbar (positioned directly on top of Console Log)
+        action_bar = ctk.CTkFrame(card_wrap, fg_color="transparent")
+        action_bar.pack(fill="x", pady=(0, 10))
+
+        def _sec_btn(parent, text, cmd, color=TEXT, hover=PREVIEW_BG):
+            return ctk.CTkButton(
+                parent, text=text, height=34,
+                fg_color=PANEL, hover_color=hover,
+                border_color=BORDER_DARK, border_width=1,
+                text_color=color, font=(FONT_FAMILY, 10, "bold"),
+                corner_radius=6, command=cmd
+            )
+
+        self._upload_btn   = _sec_btn(action_bar, "⬆ Upload", self._on_upload)
+        self._upload_btn.pack(side="left", padx=(0, 6))
+        self._download_btn = _sec_btn(action_bar, "⬇ Download", self._on_download)
+        self._download_btn.pack(side="left", padx=(0, 6))
+        self._scan_btn     = _sec_btn(action_bar, "🔍 Scan", self._on_scan)
+        self._scan_btn.pack(side="left", padx=(0, 6))
+        self._cleanse_btn  = _sec_btn(action_bar, "🗑 Clean", self._on_cleanse, color=ERROR, hover=ERROR_LIGHT)
+        self._cleanse_btn.pack(side="left")
+
+        # Console Log Card
+        log_card = ctk.CTkFrame(card_wrap, fg_color=PANEL, corner_radius=10, border_color=BORDER, border_width=1)
+        log_card.pack(fill="both", expand=True)
+
+        log_hdr = ctk.CTkFrame(log_card, fg_color="transparent")
+        log_hdr.pack(fill="x", padx=16, pady=(12, 6))
+        
+        ctk.CTkLabel(
+            log_hdr, text="Console Log",
+            font=(FONT_FAMILY, 12, "bold"), text_color=TEXT,
+            fg_color="transparent"
+        ).pack(side="left")
+
+        self._clear_log_btn = ctk.CTkButton(
+            log_hdr, text="↻ Clear Log", height=26, width=70,
+            fg_color="transparent", hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=MUTED, font=(FONT_FAMILY, 10),
+            corner_radius=5, command=self._clear_log
+        )
+        self._clear_log_btn.pack(side="right")
+        
+        ctk.CTkFrame(log_card, height=1, fg_color=BORDER).pack(fill="x", padx=16)
+
+        log_frame = ctk.CTkFrame(log_card, fg_color="transparent")
+        log_frame.pack(fill="both", expand=True, padx=10, pady=(6, 0))
+
+        self._log = tk.Text(
+            log_frame, bg=PANEL, fg=TEXT,
+            font=(FONT_MONO, 9), relief="flat", state="disabled",
+            wrap="word", borderwidth=0, highlightthickness=0,
+            padx=10, pady=10, insertbackground=TEXT
+        )
+        _log_scroll = tk.Scrollbar(log_frame, command=self._log.yview)
+        self._log.configure(yscrollcommand=_log_scroll.set)
+        _log_scroll.pack(side="right", fill="y")
         self._log.pack(fill="both", expand=True)
+
         self._log.tag_config("ok",   foreground=SUCCESS)
         self._log.tag_config("err",  foreground=ERROR)
         self._log.tag_config("warn", foreground=WARN)
-        self._log.tag_config("head", foreground=ACCENT, font=("Consolas", 10, "bold"))
+        self._log.tag_config("head", foreground=ACCENT, font=(FONT_MONO, 9, "bold"))
         self._log.tag_config("dim",  foreground=MUTED)
+
+        # ── Integrated Status Bar ─────────────────────────────────────────────
+        statusbar = ctk.CTkFrame(log_card, fg_color=PREVIEW_BG, corner_radius=0, border_color=BORDER, border_width=1)
+        statusbar.pack(fill="x", side="bottom")
+        
+        st = ctk.CTkFrame(statusbar, fg_color="transparent")
+        st.pack(fill="x", padx=16, pady=6)
+        
+        self._dot = ctk.CTkLabel(
+            st, text="●", width=14,
+            font=(FONT_FAMILY, 12), text_color=SUCCESS,
+            fg_color="transparent"
+        )
+        self._dot.pack(side="left")
         
         self._status_var = tk.StringVar(value="Ready")
-        self._dot = tk.Label(status_row, text="●", bg=PANEL, fg=MUTED, font=("Segoe UI", 12))
-        self._dot.pack(side="left")
-        tk.Label(status_row, textvariable=self._status_var, bg=PANEL, fg=MUTED, font=("Segoe UI", 9, "bold")).pack(side="left", padx=(6, 0))
-        
-        util_links = tk.Frame(status_row, bg=PANEL)
-        util_links.pack(side="right")
-        
-        def _make_link(parent, text, cmd):
-            lbl = tk.Label(parent, text=text, bg=PANEL, fg=ACCENT, font=("Segoe UI", 9, "underline"), cursor="hand2")
-            lbl.pack(side="left", padx=(15, 0))
-            def _on_click(e):
-                if lbl.cget("state") != "disabled":
-                    cmd()
-            lbl.bind("<Button-1>", _on_click)
-            return lbl
-            
-        self._clear_log_btn = _make_link(util_links, "↻ Clear Logs", self._clear_log)
-        self._open_input_btn = _make_link(util_links, "Open Merchant", self._open_input)
-        self._open_mutation_btn = _make_link(util_links, "Open Mutation", self._open_mutation)
-        self._open_btn = _make_link(util_links, "Open Result", self._open_output)
+        ctk.CTkLabel(
+            st, textvariable=self._status_var,
+            font=(FONT_FAMILY, 10, "bold"), text_color=TEXT,
+            fg_color="transparent"
+        ).pack(side="left", padx=(4, 0))
+
+        # Alias for completion callback compatibility
+        self._open_btn = self._open_btn_sidebar
 
     def _center(self):
         self.update_idletasks()
@@ -312,9 +622,10 @@ class App(tk.Tk):
     def _refresh_folder_status(self):
         files = list(INPUT_DIR.rglob("*")) if INPUT_DIR.exists() else []
         n = sum(1 for f in files if f.is_file())
-        self._folder_label.config(
-            text=f"📂  Input folder: {INPUT_DIR}   ({n} file found)",
-            fg=SUCCESS if n > 0 else WARN,
+        color = SUCCESS if n > 0 else WARN
+        self._folder_label.configure(
+            text=f"📂 Input folder: {INPUT_DIR}   ({n} file{'s' if n != 1 else ''} found)",
+            text_color=color,
         )
 
     def _log_write(self, text: str, tag: str = ""):
@@ -325,14 +636,14 @@ class App(tk.Tk):
 
     def _set_status(self, text: str, color: str):
         self._status_var.set(text)
-        self._dot.config(fg=color)
+        self._dot.configure(text_color=color)
 
     def _clear_log(self):
         self._log.config(state="normal")
         self._log.delete("1.0", tk.END)
         self._log.config(state="disabled")
 
-    # ── New Feature Stubs ─────────────────────────────────────────────────────
+    # ── Feature Operations ────────────────────────────────────────────────────
     def _on_upload(self):
         try:
             from config import (
@@ -380,7 +691,6 @@ class App(tk.Tk):
                 elif "payments" in name and name.endswith(".xlsx"):
                     target_dir = ODO_EXCEL_PATH.parent
                 else:
-                    # Detect BRI based on MID and .zip extension, fallback to BRI_ZIP_PATTERN
                     from config import BANK_ACCOUNTS, BRI_ZIP_PATTERN
                     if name.endswith(".zip") or name.endswith(".pdf") or name.endswith(".csv"):
                         for alias, acc_info in BANK_ACCOUNTS.get("bri", {}).items():
@@ -390,7 +700,6 @@ class App(tk.Tk):
                                 matched_bank = "bri"
                                 break
                         
-                        # Fallback for legacy single account
                         if not matched_bank and BRI_ZIP_PATTERN and BRI_ZIP_PATTERN.lower() in name:
                             target_dir = BRI_ZIP_DIR
                             matched_bank = "bri"
@@ -424,7 +733,7 @@ class App(tk.Tk):
                     
             self._refresh_folder_status()
         except Exception as e:
-            self._log_write(f"\n❌ Error during Upload: {e}\nEnsure your .env file is configured correctly!\n", "error")
+            self._log_write(f"\n❌ Error during Upload: {e}\nEnsure your .env file is configured correctly!\n", "err")
 
     def _on_download(self):
         if DateEntry:
@@ -435,7 +744,7 @@ class App(tk.Tk):
             date_to = self._date_to_var.get().strip()
         
         self._log_write(f"\n── Downloading Odoo Payment (From {date_from} to {date_to}) ──\n", "head")
-        self._set_status("Downloading Odoo...", "orange")
+        self._set_status("Downloading Odoo...", WARN)
         self._running = True
         
         def run():
@@ -476,10 +785,10 @@ class App(tk.Tk):
                 if process.returncode == 0:
                     self._log_write("\n✅ Odoo Download Finished!\n", "ok")
                 else:
-                    self._log_write(f"\n❌ Odoo Download failed with code {process.returncode}\n", "error")
+                    self._log_write(f"\n❌ Odoo Download failed with code {process.returncode}\n", "err")
                     
             except Exception as e:
-                self._log_write(f"\n❌ Error: {e}\n", "error")
+                self._log_write(f"\n❌ Error: {e}\n", "err")
             finally:
                 self._running = False
                 self._refresh_folder_status()
@@ -508,7 +817,7 @@ class App(tk.Tk):
                         target_subdir.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(f), str(target_subdir / f.name))
                         moved_count += 1
-                            
+                             
             if ODO_EXCEL_PATH.exists():
                 recap_dir.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(ODO_EXCEL_PATH), str(recap_dir / ODO_EXCEL_PATH.name))
@@ -521,7 +830,7 @@ class App(tk.Tk):
                 
             self._refresh_folder_status()
         except Exception as e:
-            self._log_write(f"\n❌ Error during Data Cleanup: {e}\nEnsure your .env file is configured correctly!\n", "error")
+            self._log_write(f"\n❌ Error during Data Cleanup: {e}\nEnsure your .env file is configured correctly!\n", "err")
 
     # ── Run / Scan ────────────────────────────────────────────────────────────
     def _on_scan(self):
@@ -534,9 +843,9 @@ class App(tk.Tk):
             self._running = False
             return
 
-        self._scan_btn.config(state="disabled")
-        self._run_btn.config(state="disabled")
-        self._open_btn.config(state="disabled")
+        self._scan_btn.configure(state="disabled")
+        self._run_btn.configure(state="disabled")
+        self._open_btn.configure(state="disabled")
         self._log.config(state="normal")
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
@@ -554,9 +863,9 @@ class App(tk.Tk):
             self._running = False
             return
 
-        self._scan_btn.config(state="disabled")
-        self._run_btn.config(state="disabled", text="⏳  Processing...")
-        self._open_btn.config(state="disabled")
+        self._scan_btn.configure(state="disabled")
+        self._run_btn.configure(state="disabled", text="⏳ Processing...")
+        self._open_btn.configure(state="disabled")
         self._log.config(state="normal")
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
@@ -601,7 +910,7 @@ class App(tk.Tk):
                     
                 process.wait()
                 if process.returncode != 0:
-                    self.after(0, self._log_write, f"\n❌ Auto-Recon Failed.\n", "error")
+                    self.after(0, self._log_write, f"\n❌ Auto-Recon Failed.\n", "err")
                     self.after(0, self._on_done, process.returncode, None)
                     return
                 
@@ -609,15 +918,13 @@ class App(tk.Tk):
                 self.after(0, self._on_done, 0, None)
                 
             except Exception as e:
-                self.after(0, self._log_write, f"\n❌ Error during Auto-Recon: {e}\n", "error")
+                self.after(0, self._log_write, f"\n❌ Error during Auto-Recon: {e}\n", "err")
                 self.after(0, self._on_done, 1, None)
                 return
             
         threading.Thread(target=run_all, daemon=True).start()
 
     def _run_script(self, selected_banks, is_scan=False):
-        # When frozen: re-launch the same .exe with --worker flag for clean stdout
-        # When in dev:  launch main.py via the venv python
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--worker"]
         elif _venv_python_path.exists():
@@ -695,7 +1002,7 @@ class App(tk.Tk):
             j_proc.wait()
             
             if j_proc.returncode != 0:
-                self.after(0, self._log_write, f"\n❌ Journal Entries Check failed.\n", "error")
+                self.after(0, self._log_write, f"\n❌ Journal Entries Check failed.\n", "err")
                 
         self.after(0, self._on_done, proc.returncode, last_output_file)
 
@@ -710,10 +1017,10 @@ class App(tk.Tk):
 
     def _on_done(self, code: int, output_path: str | None):
         self._running = False
-        self._scan_btn.config(state="normal")
-        self._run_btn.config(state="normal", text="▶ Reconciliation")
-        self._journal_btn.config(state="normal")
-        self._open_btn.config(state="normal")
+        self._scan_btn.configure(state="normal")
+        self._run_btn.configure(state="normal", text="▶  Reconciliation")
+        self._journal_btn.configure(state="normal")
+        self._open_btn.configure(state="normal")
         
         if code == 0:
             self._set_status("Finished ✓", SUCCESS)
@@ -738,6 +1045,7 @@ class App(tk.Tk):
         except Exception as e:
             self._log_write(f"\n⚠️ Failed to update dates: {e}\n", "warn")
 
+    # ── Journal Confirmation Modal Overhaul ───────────────────────────────────
     def _on_journal(self):
         if self._running:
             return
@@ -752,17 +1060,18 @@ class App(tk.Tk):
             return
         latest_file = max(output_files, key=os.path.getctime)
         
-        top = tk.Toplevel(self)
+        top = ctk.CTkToplevel(self)
         top.title("Confirm Journal Creation")
         
-        window_width = 1220
-        window_height = 850
         screen_width = top.winfo_screenwidth()
         screen_height = top.winfo_screenheight()
-        center_x = int(screen_width/2 - window_width / 2)
-        center_y = int(screen_height/2 - window_height / 2)
+        window_width = min(1300, int(screen_width * 0.94))
+        window_height = min(1000, int(screen_height * 0.90))
+        center_x = max(0, int(screen_width / 2 - window_width / 2))
+        center_y = max(0, int(screen_height / 2 - window_height / 2))
         top.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
-        top.configure(bg=BG)
+        top.minsize(1200, 750)
+        top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
 
@@ -793,7 +1102,6 @@ class App(tk.Tk):
                     c_cat = col_map.get("transaction category", 7)
                     c_amt = col_map.get("total amount", 8)
                 
-                    # Dictionary to hold mutation sums: (tanggal_string, group_string) -> total_amount
                     from collections import defaultdict
                     self._mutation_totals = defaultdict(float)
                     self._mutation_raw = []
@@ -876,8 +1184,6 @@ class App(tk.Tk):
                     status_str = str(status).strip()
                     status_valid = ("Match" in status_str) or (diff <= JOURNAL_TOLERANCE)
                 
-                    # Use actual Payment Date for mutation check
-                    from datetime import datetime, timedelta
                     mutation_found = False
                     mutation_matched = False
                     mut_total = 0.0
@@ -919,7 +1225,7 @@ class App(tk.Tk):
             except Exception as e:
                 self._set_status(f"Error reading excel: {e}", ERROR)
                 return
-            # State Initialization
+
             journal_state.clear()
             for item in items:
                 is_reconciled = str(item.get("reconciled", "")).strip().lower() == "yes"
@@ -965,34 +1271,45 @@ class App(tk.Tk):
                     "disabled_ar": disabled_ar
                 })
 
-        # Initial load
         _load_data()
 
-            
         ITEMS_PER_PAGE = 15
         current_page = [0]
         
-        header_frame = tk.Frame(top, bg=PANEL, padx=40, pady=25, highlightbackground=BORDER, highlightthickness=1)
+        # Modal Header Bar
+        header_frame = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=80, border_color=BORDER, border_width=1)
         header_frame.pack(fill="x")
+        header_frame.pack_propagate(False)
         
-        left_header = tk.Frame(header_frame, bg=PANEL)
-        left_header.pack(side="left")
+        left_header = ctk.CTkFrame(header_frame, fg_color="transparent")
+        left_header.pack(side="left", padx=24, pady=16)
         
-        tk.Label(left_header, text="Journal Creation", bg=PANEL, fg=TEXT, font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        tk.Label(left_header, text="Review and select transactions to post. Expand a row to preview journal entries.", bg=PANEL, fg=MUTED, font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
+        ctk.CTkLabel(
+            left_header, text="Confirm Journal Creation",
+            font=(FONT_FAMILY, 15, "bold"), text_color=TEXT
+        ).pack(anchor="w")
+        ctk.CTkLabel(
+            left_header, text="Review and select transactions to post. Expand any row to preview journal entries.",
+            font=(FONT_FAMILY, 10), text_color=MUTED
+        ).pack(anchor="w", pady=(2, 0))
         
         def _refresh_modal():
             _load_data()
             render_page(current_page[0])
             
-        tk.Button(header_frame, text="↻ Refresh", bg=WHITE, fg=TEXT, relief="solid", borderwidth=1, highlightbackground=BORDER, font=("Segoe UI", 9, "bold"), cursor="hand2", command=_refresh_modal, padx=12, pady=4).pack(side="right")
+        ctk.CTkButton(
+            header_frame, text="↻ Refresh Data", height=32,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+            corner_radius=6, command=_refresh_modal
+        ).pack(side="right", padx=24)
         
-        # Main body container
-        body_frame = tk.Frame(top, bg=BG)
-        body_frame.pack(fill="both", expand=True, padx=40, pady=20)
+        # Main Scrollable Body
+        body_frame = ctk.CTkFrame(top, fg_color=BG, corner_radius=0)
+        body_frame.pack(fill="both", expand=True, padx=24, pady=16)
         
-        # Scrollable Data Area
-        list_frame = tk.Frame(body_frame, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+        list_frame = ctk.CTkFrame(body_frame, fg_color=PANEL, corner_radius=8, border_color=BORDER, border_width=1)
         list_frame.pack(fill="both", expand=True)
         
         canvas = tk.Canvas(list_frame, bg=PANEL, highlightthickness=0)
@@ -1007,26 +1324,35 @@ class App(tk.Tk):
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        # Bottom Action Bar
-        footer_frame = tk.Frame(top, bg=PANEL, padx=40, pady=20, highlightbackground=BORDER, highlightthickness=1)
+        # Modal Footer Toolbar
+        footer_frame = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=70, border_color=BORDER, border_width=1)
         footer_frame.pack(fill="x", side="bottom")
+        footer_frame.pack_propagate(False)
         
-        # Pagination (Left in footer)
-        pagination_frame = tk.Frame(footer_frame, bg=PANEL)
+        footer_inner = ctk.CTkFrame(footer_frame, fg_color="transparent")
+        footer_inner.pack(fill="both", expand=True, padx=24, pady=14)
+
+        pagination_frame = ctk.CTkFrame(footer_inner, fg_color="transparent")
         pagination_frame.pack(side="left")
         
-        sec_btn_style = {"font": ("Segoe UI", 9, "bold"), "relief": "solid", "cursor": "hand2", "padx": 12, "pady": 4, "borderwidth": 1, "highlightbackground": BORDER}
-        
-        btn_prev = tk.Button(pagination_frame, text="< Prev", bg=WHITE, fg=TEXT, **sec_btn_style)
+        btn_prev = ctk.CTkButton(
+            pagination_frame, text="◄ Prev", width=70, height=32,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"), corner_radius=6
+        )
         btn_prev.pack(side="left")
         
-        lbl_page = tk.Label(pagination_frame, text="", bg=PANEL, fg=TEXT, font=("Segoe UI", 9, "bold"))
-        lbl_page.pack(side="left", padx=15)
+        lbl_page = ctk.CTkLabel(pagination_frame, text="", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT)
+        lbl_page.pack(side="left", padx=12)
         
-        btn_next = tk.Button(pagination_frame, text="Next >", bg=WHITE, fg=TEXT, **sec_btn_style)
+        btn_next = ctk.CTkButton(
+            pagination_frame, text="Next ►", width=70, height=32,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"), corner_radius=6
+        )
         btn_next.pack(side="left")
-        
-        # We will add process buttons to footer later
         
         def _on_mousewheel(event):
             delta = event.delta
@@ -1044,24 +1370,48 @@ class App(tk.Tk):
             for widget in scrollable_frame.winfo_children():
                 widget.destroy()
                 
-            # Render Table Header
-            headers = ["", "Select", "Date", "Journal", "Merchant Amt", "Odoo Amt", "Mutation + Admin", "Difference", "EDC", "EDC Info", "AR", "AR Info"]
+            # Column Minwidth Specifications for Clean Breathing Room
+            col_widths = {
+                0: 40,   # Expand ►
+                1: 60,   # Select
+                2: 110,  # Date
+                3: 140,  # Journal
+                4: 130,  # Merchant Amt
+                5: 130,  # Odoo Amt
+                6: 145,  # Mutation + Admin
+                7: 80,  # Difference
+                8: 54,   # EDC
+                9: 115,  # EDC Status
+                10: 54,  # AR
+                11: 115   # AR Status
+            }
+            for col, w in col_widths.items():
+                scrollable_frame.grid_columnconfigure(col, minsize=w)
+
+            headers = ["", "Select", "Date", "Journal", "Merchant Amt", "Odoo Amt", "Mutation + Admin", "Difference", "EDC", "EDC Status", "AR", "AR Status"]
             for col, h in enumerate(headers):
                 lbl_anchor = "w" if col in [2, 3] else "e" if col in [4, 5, 6, 7] else "center"
-                lbl = tk.Label(scrollable_frame, text=h, bg=PREVIEW_BG, fg=MUTED, font=("Segoe UI", 9, "bold"), anchor=lbl_anchor, padx=10)
-                lbl.grid(row=0, column=col, sticky="nsew", pady=(0, 8), ipady=8)
+                lbl = tk.Label(
+                    scrollable_frame, text=h, bg=PREVIEW_BG, fg=MUTED,
+                    font=(FONT_FAMILY, 9, "bold"), anchor=lbl_anchor, padx=14
+                )
+                lbl.grid(row=0, column=col, sticky="nsew", pady=(0, 4), ipady=8)
                 
-            # Fill the remaining space on the right with the header color
             dummy = tk.Label(scrollable_frame, text="", bg=PREVIEW_BG)
-            dummy.grid(row=0, column=len(headers), sticky="nsew", pady=(0, 8), ipady=8)
+            dummy.grid(row=0, column=len(headers), sticky="nsew", pady=(0, 4), ipady=8)
             scrollable_frame.grid_columnconfigure(len(headers), weight=1)
+            
+            # Header Bottom Border Line
+            tk.Frame(scrollable_frame, bg=BORDER_DARK, height=1).grid(row=1, column=0, columnspan=len(headers)+1, sticky="ew", pady=(0, 4))
                 
             start_idx = page_idx * ITEMS_PER_PAGE
             end_idx = min(start_idx + ITEMS_PER_PAGE, len(journal_state))
             
             for i, state in enumerate(journal_state[start_idx:end_idx]):
-                r_main = i * 2 + 1
-                r_det = i * 2 + 2
+                r_main = i * 3 + 2
+                r_det  = i * 3 + 3
+                r_sep  = i * 3 + 4
+                bg_row = PANEL if i % 2 == 0 else "#FAFAFC"
                 
                 item = state["item"]
                 var_item = state["var_item"]
@@ -1083,7 +1433,6 @@ class App(tk.Tk):
                 b_name = str(item['bank']).lower()
                 b_group = str(item['group']).lower()
                 
-                # Find alias and properties
                 alias = ""
                 props = {}
                 for a, p in config.BANK_ACCOUNTS.get(b_name, {}).items():
@@ -1092,27 +1441,25 @@ class App(tk.Tk):
                         props = p
                         break
                         
-                det_frame = tk.Frame(scrollable_frame, bg=PREVIEW_BG, highlightbackground=BORDER, highlightthickness=1)
+                det_frame = tk.Frame(scrollable_frame, bg=PREVIEW_BG, highlightbackground=BORDER_DARK, highlightthickness=1)
                 
-                # EDC Section
+                # EDC Section Preview
                 edc_debit = props.get("edc_debit") or f"{str(item['bank']).upper()} EDC Debit"
                 edc_credit = props.get("edc_credit") or f"{str(item['group'])} Credit"
                 
                 edc_frame = tk.Frame(det_frame, bg=PREVIEW_BG)
-                edc_frame.pack(side="left", anchor="n", padx=20, pady=5)
+                edc_frame.pack(side="left", anchor="n", padx=20, pady=10)
                 
-                tk.Label(edc_frame, text="EDC Journal:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=0, column=0, columnspan=3, sticky="w")
-                tk.Label(edc_frame, text="Debit:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w")
-                tk.Label(edc_frame, text=edc_debit, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=1, column=1, sticky="w", padx=(10, 40))
-                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=1, column=2, sticky="e")
-                tk.Label(edc_frame, text="Credit:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w")
-                tk.Label(edc_frame, text=edc_credit, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=2, column=1, sticky="w", padx=(10, 40))
-                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=2, column=2, sticky="e")
+                tk.Label(edc_frame, text="EDC Journal:", bg=PREVIEW_BG, fg=ACCENT, font=(FONT_FAMILY, 9, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
+                tk.Label(edc_frame, text="Debit:", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=1, column=0, sticky="w")
+                tk.Label(edc_frame, text=edc_debit, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=1, column=1, sticky="w", padx=(10, 30))
+                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=1, column=2, sticky="e")
+                tk.Label(edc_frame, text="Credit:", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=2, column=0, sticky="w")
+                tk.Label(edc_frame, text=edc_credit, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=2, column=1, sticky="w", padx=(10, 30))
+                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=2, column=2, sticky="e")
                 
-                # AR Section Preview Logic (Only if AR is valid)
+                # AR Section Preview
                 if item.get("mutation_matched", False):
-                    ar_text_lines = ["AR Journal:"]
-                    
                     m_date = item['payment_date']
                     m_group = item['group']
                     m_raw = [m for m in getattr(self, "_mutation_raw", []) if m["payment_date"] == m_date and m["group"] == m_group]
@@ -1150,15 +1497,15 @@ class App(tk.Tk):
                         ar_rows.append(("Debit:", "8107 Bank Difference Loss", abs(t_diff)))
                         
                     ar_frame = tk.Frame(det_frame, bg=PREVIEW_BG)
-                    ar_frame.pack(side="left", anchor="n", padx=40, pady=5)
+                    ar_frame.pack(side="left", anchor="n", padx=30, pady=10)
                     
-                    tk.Label(ar_frame, text="AR Journal:", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=0, column=0, columnspan=3, sticky="w")
+                    tk.Label(ar_frame, text="AR Journal:", bg=PREVIEW_BG, fg=ACCENT, font=(FONT_FAMILY, 9, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
                     
-                    for i, (typ, acc, amt_val) in enumerate(ar_rows):
-                        r = i + 1
-                        tk.Label(ar_frame, text=typ, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=r, column=0, sticky="w")
-                        tk.Label(ar_frame, text=acc, bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=r, column=1, sticky="w", padx=(10, 40))
-                        tk.Label(ar_frame, text=f"Rp {amt_val:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=("Segoe UI", 9)).grid(row=r, column=2, sticky="e")
+                    for idx, (typ, acc, amt_val) in enumerate(ar_rows):
+                        r = idx + 1
+                        tk.Label(ar_frame, text=typ, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r, column=0, sticky="w")
+                        tk.Label(ar_frame, text=acc, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r, column=1, sticky="w", padx=(10, 30))
+                        tk.Label(ar_frame, text=f"Rp {amt_val:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=r, column=2, sticky="e")
                 
                 def _toggle_det(btn, frm=det_frame, row_idx=r_det):
                     if frm.winfo_ismapped():
@@ -1168,7 +1515,6 @@ class App(tk.Tk):
                             active_det["btn"] = None
                             active_det["frm"] = None
                     else:
-                        # Close previous if open
                         prev_frm = active_det["frm"]
                         prev_btn = active_det["btn"]
                         if prev_frm and prev_frm.winfo_exists() and prev_frm.winfo_ismapped():
@@ -1176,58 +1522,56 @@ class App(tk.Tk):
                             if prev_btn and prev_btn.winfo_exists():
                                 prev_btn.config(text="►")
                         
-                        frm.grid(row=row_idx, column=1, columnspan=10, sticky="w", pady=(15, 10))
+                        frm.grid(row=row_idx, column=1, columnspan=10, sticky="w", pady=(8, 10))
                         btn.config(text="▼")
                         active_det["btn"] = btn
                         active_det["frm"] = frm
                         
-                btn_expand = tk.Label(scrollable_frame, text="►", bg=PANEL, fg=TEXT, cursor="hand2", font=("Segoe UI", 10))
+                btn_expand = tk.Label(scrollable_frame, text="►", bg=bg_row, fg=ACCENT, cursor="hand2", font=(FONT_FAMILY, 10, "bold"))
                 btn_expand.bind("<Button-1>", lambda e, b=btn_expand, f=det_frame: _toggle_det(b, f))
-                btn_expand.grid(row=r_main, column=0, padx=5)
+                btn_expand.grid(row=r_main, column=0, padx=8, ipady=6)
                 
                 if state["disabled_edc"] and state["disabled_ar"]:
-                    cb_item = tk.Label(scrollable_frame, text="—", bg=PANEL, fg=MUTED, font=("Segoe UI", 10))
+                    cb_item = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 10))
                 else:
-                    cb_item = tk.Checkbutton(scrollable_frame, variable=var_item, bg=PANEL, selectcolor=PANEL, command=_on_jurnal_toggle)
-                cb_item.grid(row=r_main, column=1, pady=2)
+                    cb_item = tk.Checkbutton(scrollable_frame, variable=var_item, bg=bg_row, selectcolor=bg_row, command=_on_jurnal_toggle)
+                cb_item.grid(row=r_main, column=1, pady=3, ipady=4)
                 
-                tk.Label(scrollable_frame, text=str(item['tanggal']), bg=PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=r_main, column=2, sticky="w", padx=10)
-                tk.Label(scrollable_frame, text=str(item['group']), bg=PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=r_main, column=3, sticky="w", padx=10)
+                tk.Label(scrollable_frame, text=str(item['tanggal']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=2, sticky="w", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=str(item['group']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=r_main, column=3, sticky="w", padx=14, ipady=6)
                 amt_merch = float(item.get('merchant_amount') or 0)
                 amt_odoo = float(item.get('odoo_amount') or 0)
-                tk.Label(scrollable_frame, text=f"Rp {amt_merch:,.0f}", bg=PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=r_main, column=4, sticky="e", padx=10)
-                tk.Label(scrollable_frame, text=f"Rp {amt_odoo:,.0f}", bg=PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=r_main, column=5, sticky="e", padx=10)
+                tk.Label(scrollable_frame, text=f"Rp {amt_merch:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=4, sticky="e", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=f"Rp {amt_odoo:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=5, sticky="e", padx=14, ipady=6)
                 
                 mut_amt = float(item.get("mutation_amount", 0))
-                tk.Label(scrollable_frame, text=f"Rp {mut_amt:,.0f}", bg=PANEL, fg=TEXT, font=("Segoe UI", 9)).grid(row=r_main, column=6, sticky="e", padx=10)
+                tk.Label(scrollable_frame, text=f"Rp {mut_amt:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=6, sticky="e", padx=14, ipady=6)
                 
                 sel_color = WARN if sel != 0 else TEXT
-                tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=PANEL, fg=sel_color, font=("Segoe UI", 9)).grid(row=r_main, column=7, sticky="e", padx=10)
+                tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=bg_row, fg=sel_color, font=(FONT_FAMILY, 9, "bold" if sel != 0 else "normal")).grid(row=r_main, column=7, sticky="e", padx=14, ipady=6)
                 
                 if state["disabled_edc"]:
-                    cb_edc = tk.Label(scrollable_frame, text="—", bg=PANEL, fg=MUTED, font=("Segoe UI", 10))
+                    cb_edc = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 10))
                 else:
-                    cb_edc = tk.Checkbutton(scrollable_frame, variable=var_edc, bg=PANEL, selectcolor=PANEL)
-                cb_edc.grid(row=r_main, column=8, padx=15)
+                    cb_edc = tk.Checkbutton(scrollable_frame, variable=var_edc, bg=bg_row, selectcolor=bg_row)
+                cb_edc.grid(row=r_main, column=8, padx=12, ipady=4)
                 
                 if state["disabled_ar"]:
-                    cb_ar = tk.Label(scrollable_frame, text="—", bg=PANEL, fg=MUTED, font=("Segoe UI", 10))
+                    cb_ar = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 10))
                 else:
-                    cb_ar = tk.Checkbutton(scrollable_frame, variable=var_ar, bg=PANEL, selectcolor=PANEL)
-                cb_ar.grid(row=r_main, column=10, padx=15)
+                    cb_ar = tk.Checkbutton(scrollable_frame, variable=var_ar, bg=bg_row, selectcolor=bg_row)
+                cb_ar.grid(row=r_main, column=10, padx=12, ipady=4)
                 
                 edc_info_texts = []
                 ar_info_texts = []
                 is_reconciled = str(item.get("reconciled", "")).strip().lower() == "yes"
                 status_valid = item.get("status_valid", True)
                 
-                # Base EDC Validation
                 if not is_reconciled:
                     edc_info_texts.append("⚠️ Unreconciled")
                 elif not status_valid:
                     edc_info_texts.append("⚠️ Difference")
                 
-                # Base AR Validation
                 if not is_reconciled:
                     ar_info_texts.append("⚠️ Unreconciled")
                 elif not status_valid:
@@ -1261,19 +1605,20 @@ class App(tk.Tk):
                     
                 if edc_info_texts:
                     lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in edc_info_texts) else WARN
-                    tk.Label(scrollable_frame, text="\n".join(edc_info_texts), bg=PANEL, fg=lbl_color, font=("Segoe UI", 8)).grid(row=r_main, column=9, sticky="w", padx=10)
+                    tk.Label(scrollable_frame, text="\n".join(edc_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 8, "bold")).grid(row=r_main, column=9, sticky="w", padx=14, ipady=6)
                     
-                cb_ar.grid(row=r_main, column=10, padx=15)
-                
                 if ar_info_texts:
                     lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in ar_info_texts) else WARN
-                    tk.Label(scrollable_frame, text="\n".join(ar_info_texts), bg=PANEL, fg=lbl_color, font=("Segoe UI", 8)).grid(row=r_main, column=11, sticky="w", padx=10)
+                    tk.Label(scrollable_frame, text="\n".join(ar_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 8, "bold")).grid(row=r_main, column=11, sticky="w", padx=14, ipady=6)
+                
+                # Row Divider Line
+                tk.Frame(scrollable_frame, bg=BORDER, height=1).grid(row=r_sep, column=0, columnspan=len(headers)+1, sticky="ew")
                 
             total_pages = max(1, (len(journal_state) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
-            lbl_page.config(text=f"Page {page_idx + 1} of {total_pages}")
+            lbl_page.configure(text=f"Page {page_idx + 1} of {total_pages}")
             
-            btn_prev.config(state="normal" if page_idx > 0 else "disabled")
-            btn_next.config(state="normal" if page_idx < total_pages - 1 else "disabled")
+            btn_prev.configure(state="normal" if page_idx > 0 else "disabled")
+            btn_next.configure(state="normal" if page_idx < total_pages - 1 else "disabled")
             
             canvas.yview_moveto(0)
             
@@ -1288,8 +1633,8 @@ class App(tk.Tk):
                 current_page[0] += 1
                 render_page(current_page[0])
                 
-        btn_prev.config(command=_prev_page)
-        btn_next.config(command=_next_page)
+        btn_prev.configure(command=_prev_page)
+        btn_next.configure(command=_next_page)
         
         render_page(0)
         
@@ -1351,26 +1696,28 @@ class App(tk.Tk):
             edc_count = sum(1 for item in selected if item.get("edc", False))
             
             def _show_custom_confirm():
-                dlg = tk.Toplevel(top)
+                dlg = ctk.CTkToplevel(top)
                 dlg.title("Confirm Upload")
-                dlg.geometry("500x280")
-                dlg.configure(bg=PANEL)
+                dlg.geometry("520x290")
+                dlg.configure(fg_color=PANEL)
                 dlg.transient(top)
                 dlg.grab_set()
                 
                 dlg.update_idletasks()
-                x = top.winfo_x() + (top.winfo_width() - 500) // 2
-                y = top.winfo_y() + (top.winfo_height() - 280) // 2
+                x = top.winfo_x() + (top.winfo_width() - 520) // 2
+                y = top.winfo_y() + (top.winfo_height() - 290) // 2
                 dlg.geometry(f"+{x}+{y}")
                 
-                tk.Label(dlg, text="Confirm Upload", bg=PANEL, fg=TEXT, font=("Segoe UI", 16, "bold")).pack(pady=(25, 10))
+                ctk.CTkLabel(
+                    dlg, text="Confirm Upload to Odoo",
+                    font=(FONT_FAMILY, 15, "bold"), text_color=TEXT
+                ).pack(pady=(24, 8))
                 
-                lbl = tk.Label(
+                ctk.CTkLabel(
                     dlg, 
-                    text=f"Ready to import to Odoo.\n\nAR Journals to be created: {ar_count}\nEDC Journals to be created: {edc_count}\n\nIf you need to make manual edits before importing, click 'Edit Excel'.", 
-                    justify="center", bg=PANEL, fg=MUTED, font=("Segoe UI", 10)
-                )
-                lbl.pack(pady=(0, 20), padx=20)
+                    text=f"Ready to import to Odoo.\n\nAR Journals: {ar_count}   |   EDC Journals: {edc_count}\n\nTo make manual edits before importing, click 'Edit Excel'.", 
+                    justify="center", text_color=MUTED, font=(FONT_FAMILY, 10)
+                ).pack(pady=(0, 20), padx=20)
                 
                 result = {"confirm": False}
                 
@@ -1381,17 +1728,31 @@ class App(tk.Tk):
                 def on_cancel():
                     dlg.destroy()
                 
-                btn_frame = tk.Frame(dlg, bg=PANEL)
-                btn_frame.pack(fill="x", pady=10)
+                btn_frame = ctk.CTkFrame(dlg, fg_color="transparent")
+                btn_frame.pack(fill="x", padx=20, pady=10)
                 
-                cancel_btn = tk.Button(btn_frame, text="Cancel", bg=WHITE, fg=TEXT, relief="solid", borderwidth=1, highlightbackground=BORDER, font=("Segoe UI", 9, "bold"), cursor="hand2", command=on_cancel, padx=20, pady=8)
-                cancel_btn.pack(side="left", padx=(30, 10), expand=True)
+                ctk.CTkButton(
+                    btn_frame, text="Cancel", height=36,
+                    fg_color=PANEL, hover_color=PREVIEW_BG,
+                    border_color=BORDER_DARK, border_width=1,
+                    text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+                    corner_radius=6, command=on_cancel
+                ).pack(side="left", padx=4, expand=True, fill="x")
                 
-                edit_btn = tk.Button(btn_frame, text="Edit Excel", bg=WHITE, fg=TEXT, relief="solid", borderwidth=1, highlightbackground=BORDER, font=("Segoe UI", 9, "bold"), cursor="hand2", command=lambda: _open_path(str(out_path)), padx=20, pady=8)
-                edit_btn.pack(side="left", padx=10, expand=True)
+                ctk.CTkButton(
+                    btn_frame, text="Edit Excel", height=36,
+                    fg_color=PANEL, hover_color=PREVIEW_BG,
+                    border_color=BORDER_DARK, border_width=1,
+                    text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+                    corner_radius=6, command=lambda: _open_path(str(out_path))
+                ).pack(side="left", padx=4, expand=True, fill="x")
                 
-                upload_btn = tk.Button(btn_frame, text="Upload to Odoo", bg=SUCCESS, fg=WHITE, relief="flat", borderwidth=0, font=("Segoe UI", 9, "bold"), cursor="hand2", command=on_upload, padx=20, pady=8)
-                upload_btn.pack(side="right", padx=(10, 30), expand=True)
+                ctk.CTkButton(
+                    btn_frame, text="Upload to Odoo", height=36,
+                    fg_color=SUCCESS, hover_color=SUCCESS_DARK,
+                    text_color=WHITE, font=(FONT_FAMILY, 10, "bold"),
+                    corner_radius=6, command=on_upload
+                ).pack(side="left", padx=4, expand=True, fill="x")
                 
                 top.wait_window(dlg)
                 return result["confirm"]
@@ -1405,7 +1766,7 @@ class App(tk.Tk):
             
             self._running = True
             self._set_status("Uploading Edited Journal to Odoo...", WARN)
-            self._journal_btn.config(state="disabled")
+            self._journal_btn.configure(state="disabled")
             
             def run_script():
                 try:
@@ -1438,7 +1799,7 @@ class App(tk.Tk):
             
             threading.Thread(target=run_script, daemon=True).start()
             
-        footer_right = tk.Frame(footer_frame, bg=PANEL)
+        footer_right = ctk.CTkFrame(footer_inner, fg_color="transparent")
         footer_right.pack(side="right")
         
         def _select_all():
@@ -1460,19 +1821,55 @@ class App(tk.Tk):
                     v["var_ar"].set(False)
             render_page(current_page[0])
                 
-        mod_btn_style = {"bg": WHITE, "fg": TEXT, "font": ("Segoe UI", 9, "bold"), "relief": "solid", "borderwidth": 1, "cursor": "hand2", "padx": 12, "pady": 4, "highlightbackground": BORDER}
-        primary_mod_style = {"bg": SUCCESS, "fg": WHITE, "font": ("Segoe UI", 9, "bold"), "relief": "flat", "borderwidth": 0, "cursor": "hand2", "padx": 16, "pady": 5}
+        tools_frame = ctk.CTkFrame(pagination_frame, fg_color="transparent")
+        tools_frame.pack(side="left", padx=(20, 0))
         
-        tools_frame = tk.Frame(pagination_frame, bg=PANEL)
-        tools_frame.pack(side="left", padx=(30, 0))
-        tk.Button(tools_frame, text="Select All", command=_select_all, **mod_btn_style).pack(side="left", padx=(0, 8))
-        tk.Button(tools_frame, text="Deselect All", command=_deselect_all, **mod_btn_style).pack(side="left")
+        ctk.CTkButton(
+            tools_frame, text="Select All", height=32, width=80,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+            corner_radius=6, command=_select_all
+        ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            tools_frame, text="Deselect All", height=32, width=85,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+            corner_radius=6, command=_deselect_all
+        ).pack(side="left")
         
-        tk.Button(footer_right, text="Cancel", command=top.destroy, **mod_btn_style).pack(side="left", padx=(0, 15))
-        tk.Button(footer_right, text="Export EDC", command=lambda: _export("edc"), **mod_btn_style).pack(side="left", padx=(0, 8))
-        tk.Button(footer_right, text="Export AR", command=lambda: _export("ar"), **mod_btn_style).pack(side="left", padx=(0, 15))
+        ctk.CTkButton(
+            footer_right, text="Cancel", height=36, width=80,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+            corner_radius=6, command=top.destroy
+        ).pack(side="left", padx=(0, 8))
         
-        tk.Button(footer_right, text="Submit", command=_process, **primary_mod_style).pack(side="left")
+        ctk.CTkButton(
+            footer_right, text="Export EDC", height=36, width=95,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+            corner_radius=6, command=lambda: _export("edc")
+        ).pack(side="left", padx=(0, 6))
+        
+        ctk.CTkButton(
+            footer_right, text="Export AR", height=36, width=90,
+            fg_color=PANEL, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+            corner_radius=6, command=lambda: _export("ar")
+        ).pack(side="left", padx=(0, 12))
+        
+        ctk.CTkButton(
+            footer_right, text="Submit", height=36, width=100,
+            fg_color=SUCCESS, hover_color=SUCCESS_DARK,
+            text_color=WHITE, font=(FONT_FAMILY, 10, "bold"),
+            corner_radius=6, command=_process
+        ).pack(side="left")
 
     def _open_output(self):
         path = self._last_output
@@ -1497,7 +1894,6 @@ if __name__ == "__main__":
     import io
 
     if len(sys.argv) > 1:
-        # Force UTF-8 encoding for subprocesses so emojis don't crash Windows CP1252
         try:
             sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
             sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
@@ -1510,9 +1906,6 @@ if __name__ == "__main__":
             odoo_downloader.run_downloader()
             sys.exit(0)
         elif sys.argv[1] == "--run-main":
-            # main.py usually runs its logic on import or inside a main() check.
-            # If main.py just runs on import, importing it is enough.
-            # If it requires __main__, we can run it using runpy.
             import runpy
             runpy.run_module('main', run_name='__main__')
             sys.exit(0)
@@ -1529,7 +1922,7 @@ if __name__ == "__main__":
             sys.exit(0)
         elif sys.argv[1].endswith(".py"):
             import runpy
-            script_name = sys.argv[1][:-3]  # remove .py
+            script_name = sys.argv[1][:-3]
             sys.argv = [sys.argv[0]] + sys.argv[2:]
             runpy.run_module(script_name, run_name='__main__')
             sys.exit(0)

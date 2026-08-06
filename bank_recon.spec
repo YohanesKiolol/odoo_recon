@@ -17,6 +17,14 @@ if _pw_spec and _pw_spec.submodule_search_locations:
     if _pw_driver_dir.exists():
         _pw_driver = [(str(_pw_driver_dir), str(Path('playwright') / 'driver'))]
 
+# Find CustomTkinter assets (themes, images)
+_ctk_spec = importlib.util.find_spec('customtkinter')
+_ctk_data = []
+if _ctk_spec and _ctk_spec.submodule_search_locations:
+    _ctk_root = Path(list(_ctk_spec.submodule_search_locations)[0])
+    if _ctk_root.exists():
+        _ctk_data = [(str(_ctk_root), 'customtkinter')]
+
 a = Analysis(
     [str(ROOT / 'gui.py')],
     pathex=[str(ROOT)],
@@ -33,7 +41,7 @@ a = Analysis(
         (str(ROOT / 'journal_generator.py'),'.'),
         (str(ROOT / 'odoo_journal_creator.py'),'.'),
         (str(ROOT / 'readers'),           'readers'),
-    ] + _pw_driver,
+    ] + _pw_driver + _ctk_data,
     hiddenimports=[
         'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
         'journal_checker', 'journal_generator', 'odoo_journal_creator',
@@ -43,6 +51,7 @@ a = Analysis(
         'msoffcrypto', 'playwright', 'playwright.sync_api',
         'playwright._impl._driver', 'playwright._repo_version',
         'tkcalendar', 'babel.numbers',
+        'customtkinter', 'darkdetect',
     ],
     hookspath=[],
     hooksconfig={},
