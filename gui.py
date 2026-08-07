@@ -2426,13 +2426,18 @@ class App(ctk.CTk):
                                     ws_b.cell(r, 11).value = pair_tag
                                     for c in range(1, 12): ws_b.cell(r, c).fill = GREEN_FILL
 
-                wb.save(latest_file)
-                self._log_write(f"\n✅ Updated reconciliation report ({os.path.basename(latest_file)}) with {len(active_matched)} matched pairs!\n", "ok")
-                self._set_status(f"Updated recon report with {len(active_matched)} matched pairs", SUCCESS)
+                from odoo_journal_creator import safe_save_workbook
+                saved_ok = safe_save_workbook(wb, Path(latest_file))
+                if saved_ok:
+                    self._log_write(f"\n✅ Updated reconciliation report ({os.path.basename(latest_file)}) with {len(active_matched)} matched pairs!\n", "ok")
+                    self._set_status(f"Updated recon report with {len(active_matched)} matched pairs", SUCCESS)
+                else:
+                    self._log_write(f"\n⚠️ Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel manually.\n", "warn")
                 top.destroy()
 
                 if open_journal_modal:
                     self._on_journal()
+
             except Exception as e:
                 self._log_write(f"\n❌ Error updating recon file: {e}\n", "err")
                 self._set_status(f"Error updating recon file: {e}", ERROR)

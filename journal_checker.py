@@ -285,10 +285,12 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
 
             
     if updated > 0:
-        wb.save(path)
+        from odoo_journal_creator import safe_save_workbook
+        safe_save_workbook(wb, path, reopen=True)
         print(f"\n✅ Successfully updated {updated} Journal Information rows in {path.name}")
     else:
         print("\n⚠️ Tidak ada baris yang diperbarui.")
+
         
     return True
 
