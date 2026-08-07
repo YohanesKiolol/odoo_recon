@@ -189,7 +189,7 @@ class CTkDateInput(ctk.CTkFrame):
         self._entry = ctk.CTkEntry(
             self, textvariable=self._var, placeholder_text="MM/DD/YYYY",
             height=28, border_width=0, fg_color="transparent", text_color=TEXT,
-            font=(FONT_FAMILY, 10)
+            font=(FONT_FAMILY, 10, "bold")
         )
         self._entry.pack(side="left", fill="x", expand=True, padx=(4, 0), pady=2)
         
@@ -394,9 +394,10 @@ class App(ctk.CTk):
         ).pack(anchor="w")
         ctk.CTkLabel(
             brand_inner, text="Odoo Automation Tool",
-            font=(FONT_FAMILY, 11), text_color=MUTED,
+            font=(FONT_FAMILY, 11, "bold"), text_color=MUTED,
             fg_color="transparent"
         ).pack(anchor="w")
+
         
         ctk.CTkFrame(sidebar_outer, height=1, fg_color=BORDER).pack(fill="x")
 
@@ -418,7 +419,7 @@ class App(ctk.CTk):
         ).pack(anchor="w", padx=10, pady=(8, 4))
 
         ctk.CTkLabel(
-            sec_cred, text="Username", font=(FONT_FAMILY, 10),
+            sec_cred, text="Username", font=(FONT_FAMILY, 10, "bold"),
             text_color=TEXT, fg_color="transparent"
         ).pack(anchor="w", padx=10)
         
@@ -427,11 +428,11 @@ class App(ctk.CTk):
             sec_cred, textvariable=self._email_var,
             placeholder_text="odoo@example.com",
             height=32, corner_radius=6, border_color=BORDER_DARK, fg_color=WHITE, text_color=TEXT,
-            font=(FONT_FAMILY, 10)
+            font=(FONT_FAMILY, 10, "bold")
         ).pack(fill="x", padx=10, pady=(2, 6))
 
         ctk.CTkLabel(
-            sec_cred, text="Password", font=(FONT_FAMILY, 10),
+            sec_cred, text="Password", font=(FONT_FAMILY, 10, "bold"),
             text_color=TEXT, fg_color="transparent"
         ).pack(anchor="w", padx=10)
         
@@ -449,7 +450,7 @@ class App(ctk.CTk):
             
         _btn_eye = tk.Label(
             pass_frame, text="👁", bg=WHITE, fg=MUTED,
-            font=(FONT_FAMILY, 9), cursor="hand2"
+            font=(FONT_FAMILY, 9, "bold"), cursor="hand2"
         )
         _btn_eye.pack(side="right", padx=(4, 10), pady=4)
         _btn_eye.bind("<ButtonPress-1>", _show_pass)
@@ -459,7 +460,7 @@ class App(ctk.CTk):
             pass_frame, textvariable=self._password_var,
             placeholder_text="Password", show="•",
             height=32, border_width=0, fg_color="transparent", text_color=TEXT,
-            font=(FONT_FAMILY, 10)
+            font=(FONT_FAMILY, 10, "bold")
         )
         self._password_entry.pack(side="left", fill="x", expand=True, padx=(8, 4))
 
@@ -553,9 +554,9 @@ class App(ctk.CTk):
         date_grid.columnconfigure(0, weight=1)
         date_grid.columnconfigure(1, weight=1)
         
-        ctk.CTkLabel(date_grid, text="From", font=(FONT_FAMILY, 9), text_color=MUTED,
+        ctk.CTkLabel(date_grid, text="From", font=(FONT_FAMILY, 9, "bold"), text_color=MUTED,
                      fg_color="transparent").grid(row=0, column=0, sticky="w", padx=2)
-        ctk.CTkLabel(date_grid, text="To", font=(FONT_FAMILY, 9), text_color=MUTED,
+        ctk.CTkLabel(date_grid, text="To", font=(FONT_FAMILY, 9, "bold"), text_color=MUTED,
                      fg_color="transparent").grid(row=0, column=1, sticky="w", padx=2)
                      
         self._date_from_widget = CTkDateInput(
@@ -712,7 +713,7 @@ class App(ctk.CTk):
 
         self._dash_last_update = ctk.CTkLabel(
             dash_hdr, text="Updated: —",
-            font=(FONT_FAMILY, 10), text_color=MUTED,
+            font=(FONT_FAMILY, 10, "bold"), text_color=MUTED,
             fg_color="transparent"
         )
         self._dash_last_update.pack(side="right")
@@ -742,7 +743,7 @@ class App(ctk.CTk):
             val_lbl.pack(fill="x", padx=8, pady=(2, 0))
             setattr(self, val_attr, val_lbl)
 
-            sub_lbl = tk.Label(card, text="—", font=(FONT_FAMILY, 10), fg=MUTED, bg=PREVIEW_BG, anchor="w")
+            sub_lbl = tk.Label(card, text="—", font=(FONT_FAMILY, 10, "bold"), fg=MUTED, bg=PREVIEW_BG, anchor="w")
             sub_lbl.pack(fill="x", padx=8, pady=(0, 6))
 
             setattr(self, sub_attr, sub_lbl)
@@ -769,7 +770,7 @@ class App(ctk.CTk):
 
         self._drill_status_lbl = ctk.CTkLabel(
             drill_hdr, text="",
-            font=(FONT_FAMILY, 10), text_color=MUTED,
+            font=(FONT_FAMILY, 10, "bold"), text_color=MUTED,
             fg_color="transparent"
         )
         self._drill_status_lbl.pack(side="right", padx=(0, 4))
@@ -815,7 +816,7 @@ class App(ctk.CTk):
             log_hdr, text="↻ Clear Log", height=26, width=70,
             fg_color="transparent", hover_color=PREVIEW_BG,
             border_color=BORDER_DARK, border_width=1,
-            text_color=MUTED, font=(FONT_FAMILY, 10),
+            text_color=MUTED, font=(FONT_FAMILY, 10, "bold"),
             corner_radius=5, command=self._clear_log
         )
         self._clear_log_btn.pack(side="right")
@@ -827,7 +828,7 @@ class App(ctk.CTk):
 
         self._log = tk.Text(
             log_frame, bg=PANEL, fg=TEXT,
-            font=(FONT_MONO, 10), relief="flat", state="disabled",
+            font=(FONT_MONO, 10, "bold"), relief="flat", state="disabled",
             wrap="word", borderwidth=0, highlightthickness=0,
             padx=10, pady=10, insertbackground=TEXT
         )
@@ -856,7 +857,7 @@ class App(ctk.CTk):
         
         self._dot = ctk.CTkLabel(
             st, text="●", width=14,
-            font=(FONT_FAMILY, 12), text_color=SUCCESS,
+            font=(FONT_FAMILY, 12, "bold"), text_color=SUCCESS,
             fg_color="transparent"
         )
         self._dot.pack(side="left")
@@ -1032,7 +1033,7 @@ class App(ctk.CTk):
         # Create fresh loading placeholder
         loading_lbl = ctk.CTkLabel(
             self._drill_grid, text="Reading files, please wait...",
-            font=(FONT_FAMILY, 11), text_color=MUTED,
+            font=(FONT_FAMILY, 11, "bold"), text_color=MUTED,
             fg_color="transparent", anchor="w"
         )
         loading_lbl.grid(row=2, column=0, columnspan=3, padx=8, pady=4, sticky="w")
@@ -1088,14 +1089,14 @@ class App(ctk.CTk):
 
             stmt_lbl = ctk.CTkLabel(
                 self._drill_grid, text=stmt_r or "No files",
-                font=(FONT_FAMILY, 11), text_color=SUCCESS if stmt_r else MUTED,
+                font=(FONT_FAMILY, 11, "bold"), text_color=SUCCESS if stmt_r else MUTED,
                 fg_color="transparent", anchor="w"
             )
             stmt_lbl.grid(row=row_num, column=1, padx=(4, 4), pady=2, sticky="w")
 
             mut_lbl = ctk.CTkLabel(
                 self._drill_grid, text=mut_r or "No mutation CSV",
-                font=(FONT_FAMILY, 11), text_color=SUCCESS if mut_r else WARN,
+                font=(FONT_FAMILY, 11, "bold"), text_color=SUCCESS if mut_r else WARN,
                 fg_color="transparent", anchor="w"
             )
             mut_lbl.grid(row=row_num, column=2, padx=(4, 8), pady=2, sticky="w")
@@ -1504,15 +1505,15 @@ class App(ctk.CTk):
             hdr = ctk.CTkFrame(content, fg_color="transparent")
             hdr.pack(fill="x", padx=16, pady=(16, 8))
             ctk.CTkLabel(hdr, text="🗑️  Confirm Workspace Data Cleanup", font=(FONT_FAMILY, 13, "bold"), text_color=ERROR).pack(anchor="w")
-            ctk.CTkLabel(hdr, text=f"This will relocate {len(files_to_move)} file(s) out of active input, mutation & output folders.", font=(FONT_BODY, 11), text_color=MUTED).pack(anchor="w", pady=(2, 0))
+            ctk.CTkLabel(hdr, text=f"This will relocate {len(files_to_move)} file(s) out of active input, mutation & output folders.", font=(FONT_BODY, 11, "bold"), text_color=MUTED).pack(anchor="w", pady=(2, 0))
             
             info_box = ctk.CTkFrame(content, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
             info_box.pack(fill="x", padx=16, pady=12)
             
             ctk.CTkLabel(info_box, text="🗄️ Archive Destination Folder:", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT).pack(anchor="w", padx=12, pady=(10, 2))
-            ctk.CTkLabel(info_box, text=str(target_recap), font=(FONT_MONO, 10), text_color=ACCENT, wraplength=460, justify="left").pack(anchor="w", padx=12, pady=(0, 10))
+            ctk.CTkLabel(info_box, text=str(target_recap), font=(FONT_MONO, 10, "bold"), text_color=ACCENT, wraplength=460, justify="left").pack(anchor="w", padx=12, pady=(0, 10))
             
-            ctk.CTkLabel(content, text="Cleaned files will be stored safely in Recap storage and can be accessed via Quick Access.", font=(FONT_BODY, 10), text_color=MUTED, wraplength=460, justify="left").pack(anchor="w", padx=16)
+            ctk.CTkLabel(content, text="Cleaned files will be stored safely in Recap storage and can be accessed via Quick Access.", font=(FONT_BODY, 10, "bold"), text_color=MUTED, wraplength=460, justify="left").pack(anchor="w", padx=16)
             
             btn_frame = ctk.CTkFrame(content, fg_color="transparent")
             btn_frame.pack(fill="x", side="bottom", padx=16, pady=(12, 16))
@@ -1542,7 +1543,7 @@ class App(ctk.CTk):
             ctk.CTkButton(
                 btn_frame, text="Cancel", height=36, width=100,
                 fg_color=WHITE, hover_color=PREVIEW_BG, border_color=BORDER_DARK, border_width=1,
-                text_color=TEXT, font=(FONT_FAMILY, 11), command=dlg.destroy
+                text_color=TEXT, font=(FONT_FAMILY, 11, "bold"), command=dlg.destroy
             ).pack(side="right", padx=(8, 0))
             
             ctk.CTkButton(
@@ -1963,7 +1964,7 @@ class App(ctk.CTk):
         ).pack(anchor="w")
         ctk.CTkLabel(
             hdr_in, text=f"Review candidate pairs or manually match Bank vs Odoo discrepancies. Loaded {len(bank_items)} Bank & {len(odo_items)} Odoo items.",
-            font=(FONT_FAMILY, 10), text_color=MUTED
+            font=(FONT_FAMILY, 10, "bold"), text_color=MUTED
         ).pack(anchor="w", pady=(2, 0))
 
         body_frame = ctk.CTkFrame(top, fg_color=BG, corner_radius=0)
@@ -2015,7 +2016,7 @@ class App(ctk.CTk):
                 q_scroll.grid_columnconfigure(col, weight=1, minsize=w)
 
             if not active_matched:
-                tk.Label(q_scroll, text="No matched pairs queued yet. Click '🔗 Match Pair' above to add items here.", bg=PREVIEW_BG, fg=MUTED, font=(FONT_FAMILY, 9)).pack(pady=10)
+                tk.Label(q_scroll, text="No matched pairs queued yet. Click '🔗 Match Pair' above to add items here.", bg=PREVIEW_BG, fg=MUTED, font=(FONT_FAMILY, 9, "bold")).pack(pady=10)
                 return
 
             q_headers = ["Date", "Journal", "Bank Amount", "Odoo Amount", "Net Difference", "Action"]
@@ -2083,7 +2084,7 @@ class App(ctk.CTk):
                 w.destroy()
 
             if not avail_candidates:
-                ctk.CTkLabel(tab_auto_frame, text="No candidate pairs remaining to match.", font=(FONT_FAMILY, 11), text_color=MUTED).pack(pady=40)
+                ctk.CTkLabel(tab_auto_frame, text="No candidate pairs remaining to match.", font=(FONT_FAMILY, 11, "bold"), text_color=MUTED).pack(pady=40)
                 return
 
             total_pages = max(1, (len(avail_candidates) + CANDIDATES_PER_PAGE - 1) // CANDIDATES_PER_PAGE)
@@ -2718,7 +2719,7 @@ class App(ctk.CTk):
         ).pack(anchor="w")
         ctk.CTkLabel(
             left_header, text="Review and select transactions to post. Expand any row to preview journal entries.",
-            font=(FONT_FAMILY, 10), text_color=MUTED
+            font=(FONT_FAMILY, 10, "bold"), text_color=MUTED
         ).pack(anchor="w", pady=(2, 0))
         
         def _refresh_modal():
@@ -2912,17 +2913,17 @@ class App(ctk.CTk):
                 edc_frame.pack(side="left", anchor="n", padx=20, pady=10)
                 
                 tk.Label(edc_frame, text="EDC Journal:", bg=PREVIEW_BG, fg=ACCENT, font=(FONT_FAMILY, 9, "bold")).grid(row=0, column=0, columnspan=3, sticky="w")
-                tk.Label(edc_frame, text="Debit:", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=1, column=0, sticky="w")
-                tk.Label(edc_frame, text=edc_debit, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=1, column=1, sticky="w", padx=(10, 30))
-                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=1, column=2, sticky="e")
-                tk.Label(edc_frame, text="Credit:", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=2, column=0, sticky="w")
-                tk.Label(edc_frame, text=edc_credit, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=2, column=1, sticky="w", padx=(10, 30))
-                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=2, column=2, sticky="e")
+                tk.Label(edc_frame, text="Debit:", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=1, column=0, sticky="w")
+                tk.Label(edc_frame, text=edc_debit, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=1, column=1, sticky="w", padx=(10, 30))
+                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=1, column=2, sticky="e")
+                tk.Label(edc_frame, text="Credit:", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=2, column=0, sticky="w")
+                tk.Label(edc_frame, text=edc_credit, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=2, column=1, sticky="w", padx=(10, 30))
+                tk.Label(edc_frame, text=f"Rp {amt:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=2, column=2, sticky="e")
 
                 # Separator & Totals Footer for EDC
                 tk.Frame(edc_frame, bg=BORDER_DARK, height=1).grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 4))
-                tk.Label(edc_frame, text=f"Total Debit: Rp {amt:,.0f}", bg=PREVIEW_BG, fg=SUCCESS, font=(FONT_FAMILY, 9, "bold")).grid(row=4, column=0, columnspan=2, sticky="w")
-                tk.Label(edc_frame, text=f"Total Credit: Rp {amt:,.0f}", bg=PREVIEW_BG, fg=SUCCESS, font=(FONT_FAMILY, 9, "bold")).grid(row=4, column=2, sticky="e")
+                tk.Label(edc_frame, text=f"Total Debit: Rp {amt:,.0f}", bg=PREVIEW_BG, fg=SUCCESS, font=(FONT_FAMILY, 10, "bold")).grid(row=4, column=0, columnspan=2, sticky="w")
+                tk.Label(edc_frame, text=f"Total Credit: Rp {amt:,.0f}", bg=PREVIEW_BG, fg=SUCCESS, font=(FONT_FAMILY, 10, "bold")).grid(row=4, column=2, sticky="e")
 
                 
                 # AR Section Preview
@@ -2975,16 +2976,16 @@ class App(ctk.CTk):
 
                     for idx, (typ, acc, amt_val) in enumerate(ar_rows):
                         r = idx + 1
-                        tk.Label(ar_frame, text=typ, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r, column=0, sticky="w")
-                        tk.Label(ar_frame, text=acc, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r, column=1, sticky="w", padx=(10, 30))
-                        tk.Label(ar_frame, text=f"Rp {amt_val:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=r, column=2, sticky="e")
+                        tk.Label(ar_frame, text=typ, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r, column=0, sticky="w")
+                        tk.Label(ar_frame, text=acc, bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r, column=1, sticky="w", padx=(10, 30))
+                        tk.Label(ar_frame, text=f"Rp {amt_val:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r, column=2, sticky="e")
                     
                     # Separator & Totals Footer for AR
                     last_r = len(ar_rows) + 1
                     tot_color = SUCCESS if abs(tot_deb - tot_crd) < 0.01 else WARN
                     tk.Frame(ar_frame, bg=BORDER_DARK, height=1).grid(row=last_r, column=0, columnspan=3, sticky="ew", pady=(4, 4))
-                    tk.Label(ar_frame, text=f"Total Debit: Rp {tot_deb:,.0f}", bg=PREVIEW_BG, fg=tot_color, font=(FONT_FAMILY, 9, "bold")).grid(row=last_r+1, column=0, columnspan=2, sticky="w")
-                    tk.Label(ar_frame, text=f"Total Credit: Rp {tot_crd:,.0f}", bg=PREVIEW_BG, fg=tot_color, font=(FONT_FAMILY, 9, "bold")).grid(row=last_r+1, column=2, sticky="e")
+                    tk.Label(ar_frame, text=f"Total Debit: Rp {tot_deb:,.0f}", bg=PREVIEW_BG, fg=tot_color, font=(FONT_FAMILY, 10, "bold")).grid(row=last_r+1, column=0, columnspan=2, sticky="w")
+                    tk.Label(ar_frame, text=f"Total Credit: Rp {tot_crd:,.0f}", bg=PREVIEW_BG, fg=tot_color, font=(FONT_FAMILY, 10, "bold")).grid(row=last_r+1, column=2, sticky="e")
 
                 
                 def _toggle_det(btn, frm=det_frame, row_idx=r_det):
@@ -3098,11 +3099,11 @@ class App(ctk.CTk):
                     
                 if edc_info_texts:
                     lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in edc_info_texts) else WARN
-                    tk.Label(scrollable_frame, text="\n".join(edc_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 8, "bold")).grid(row=r_main, column=9, sticky="w", padx=14, ipady=6)
+                    tk.Label(scrollable_frame, text="\n".join(edc_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=9, sticky="w", padx=14, ipady=6)
                     
                 if ar_info_texts:
                     lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in ar_info_texts) else WARN
-                    tk.Label(scrollable_frame, text="\n".join(ar_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 8, "bold")).grid(row=r_main, column=11, sticky="w", padx=14, ipady=6)
+                    tk.Label(scrollable_frame, text="\n".join(ar_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=11, sticky="w", padx=14, ipady=6)
                 
                 # Row Divider Line
                 tk.Frame(scrollable_frame, bg=BORDER, height=1).grid(row=r_sep, column=0, columnspan=len(headers)+1, sticky="ew")
@@ -3209,7 +3210,7 @@ class App(ctk.CTk):
                 ctk.CTkLabel(
                     dlg, 
                     text=f"Ready to import to Odoo.\n\nAR Journals: {ar_count}   |   EDC Journals: {edc_count}\n\nTo make manual edits before importing, click 'Edit Excel'.", 
-                    justify="center", text_color=MUTED, font=(FONT_FAMILY, 10)
+                    justify="center", text_color=MUTED, font=(FONT_FAMILY, 10, "bold")
                 ).pack(pady=(0, 20), padx=20)
                 
                 result = {"confirm": False}
