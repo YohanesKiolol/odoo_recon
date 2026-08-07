@@ -56,7 +56,30 @@ def _rp(amount: Decimal) -> str:
     return f"Rp {int(amount):,}".replace(",", ".")
 
 
+def _parse_date_obj(val):
+    """Parse date strings (DD/MM/YYYY, YYYY-MM-DD, etc.), dates, or datetimes into (year, month, day) tuple for sorting."""
+    if not val:
+        return (9999, 12, 31)
+    if hasattr(val, "year") and hasattr(val, "month") and hasattr(val, "day"):
+        return (val.year, val.month, val.day)
+    if isinstance(val, str):
+        val = val.strip()
+        for fmt in ("%d/%m/%Y", "%d/%m/%y", "%Y-%m-%d", "%d-%m-%Y"):
+            try:
+                dt = datetime.strptime(val, fmt)
+                return (dt.year, dt.month, dt.day)
+            except ValueError:
+                pass
+    return (9999, 12, 31)
+
+
+def _date_sort_key(r):
+    val = r.get("date") or r.get("payment_date") or r.get("txn_date") or ""
+    return _parse_date_obj(val)
+
+
 def _hdr(cell, text: str, bg: str = COLOR_HEADER):
+
     cell.value = text
     cell.font = Font(bold=True, color=COLOR_WHITE, size=11)
     cell.fill = PatternFill("solid", fgColor=bg)
@@ -156,7 +179,7 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     ws.row_dimensions[3].height = 28
 
     # ── Data rows (start row 4) ───────────────────────────────────────
-    rows_sorted = sorted(rows, key=lambda r: r.get("date", "") or "")
+    rows_sorted = sorted(rows, key=_date_sort_key)
     for idx, r in enumerate(rows_sorted, 1):
         rn = idx + 3  # offset by 3 header rows
         st = r["status"]
@@ -208,7 +231,7 @@ def _write_other_sheet(ws, rows: list[dict], odo_date=None):
     ws.row_dimensions[3].height = 28
 
     # ── Data rows (start row 4) ───────────────────────────────────────
-    rows_sorted = sorted(rows, key=lambda r: r.get("date", "") or "")
+    rows_sorted = sorted(rows, key=_date_sort_key)
     for idx, r in enumerate(rows_sorted, 1):
         rn = idx + 3
         st = r["status"]
@@ -268,7 +291,7 @@ def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=No
         bank_label, acc_name = _get_account_info(acc_key)
         rows_sorted = sorted(
             (r for r in rows if r["status"] != STATUS_DONE),
-            key=lambda r: r.get("date", "") or ""
+            key=_date_sort_key
         )
         for r in rows_sorted:
             idx += 1
@@ -335,7 +358,7 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
     from decimal import Decimal
 
     ws.title = "Daily Summary"
-    COL_HEADERS = ["No", "Date", "Payment Date", "Bank", "Journal", "Total Bank", "Total Odoo", "Difference", "Reconciled", "Status", "Journal Information"]
+    COL_HEADERS = ["No", "Date", "Payment Date", "Bank", "Journal", "Total Bank", "Total Odoo", "Difference", "Reconciled", "Status", "Journal Information", "EDC Number", "AR Number"]
     ncols = len(COL_HEADERS)
     date_str = odo_date.strftime("%d %B %Y") if odo_date else "-"
 
@@ -346,6 +369,7 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
         _hdr(ws.cell(3, col), h)
     ws.row_dimensions[3].height = 28
 
+
     bank_sums: dict = defaultdict(lambda: defaultdict(Decimal))
     odo_sums:  dict = defaultdict(lambda: defaultdict(Decimal))
     payment_dates = {}
@@ -354,7 +378,7 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
     all_banks = sorted([k for k in all_results.keys() if k != "other"])
 
     for bank in all_banks:
-        for r in all_results.get(bank, []):
+        for r in sorted(all_results.get(bank, []), key=_date_sort_key):
             d   = r.get("date", "") or ""
             pd  = r.get("payment_date", "")
             if pd:
@@ -379,7 +403,7 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
 
     rows = []
     for bank in all_banks:
-        for d in sorted(set(list(bank_sums[bank].keys()) + list(odo_sums[bank].keys()))):
+        for d in sorted(set(list(bank_sums[bank].keys()) + list(odo_sums[bank].keys())), key=_parse_date_obj):
             b_sum = bank_sums[bank][d]
             o_sum = odo_sums[bank][d]
             pd    = payment_dates.get((bank, d), "")
@@ -447,10 +471,20 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
         jc = ws.cell(rn, 11)
         _sc(jc, j_stat_label, "center")
         jc.font = Font(size=10, bold=True)
+        
+        c12 = ws.cell(rn, 12)
+        _sc(c12, "-", "center")
+        c12.font = Font(size=10, bold=True)
+
+        c13 = ws.cell(rn, 13)
+        _sc(c13, "-", "center")
+        c13.font = Font(size=10, bold=True)
         ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 15, 18, 30, 20, 20, 20, 15, 20, 15], start=1):
+
+    for col, width in enumerate([6, 15, 15, 18, 30, 20, 20, 20, 15, 20, 22, 22, 22], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
+
     
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{len(rows) + 3}"
     ws.freeze_panes = "A4"
@@ -681,7 +715,7 @@ def _write_mutation_summary(ws, all_results, mutations, odo_date=None):
         
     row = 4
     idx = 1
-    for key in sorted(summary.keys()):
+    for key in sorted(summary.keys(), key=lambda k: (_parse_date_obj(k[0]), _parse_date_obj(k[1]), k[2])):
         o_str, p_str, bank, acc_name, desc, txn_type = key
         amount = summary[key]
         
@@ -780,7 +814,7 @@ def _write_admin_fee_sheet(ws, all_results, mutations, odo_date=None):
 
     row = 4
     idx = 1
-    for key in sorted(summary.keys()):
+    for key in sorted(summary.keys(), key=lambda k: (_parse_date_obj(k[0]), _parse_date_obj(k[1]), k[2])):
         o_str, p_str, bank, acc_name, desc, txn_type = key
         amount = summary[key]
         
@@ -831,7 +865,7 @@ def _write_unmapped_mutations(ws, all_results, unknowns, odo_date=None):
     
     row = 4
     idx = 1
-    for m in unknowns:
+    for m in sorted(unknowns, key=_date_sort_key):
         p_str = _fmt_date(m["date"])
         bank_raw = m["bank"].upper()
         _, acc_name = _get_account_info(f"{m['bank']}_{m['alias']}")

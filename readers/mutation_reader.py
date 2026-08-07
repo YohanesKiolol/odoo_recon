@@ -15,37 +15,54 @@ def read_all_mutations():
     mutations = []
     unknowns = []
 
+    def _get_csv_files(directory: Path):
+        files = list(directory.glob("*.csv")) + list(directory.glob("*.CSV"))
+        return set(files)
+
     # 1. BCA
     bca_dir = MUTATION_DIR / "bca"
     if bca_dir.exists():
         for alias in bca_dir.iterdir():
             if alias.is_dir():
-                for f in alias.glob("*.csv"):
+                for f in _get_csv_files(alias):
                     m, u = read_mutation_bca(f, alias.name)
                     mutations.extend(m)
                     unknowns.extend(u)
+        for f in _get_csv_files(bca_dir):
+            m, u = read_mutation_bca(f, "main")
+            mutations.extend(m)
+            unknowns.extend(u)
 
     # 2. Mandiri
     mandiri_dir = MUTATION_DIR / "mandiri"
     if mandiri_dir.exists():
         for alias in mandiri_dir.iterdir():
             if alias.is_dir():
-                for f in alias.glob("*.csv"):
+                for f in _get_csv_files(alias):
                     m, u = read_mutation_mandiri(f, alias.name)
                     mutations.extend(m)
                     unknowns.extend(u)
+        for f in _get_csv_files(mandiri_dir):
+            m, u = read_mutation_mandiri(f, "main")
+            mutations.extend(m)
+            unknowns.extend(u)
 
     # 3. BRI
     bri_dir = MUTATION_DIR / "bri"
     if bri_dir.exists():
         for alias in bri_dir.iterdir():
             if alias.is_dir():
-                for f in alias.glob("*.csv"):
+                for f in _get_csv_files(alias):
                     m, u = read_mutation_bri(f, alias.name)
                     mutations.extend(m)
                     unknowns.extend(u)
+        for f in _get_csv_files(bri_dir):
+            m, u = read_mutation_bri(f, "main")
+            mutations.extend(m)
+            unknowns.extend(u)
 
     return mutations, unknowns
+
 
 
 def _clean_amount(val: str) -> float:
@@ -66,6 +83,7 @@ def read_mutation_bca(filepath: Path, alias: str):
     
     # Fallback year from "Periode" line or current year
     year = datetime.today().year
+    periode_end_dt = None
     
     with open(filepath, "r", encoding="utf-8-sig", errors="replace") as f:
         reader = csv.reader(f, delimiter=",")
@@ -82,6 +100,14 @@ def read_mutation_bca(filepath: Path, alias: str):
                         year = int(parts[2].split(" ")[0][:4])
                     except Exception:
                         pass
+                if "-" in first_cell:
+                    try:
+                        end_part = first_cell.split("-")[-1].strip()
+                        if len(end_part) == 10 and end_part.count("/") == 2:
+                            periode_end_dt = datetime.strptime(end_part, "%d/%m/%Y")
+                    except Exception:
+                        pass
+
             # Header row starts with "Tanggal" or "Date"
             if "Tanggal" in first_cell or "Date" in first_cell:
                 break
@@ -111,6 +137,10 @@ def read_mutation_bca(filepath: Path, alias: str):
             else:
                 continue
             
+            # Skip PEND / PENDING rows (unposted/unsettled intra-day transactions)
+            if date_str.upper() in ["PEND", "PENDING"]:
+                continue
+
             # Parse Date (BCA format can be "DD/MM/YYYY", "YYYY-MM-DD", or "DD/MM")
             dt = None
             if len(date_str) == 10 and date_str.count("/") == 2:
@@ -128,6 +158,7 @@ def read_mutation_bca(filepath: Path, alias: str):
                     dt = datetime.strptime(f"{date_str}/{year}", "%d/%m/%Y")
                 except ValueError:
                     continue
+
 
             # Determine Type
             desc_upper = desc.upper()
@@ -171,6 +202,7 @@ def read_mutation_bca(filepath: Path, alias: str):
                 "type": txn_type,
                 "cr_db_type": cr_db_type
             }
+
             
             if txn_type == "Unknown":
                 unknowns.append(record)
@@ -178,6 +210,7 @@ def read_mutation_bca(filepath: Path, alias: str):
                 mutations.append(record)
 
     return mutations, unknowns
+
 
 
 
@@ -222,10 +255,17 @@ def _read_mutation_mandiri_raw(filepath: Path, alias: str):
                 continue
                 
             date_str = row[date_idx].strip()
+            if date_str.upper() in ["PEND", "PENDING"]:
+                continue
+
+            dt = None
             try:
                 dt = datetime.strptime(date_str, "%d/%m/%y")
             except ValueError:
-                continue
+                try:
+                    dt = datetime.strptime(date_str, "%d/%m/%Y")
+                except ValueError:
+                    continue
                 
             desc1 = row[desc1_idx].strip()
             desc2 = row[desc2_idx].strip() if len(row) > desc2_idx else ""
@@ -254,6 +294,7 @@ def _read_mutation_mandiri_raw(filepath: Path, alias: str):
                 "type": txn_type,
                 "cr_db_type": cr_db_type
             }
+
             
             if txn_type == "Unknown":
                 unknowns.append(record)
@@ -290,11 +331,16 @@ def read_mutation_bri(filepath: Path, alias: str):
                 continue
                 
             date_str = row.get("TGL_TRAN", "").strip()
+            if date_str.upper() in ["PEND", "PENDING"]:
+                continue
+
+            dt = None
             # BRI Date format: "2026-07-01 03:22:44"
             try:
                 dt = datetime.strptime(date_str.split(" ")[0], "%Y-%m-%d")
             except ValueError:
                 continue
+
                 
             desc = row.get("DESK_TRAN", "").strip()
             desc_upper = desc.upper()

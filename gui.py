@@ -255,6 +255,7 @@ class App(ctk.CTk):
         self.minsize(1100, 720)
         self.resizable(True, True)
         self._running = False
+        self._active_proc = None
         self._last_output: str | None = None
         self._set_app_icon()
         self._build_ui()
@@ -643,6 +644,13 @@ class App(ctk.CTk):
         )
         self._journal_btn.pack(fill="x")
 
+        self._stop_btn = ctk.CTkButton(
+            _cta, text="⏹  Stop Process",
+            height=38, fg_color=ERROR, hover_color="#B91C1C",
+            text_color=WHITE, font=(FONT_FAMILY, 11, "bold"),
+            corner_radius=8, command=self._on_stop
+        )
+
         # ── Main Content Area ─────────────────────────────────────────────────
         main_area = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         main_area.pack(side="left", fill="both", expand=True)
@@ -730,13 +738,15 @@ class App(ctk.CTk):
             t_lbl = ctk.CTkLabel(top_f, text=title, font=(FONT_FAMILY, 10, "bold"), text_color=MUTED)
             t_lbl.pack(side="left", padx=(3, 0))
 
-            val_lbl = ctk.CTkLabel(card, text="0 Files", font=(FONT_FAMILY, 14, "bold"), text_color=TEXT, anchor="w")
+            val_lbl = tk.Label(card, text="0 Files", font=(FONT_FAMILY, 13, "bold"), fg=TEXT, bg=PREVIEW_BG, anchor="w")
             val_lbl.pack(fill="x", padx=8, pady=(2, 0))
             setattr(self, val_attr, val_lbl)
 
-            sub_lbl = ctk.CTkLabel(card, text="—", font=(FONT_FAMILY, 10), text_color=MUTED, anchor="w")
-            sub_lbl.pack(fill="x", padx=8, pady=(0, 8))
+            sub_lbl = tk.Label(card, text="—", font=(FONT_FAMILY, 10), fg=MUTED, bg=PREVIEW_BG, anchor="w")
+            sub_lbl.pack(fill="x", padx=8, pady=(0, 6))
+
             setattr(self, sub_attr, sub_lbl)
+
 
         _make_kpi_card(kpi_grid, 0, "🏦", "MERCHANT REPORT", "_kpi_bank_val", "_kpi_bank_sub")
         _make_kpi_card(kpi_grid, 1, "💳", "ODOO PAYMENTS",   "_kpi_odoo_val", "_kpi_odoo_sub")
@@ -878,6 +888,19 @@ class App(ctk.CTk):
         self._update_dashboard_summary()
 
     def _update_dashboard_summary(self, skip_drill: bool = False):
+        def _set_lbl(lbl, text, color):
+            if hasattr(lbl, "config"):
+                try:
+                    lbl.config(text=text, fg=color)
+                    return
+                except Exception:
+                    pass
+            if hasattr(lbl, "configure"):
+                try:
+                    lbl.configure(text=text, text_color=color)
+                except Exception:
+                    pass
+
         try:
             # 1. Bank Files
             c_bca = [f for f in ((INPUT_DIR / "bca").rglob("*") if (INPUT_DIR / "bca").exists() else []) if f.is_file()]
@@ -886,27 +909,26 @@ class App(ctk.CTk):
             
             tot_bank = len(c_bca) + len(c_man) + len(c_bri)
             if hasattr(self, "_kpi_bank_val"):
-                self._kpi_bank_val.configure(text=f"{tot_bank} File{'s' if tot_bank!=1 else ''}", text_color=SUCCESS if tot_bank > 0 else TEXT)
+                _set_lbl(self._kpi_bank_val, f"{tot_bank} File{'s' if tot_bank!=1 else ''}", SUCCESS if tot_bank > 0 else TEXT)
                 parts = []
                 if c_bca: parts.append(f"BCA: {len(c_bca)}")
                 if c_man: parts.append(f"Mandiri: {len(c_man)}")
                 if c_bri: parts.append(f"BRI: {len(c_bri)}")
-                self._kpi_bank_sub.configure(text=" | ".join(parts) if parts else "No merchant files")
+                _set_lbl(self._kpi_bank_sub, " | ".join(parts) if parts else "No merchant files", MUTED)
 
             # 2. Odoo Payments File
             from config import ODO_EXCEL_PATH
             if hasattr(self, "_kpi_odoo_val"):
                 if ODO_EXCEL_PATH.exists():
                     sz = ODO_EXCEL_PATH.stat().st_size / 1024
-                    self._kpi_odoo_val.configure(text="Ready", text_color=SUCCESS)
-                    self._kpi_odoo_sub.configure(text=f"{ODO_EXCEL_PATH.name} ({sz:.1f} KB)")
+                    _set_lbl(self._kpi_odoo_val, "Ready", SUCCESS)
+                    _set_lbl(self._kpi_odoo_sub, f"{ODO_EXCEL_PATH.name} ({sz:.1f} KB)", MUTED)
                 else:
-                    self._kpi_odoo_val.configure(text="Not Found", text_color=WARN)
-                    self._kpi_odoo_sub.configure(text="Will download via Odoo")
+                    _set_lbl(self._kpi_odoo_val, "Not Found", WARN)
+                    _set_lbl(self._kpi_odoo_sub, "Will download via Odoo", MUTED)
 
             # 3. Mutations & Fees
             from config import MUTATION_DIR
-            # Count per-bank mutation files
             mut_by_bank = {"bca": 0, "mandiri": 0, "bri": 0}
             for bank in ["bca", "mandiri", "bri"]:
                 bd = MUTATION_DIR / bank
@@ -915,15 +937,15 @@ class App(ctk.CTk):
             tot_mut = sum(mut_by_bank.values())
             if hasattr(self, "_kpi_mut_val"):
                 if tot_mut > 0:
-                    self._kpi_mut_val.configure(text=f"{tot_mut} CSV File{'s' if tot_mut!=1 else ''}", text_color=SUCCESS)
+                    _set_lbl(self._kpi_mut_val, f"{tot_mut} CSV File{'s' if tot_mut!=1 else ''}", SUCCESS)
                     mut_parts = []
                     if mut_by_bank["bca"]:     mut_parts.append(f"BCA: {mut_by_bank['bca']}")
                     if mut_by_bank["mandiri"]: mut_parts.append(f"Mandiri: {mut_by_bank['mandiri']}")
                     if mut_by_bank["bri"]:     mut_parts.append(f"BRI: {mut_by_bank['bri']}")
-                    self._kpi_mut_sub.configure(text=" | ".join(mut_parts) if mut_parts else "Mutation files")
+                    _set_lbl(self._kpi_mut_sub, " | ".join(mut_parts) if mut_parts else "Mutation files", MUTED)
                 else:
-                    self._kpi_mut_val.configure(text="None Loaded", text_color=MUTED)
-                    self._kpi_mut_sub.configure(text="No mutation CSV files found")
+                    _set_lbl(self._kpi_mut_val, "None Loaded", MUTED)
+                    _set_lbl(self._kpi_mut_sub, "No mutation CSV files found", MUTED)
 
             # Drill-down: per-account date coverage (run in background thread)
             if hasattr(self, "_drill_grid") and not skip_drill:
@@ -954,31 +976,32 @@ class App(ctk.CTk):
                         max_d = max(d_list) if d_list else ""
                         d_str = f" ({min_d[:5]}–{max_d[:5]})" if min_d and max_d else ""
                         
-                        self._kpi_rep_val.configure(text="Report Ready", text_color=SUCCESS)
-                        self._kpi_rep_sub.configure(text=f"{b_str}{d_str}")
+                        _set_lbl(self._kpi_rep_val, "Report Ready", SUCCESS)
+                        _set_lbl(self._kpi_rep_sub, f"{b_str}{d_str}", MUTED)
                     except Exception:
-                        self._kpi_rep_val.configure(text="Report Ready", text_color=SUCCESS)
-                        self._kpi_rep_sub.configure(text=report_name)
+                        _set_lbl(self._kpi_rep_val, "Report Ready", SUCCESS)
+                        _set_lbl(self._kpi_rep_sub, report_name, MUTED)
                 else:
-                    self._kpi_rep_val.configure(text="Not Found", text_color=MUTED)
-                    self._kpi_rep_sub.configure(text="No report in output folder")
+                    _set_lbl(self._kpi_rep_val, "Not Found", MUTED)
+                    _set_lbl(self._kpi_rep_sub, "No report in output folder", MUTED)
 
             # 5. Engine Status
             if hasattr(self, "_kpi_eng_val"):
                 if getattr(self, "_running", False):
-                    self._kpi_eng_val.configure(text="Running...", text_color=ACCENT)
-                    self._kpi_eng_sub.configure(text="Reconciling data...")
+                    _set_lbl(self._kpi_eng_val, "Running...", ACCENT)
+                    _set_lbl(self._kpi_eng_sub, "Reconciling data...", MUTED)
                 else:
-                    self._kpi_eng_val.configure(text="Ready", text_color=SUCCESS)
+                    _set_lbl(self._kpi_eng_val, "Ready", SUCCESS)
                     if output_files:
                         latest = max(output_files, key=os.path.getmtime)
                         mtime = datetime.fromtimestamp(os.path.getmtime(latest)).strftime("%d/%m %H:%M")
-                        self._kpi_eng_sub.configure(text=f"Last report: {mtime}")
+                        _set_lbl(self._kpi_eng_sub, f"Last report: {mtime}", MUTED)
                     else:
-                        self._kpi_eng_sub.configure(text="No report generated yet")
+                        _set_lbl(self._kpi_eng_sub, "No report generated yet", MUTED)
 
             if hasattr(self, "_dash_last_update"):
-                self._dash_last_update.configure(text=f"Updated: {datetime.now().strftime('%H:%M:%S')}")
+                _set_lbl(self._dash_last_update, f"Updated: {datetime.now().strftime('%H:%M:%S')}", MUTED)
+
         except Exception:
             pass
 
@@ -1140,10 +1163,13 @@ class App(ctk.CTk):
                     if not alias_dir.exists(): return None
                     try:
                         from readers.mutation_reader import read_mutation_bca, read_mutation_mandiri, read_mutation_bri
-                        bank_name = alias_dir.parent.name
+                        bank_name = alias_dir.parent.name.lower()
                         alias = alias_dir.name
                         dates = []
-                        for csv_f in alias_dir.glob("*.csv"):
+                        csv_files = set(list(alias_dir.glob("*.csv")) + list(alias_dir.glob("*.CSV")))
+                        if alias_dir.is_dir() and not csv_files:
+                            csv_files = set(list(alias_dir.parent.glob("*.csv")) + list(alias_dir.parent.glob("*.CSV")))
+                        for csv_f in csv_files:
                             try:
                                 if bank_name == "bca":       rows2, unks2 = read_mutation_bca(csv_f, alias)
                                 elif bank_name == "mandiri": rows2, unks2 = read_mutation_mandiri(csv_f, alias)
@@ -1155,6 +1181,7 @@ class App(ctk.CTk):
                         return _date_range(dates)
                     except Exception:
                         return None
+
 
                 # ── BCA ──────────────────────────────────────────────────────
                 bca_stmt_dates = []
@@ -1360,6 +1387,8 @@ class App(ctk.CTk):
         self._log_write(f"\n── Downloading Odoo Payment (From {date_from} to {date_to}) ──\n", "head")
         self._set_status("Downloading Odoo...", WARN)
         self._running = True
+        if hasattr(self, "_stop_btn"):
+            self._stop_btn.pack(fill="x", pady=(6, 0))
         
         def run():
             try:
@@ -1391,6 +1420,8 @@ class App(ctk.CTk):
                     errors="replace",
                     env=env
                 )
+                self._active_proc = process
+
                 
                 for line in process.stdout:
                     self._log_write(line)
@@ -1401,12 +1432,35 @@ class App(ctk.CTk):
                 else:
                     self._log_write(f"\n❌ Odoo Download failed with code {process.returncode}\n", "err")
                     
+                self._active_proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    encoding="utf-8",
+                    errors="replace",
+                    env=env
+                )
+                
+                for line in self._active_proc.stdout:
+                    self.after(0, self._log_write, line)
+                    
+                self._active_proc.wait()
+                if self._active_proc.returncode == 0:
+                    self.after(0, self._log_write, "\n✅ Odoo Download Finished!\n", "ok")
+                else:
+                    self.after(0, self._log_write, f"\n❌ Odoo Download failed with code {self._active_proc.returncode}\n", "err")
+                    
             except Exception as e:
-                self._log_write(f"\n❌ Error: {e}\n", "err")
+                self.after(0, self._log_write, f"\n❌ Error: {e}\n", "err")
             finally:
+                self._active_proc = None
                 self._running = False
-                self._refresh_folder_status()
-                self._set_status("Ready", SUCCESS)
+                self.after(0, self._refresh_folder_status)
+                if hasattr(self, "_stop_btn"):
+                    self.after(0, self._stop_btn.pack_forget)
+                self.after(0, self._set_status, "Ready", SUCCESS)
                 
         threading.Thread(target=run, daemon=True).start()
 
@@ -1530,13 +1584,16 @@ class App(ctk.CTk):
         self.after(50, _deferred_scan)
 
     def _on_run(self):
-        if self._running:
-            return
         self._running = True
+        if hasattr(self, "_stop_btn"):
+            self._stop_btn.pack(fill="x", pady=(6, 0))
+
         selected_banks = [b.lower() for b, var in self._bank_vars.items() if var.get()]
         if not selected_banks:
             self._set_status("Select at least 1 bank!", ERROR)
             self._running = False
+            if hasattr(self, "_stop_btn"):
+                self._stop_btn.pack_forget()
             return
 
         self._scan_btn.configure(state="disabled")
@@ -1580,6 +1637,8 @@ class App(ctk.CTk):
                     errors="replace",
                     env=env
                 )
+                self._active_proc = process
+
 
                 for line in process.stdout:
                     self.after(0, self._log_write, line)
@@ -1625,6 +1684,10 @@ class App(ctk.CTk):
         if is_scan:
             cmd.append("--scan")
 
+        self._running = True
+        if hasattr(self, "_stop_btn"):
+            self._stop_btn.pack(fill="x", pady=(6, 0))
+
         env = os.environ.copy()
         env.pop("TCL_LIBRARY", None)
         env.pop("TK_LIBRARY", None)
@@ -1641,6 +1704,7 @@ class App(ctk.CTk):
             creationflags=flags,
             env=env
         )
+        self._active_proc = proc
 
         last_output_file = None
         if proc.stdout:
@@ -1682,6 +1746,7 @@ class App(ctk.CTk):
                     creationflags=flags,
                     env=env
                 )
+                self._active_proc = j_proc
                 
                 if j_proc.stdout:
                     for line in j_proc.stdout:
@@ -1703,23 +1768,49 @@ class App(ctk.CTk):
         return ""
 
     def _on_done(self, code: int, output_path: str | None):
+        self._active_proc = None
         self._running = False
+        if hasattr(self, "_stop_btn"):
+            self._stop_btn.pack_forget()
         self._scan_btn.configure(state="normal")
         self._run_btn.configure(state="normal", text="▶  Reconciliation")
         self._journal_btn.configure(state="normal")
         self._open_btn.configure(state="normal")
-        # Refresh KPI cards only — skip drill re-scan (it already ran at scan start
-        # and _compute_drill_rows is heavy; running it again here would race with
-        # any in-flight background thread and freeze the Live Data component).
-        self._update_dashboard_summary(skip_drill=True)
-        
+
         if code == 0:
-            self._set_status("Finished ✓", SUCCESS)
-            self._last_output = output_path
-            if output_path and Path(output_path).exists():
-                _open_path(output_path)
+            if output_path:
+                self._set_status("Finished ✓", SUCCESS)
+                self._last_output = output_path
+                if Path(output_path).exists():
+                    _open_path(output_path)
+            else:
+                self._set_status("Scan Complete ✓", SUCCESS)
         else:
             self._set_status("Failed — check logs below", ERROR)
+
+        # Refresh KPI cards and engine status card
+        self._update_dashboard_summary(skip_drill=True)
+
+    def _on_stop(self):
+        proc = getattr(self, "_active_proc", None)
+        if proc:
+            try:
+                proc.terminate()
+                self.after(500, lambda: proc.kill() if proc and proc.poll() is None else None)
+            except Exception:
+                pass
+            self._active_proc = None
+        self._running = False
+        if hasattr(self, "_stop_btn"):
+            self._stop_btn.pack_forget()
+        self._log_write("\n🛑 Process stopped by user.\n", "err")
+        self._set_status("Process Stopped", ERROR)
+        self._scan_btn.configure(state="normal")
+        self._run_btn.configure(state="normal", text="▶  Reconciliation")
+        self._journal_btn.configure(state="normal")
+        self._open_btn.configure(state="normal")
+        self._update_dashboard_summary(skip_drill=True)
+
             
     def _set_dates(self, min_d: str, max_d: str):
         try:
@@ -2367,6 +2458,15 @@ class App(ctk.CTk):
 
     # ── Journal Confirmation Modal Overhaul ───────────────────────────────────
     def _on_journal(self):
+        if getattr(self, "_journal_window", None) and self._journal_window.winfo_exists():
+            try:
+                self._journal_window.deiconify()
+                self._journal_window.lift()
+                self._journal_window.focus_force()
+                return
+            except Exception:
+                pass
+
         if self._running:
             return
         
@@ -2381,22 +2481,33 @@ class App(ctk.CTk):
         latest_file = max(output_files, key=os.path.getctime)
         
         top = ctk.CTkToplevel(self)
+        self._journal_window = top
+
+        def _on_close_modal():
+            self._journal_window = None
+            top.destroy()
+
+        top.protocol("WM_DELETE_WINDOW", _on_close_modal)
         top.title("Confirm Journal Creation")
-        
-        screen_width = top.winfo_screenwidth()
-        screen_height = top.winfo_screenheight()
-        window_width = min(1300, int(screen_width * 0.94))
-        window_height = min(1000, int(screen_height * 0.90))
-        center_x = max(0, int(screen_width / 2 - window_width / 2))
-        center_y = max(0, int(screen_height / 2 - window_height / 2))
-        top.geometry(f'{window_width}x{window_height}+{center_x}+{center_y}')
-        top.minsize(1200, 750)
+        top.resizable(True, True)
+        top.minsize(1050, 700)
         top.configure(fg_color=BG)
+
+        if IS_WINDOWS:
+            try:
+                top.state("zoomed")
+            except Exception:
+                pass
+        else:
+            screen_w, screen_h = top.winfo_screenwidth(), top.winfo_screenheight()
+            top.geometry(f"{min(1400, screen_w)}x{min(900, screen_h)}+0+0")
+
         top.transient(self)
         top.grab_set()
 
         items = []
         journal_state = []
+
         
         def _load_data():
             nonlocal items, journal_state
@@ -2641,16 +2752,25 @@ class App(ctk.CTk):
         list_frame.pack(fill="both", expand=True)
         
         canvas = tk.Canvas(list_frame, bg=PANEL, highlightthickness=0)
-        scrollbar = tk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        scrollbar = ctk.CTkScrollbar(
+            list_frame, orientation="vertical", command=canvas.yview,
+            button_color="#94A3B8", button_hover_color=ACCENT
+        )
         scrollable_frame = tk.Frame(canvas, bg=PANEL)
         
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        def _update_scrollregion(e=None):
+            canvas.update_idletasks()
+            bbox = canvas.bbox("all")
+            if bbox:
+                canvas.configure(scrollregion=(0, 0, bbox[2], bbox[3]))
+
+        scrollable_frame.bind("<Configure>", _update_scrollregion)
         canvas_window = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_window, width=e.width))
         canvas.configure(yscrollcommand=scrollbar.set)
         
         canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        scrollbar.pack(side="right", fill="y", padx=(0, 4), pady=4)
         
         # Modal Footer Toolbar
         footer_frame = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=70, border_color=BORDER, border_width=1)
@@ -2664,34 +2784,48 @@ class App(ctk.CTk):
         pagination_frame.pack(side="left")
         
         btn_prev = ctk.CTkButton(
-            pagination_frame, text="◄ Prev", width=70, height=32,
+            pagination_frame, text="◄ Prev", width=80, height=34,
             fg_color=PANEL, hover_color=PREVIEW_BG,
             border_color=BORDER_DARK, border_width=1,
-            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"), corner_radius=6
+            text_color=TEXT, font=(FONT_FAMILY, 11, "bold"), corner_radius=6
         )
         btn_prev.pack(side="left")
         
-        lbl_page = ctk.CTkLabel(pagination_frame, text="", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT)
+        lbl_page = ctk.CTkLabel(pagination_frame, text="", font=(FONT_FAMILY, 11, "bold"), text_color=TEXT)
         lbl_page.pack(side="left", padx=12)
         
         btn_next = ctk.CTkButton(
-            pagination_frame, text="Next ►", width=70, height=32,
+            pagination_frame, text="Next ►", width=80, height=34,
             fg_color=PANEL, hover_color=PREVIEW_BG,
             border_color=BORDER_DARK, border_width=1,
-            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"), corner_radius=6
+            text_color=TEXT, font=(FONT_FAMILY, 11, "bold"), corner_radius=6
         )
         btn_next.pack(side="left")
         
         def _on_mousewheel(event):
-            delta = event.delta
-            if abs(delta) >= 120:
-                delta = int(delta / 120)
-            if delta != 0:
-                canvas.yview_scroll(int(-1 * delta), "units")
+            try:
+                if not canvas.winfo_exists():
+                    return
+                y_top, y_bot = canvas.yview()
+                delta = event.delta
+                if abs(delta) >= 120:
+                    delta = int(delta / 120)
+                
+                # Boundary clamping: stop scrolling if at bounds
+                if delta > 0 and y_top <= 0.001:
+                    return
+                if delta < 0 and y_bot >= 0.999:
+                    return
+                    
+                if delta != 0:
+                    canvas.yview_scroll(int(-1 * delta), "units")
+            except Exception:
+                pass
                 
         top.bind("<MouseWheel>", _on_mousewheel)
         canvas.bind("<MouseWheel>", _on_mousewheel)
         scrollable_frame.bind("<MouseWheel>", _on_mousewheel)
+
         
         def render_page(page_idx):
             active_det = {"btn": None, "frm": None}
@@ -2723,7 +2857,8 @@ class App(ctk.CTk):
                     scrollable_frame, text=h, bg=PREVIEW_BG, fg=MUTED,
                     font=(FONT_FAMILY, 9, "bold"), anchor=lbl_anchor, padx=14
                 )
-                lbl.grid(row=0, column=col, sticky="nsew", pady=(0, 4), ipady=8)
+                lbl.grid(row=0, column=col, sticky="nsew", pady=(0, 4), ipady=6)
+
                 
             dummy = tk.Label(scrollable_frame, text="", bg=PREVIEW_BG)
             dummy.grid(row=0, column=len(headers), sticky="nsew", pady=(0, 4), ipady=8)
@@ -2790,6 +2925,7 @@ class App(ctk.CTk):
                 tk.Frame(edc_frame, bg=BORDER_DARK, height=1).grid(row=3, column=0, columnspan=3, sticky="ew", pady=(4, 4))
                 tk.Label(edc_frame, text=f"Total Debit: Rp {amt:,.0f}", bg=PREVIEW_BG, fg=SUCCESS, font=(FONT_FAMILY, 9, "bold")).grid(row=4, column=0, columnspan=2, sticky="w")
                 tk.Label(edc_frame, text=f"Total Credit: Rp {amt:,.0f}", bg=PREVIEW_BG, fg=SUCCESS, font=(FONT_FAMILY, 9, "bold")).grid(row=4, column=2, sticky="e")
+
                 
                 # AR Section Preview
                 from config import ODOO_ACCOUNT_BANK_DIFF_INCOME, ODOO_ACCOUNT_BANK_DIFF_LOSS
@@ -2851,6 +2987,7 @@ class App(ctk.CTk):
                     tk.Frame(ar_frame, bg=BORDER_DARK, height=1).grid(row=last_r, column=0, columnspan=3, sticky="ew", pady=(4, 4))
                     tk.Label(ar_frame, text=f"Total Debit: Rp {tot_deb:,.0f}", bg=PREVIEW_BG, fg=tot_color, font=(FONT_FAMILY, 9, "bold")).grid(row=last_r+1, column=0, columnspan=2, sticky="w")
                     tk.Label(ar_frame, text=f"Total Credit: Rp {tot_crd:,.0f}", bg=PREVIEW_BG, fg=tot_color, font=(FONT_FAMILY, 9, "bold")).grid(row=last_r+1, column=2, sticky="e")
+
                 
                 def _toggle_det(btn, frm=det_frame, row_idx=r_det):
                     if frm.winfo_ismapped():
@@ -2882,18 +3019,19 @@ class App(ctk.CTk):
                     cb_item = tk.Checkbutton(scrollable_frame, variable=var_item, bg=bg_row, selectcolor=bg_row, command=_on_jurnal_toggle)
                 cb_item.grid(row=r_main, column=1, pady=3, ipady=4)
                 
-                tk.Label(scrollable_frame, text=str(item['tanggal']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=2, sticky="w", padx=14, ipady=6)
-                tk.Label(scrollable_frame, text=str(item['group']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=r_main, column=3, sticky="w", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=str(item['tanggal']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=2, sticky="w", padx=14, ipady=5)
+                tk.Label(scrollable_frame, text=str(item['group']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=r_main, column=3, sticky="w", padx=14, ipady=5)
                 amt_merch = float(item.get('merchant_amount') or 0)
                 amt_odoo = float(item.get('odoo_amount') or 0)
-                tk.Label(scrollable_frame, text=f"Rp {amt_merch:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=4, sticky="e", padx=14, ipady=6)
-                tk.Label(scrollable_frame, text=f"Rp {amt_odoo:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=5, sticky="e", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=f"Rp {amt_merch:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=4, sticky="e", padx=14, ipady=5)
+                tk.Label(scrollable_frame, text=f"Rp {amt_odoo:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=5, sticky="e", padx=14, ipady=5)
                 
                 mut_amt = float(item.get("mutation_amount", 0))
-                tk.Label(scrollable_frame, text=f"Rp {mut_amt:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=6, sticky="e", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=f"Rp {mut_amt:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=6, sticky="e", padx=14, ipady=5)
                 
                 sel_color = WARN if sel != 0 else TEXT
-                tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=bg_row, fg=sel_color, font=(FONT_FAMILY, 9, "bold" if sel != 0 else "normal")).grid(row=r_main, column=7, sticky="e", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=bg_row, fg=sel_color, font=(FONT_FAMILY, 9, "bold" if sel != 0 else "normal")).grid(row=r_main, column=7, sticky="e", padx=14, ipady=5)
+
                 
                 if state["disabled_edc"]:
                     cb_edc = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 10))
@@ -3107,7 +3245,9 @@ class App(ctk.CTk):
             if not confirm:
                 return
                 
+            self._journal_window = None
             top.destroy()
+
             
             self._running = True
             self._set_status("Uploading Edited Journal to Odoo...", WARN)
@@ -3123,21 +3263,46 @@ class App(ctk.CTk):
                     
                     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
                     
-                    cmd = [_venv_python, "odoo_journal_creator.py", "--file", str(recon_file), "--import-file", str(out_path), "--config", str(config_path)]
+                    cmd = [
+                        _venv_python, "odoo_journal_creator.py",
+                        "--file", str(recon_file),
+                        "--import-file", str(out_path),
+                        "--config", str(config_path)
+                    ]
+                    email = self._email_var.get().strip() if hasattr(self, "_email_var") else ""
+                    pwd = self._password_var.get() if hasattr(self, "_password_var") else ""
+                    if email and pwd:
+                        cmd.extend(["--email", email, "--password", pwd, "--headless"])
+
+                    if hasattr(self, "_stop_btn"):
+                        self.after(0, lambda: self._stop_btn.pack(fill="x", pady=(6, 0)))
+
                     proc = subprocess.Popen(
                         cmd, cwd=str(BASE_DIR),
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                         text=True, bufsize=1, encoding="utf-8",
                         env=env, creationflags=flags
                     )
+                    self._active_proc = proc
+
                     if proc.stdout:
                         for line in iter(proc.stdout.readline, ''):
                             self.after(0, self._log_write, line, "")
                     proc.wait()
+
+                    # Always ensure local recon file status is updated
+                    try:
+                        from odoo_journal_creator import update_recon_file_status, log_journal_creation
+                        update_recon_file_status(recon_file, config_path)
+                        log_journal_creation(recon_file, config_path)
+                    except Exception as ex:
+                        print(f"Status update note: {ex}")
+
                     if proc.returncode == 0:
                         self.after(0, self._on_done, 0, None)
                     else:
                         self.after(0, self._on_done, proc.returncode, None)
+
                 except Exception as e:
                     self.after(0, self._log_write, f"ERROR: {str(e)}\n", "err")
                     self.after(0, self._on_done, 1, None)

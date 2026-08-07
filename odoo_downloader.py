@@ -393,8 +393,11 @@ def run_downloader():
                 
             download = download_info.value
             
-            # Pastikan direktori tujuan ada
+            # Pastikan direktori tujuan ada & file lama dihapus
             ODO_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if ODO_EXCEL_PATH.exists():
+                try: ODO_EXCEL_PATH.unlink()
+                except Exception: pass
             
             # Simpan file yang didownload ke lokasi yang ditentukan di .env
             download.save_as(str(ODO_EXCEL_PATH))
@@ -595,6 +598,9 @@ def run_downloader():
                 
             download_j = download_info_j.value
             ODO_JOURNAL_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+            if ODO_JOURNAL_EXCEL_PATH.exists():
+                try: ODO_JOURNAL_EXCEL_PATH.unlink()
+                except Exception: pass
             download_j.save_as(str(ODO_JOURNAL_EXCEL_PATH))
             print(f"[+] Journal Entries downloaded successfully to: {ODO_JOURNAL_EXCEL_PATH}")
 

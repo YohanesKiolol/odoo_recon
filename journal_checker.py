@@ -116,11 +116,12 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
             if cell:
                 j_headers[str(cell).strip().lower()] = col_idx
                 
+        c_j_number = j_headers.get("number") or j_headers.get("name") or j_headers.get("no")
         c_j_journal = j_headers.get("journal")
         c_j_date = j_headers.get("date")
         c_j_ref = j_headers.get("reference") or j_headers.get("label")
         c_j_status = j_headers.get("status")
-        c_j_total = j_headers.get("total signed")
+        c_j_total = j_headers.get("total signed") or j_headers.get("total")
         
         if c_j_journal is not None and c_j_date is not None:
             for j_row in j_ws.iter_rows(min_row=2, values_only=True):
@@ -136,6 +137,7 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
                         
                 ref_val = str(j_row[c_j_ref] or "").strip() if c_j_ref is not None else ""
                 status_val = str(j_row[c_j_status] or "").strip() if c_j_status is not None else ""
+                num_val = str(j_row[c_j_number] or "").strip() if c_j_number is not None else ""
                 
                 try:
                     total_val = float(j_row[c_j_total]) if c_j_total is not None and j_row[c_j_total] is not None else 0.0
@@ -144,6 +146,7 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
                 
                 if j_val and d_val:
                     existing_journals.append({
+                        "number": num_val,
                         "journal": j_val,
                         "date": d_val,
                         "reference": ref_val.lower(),
@@ -157,6 +160,9 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
     from journal_generator import format_date_indo
     from config import BANK_ACCOUNTS
     
+    c_edc_num = col_map.get("edc number", 12)
+    c_ar_num = col_map.get("ar number", 13)
+
     updated = 0
     for row in range(4, ws.max_row + 1):
         bank = str(ws.cell(row=row, column=c_bank).value or "").strip()
@@ -200,6 +206,8 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
                 edc_status = None
                 ar_diff = False
                 edc_diff = False
+                ar_number = ""
+                edc_number = ""
                 
                 c_odoo_amt = col_map.get("total odoo", 7)
                 try:
@@ -220,6 +228,7 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
                             ar_status = "Posted"
                         else:
                             ar_status = "Draft"
+                        ar_number = j.get("number", "")
                         ar_diff = abs(j_total - abs(odoo_amt)) > 1.0
                         
                     # Match EDC
@@ -228,6 +237,7 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
                             edc_status = "Posted"
                         else:
                             edc_status = "Draft"
+                        edc_number = j.get("number", "")
                         edc_diff = abs(j_total - abs(odoo_amt)) > 1.0
 
                 # Determine final status
@@ -256,12 +266,23 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
                     
                 if ds_journal != "Unknown":
                     ws.cell(row=row, column=c_jstatus).value = final_status
+                    from openpyxl.styles import Font
+                    if c_edc_num:
+                        ce = ws.cell(row=row, column=c_edc_num)
+                        ce.value = edc_number if edc_number else "-"
+                        ce.font = Font(size=10, bold=True)
+                    if c_ar_num:
+                        ca = ws.cell(row=row, column=c_ar_num)
+                        ca.value = ar_number if ar_number else "-"
+                        ca.font = Font(size=10, bold=True)
+
                     if final_status != "Not Yet":
                         updated += 1
                         if debug:
-                            print(f"      [DEBUG] Found {final_status} for {target_ref_lower}")
+                            print(f"      [DEBUG] Found {final_status} ({edc_number} / {ar_number}) for {target_ref_lower}")
             except Exception as e:
                 print(f"⚠️ Failed to parse row {row}: {e}")
+
             
     if updated > 0:
         wb.save(path)

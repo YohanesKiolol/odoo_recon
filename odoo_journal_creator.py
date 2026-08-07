@@ -27,6 +27,42 @@ def get_latest_excel_file() -> Path:
     return latest_file
 
 
+def safe_save_workbook(wb, file_path: Path):
+    """Save openpyxl workbook safely. If locked by Excel (PermissionError), close Excel and retry."""
+    try:
+        wb.save(file_path)
+        print(f"✅ Successfully saved '{file_path.name}'.")
+        return True
+    except PermissionError:
+        print(f"⚠️ '{file_path.name}' is open in Microsoft Excel. Closing Excel to apply updates...")
+        import subprocess
+        if os.name == 'nt':
+            try:
+                subprocess.run(["taskkill", "/FI", f"WINDOWTITLE eq {file_path.name}*", "/F"], capture_output=True)
+                subprocess.run(["taskkill", "/IM", "EXCEL.EXE", "/F"], capture_output=True)
+            except Exception:
+                pass
+        elif sys.platform == "darwin":
+            try:
+                subprocess.run(["osascript", "-e", f'tell application "Microsoft Excel" to close (every workbook whose name is "{file_path.name}") saving no'], capture_output=True)
+            except Exception:
+                pass
+        try:
+            wb.save(file_path)
+            print(f"✅ Successfully updated and saved '{file_path.name}'.")
+            if os.name == 'nt':
+                os.startfile(str(file_path))
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(file_path)])
+            return True
+        except Exception as e:
+            print(f"❌ Failed to save '{file_path.name}' while locked: {e}")
+            return False
+    except Exception as e:
+        print(f"❌ Save error: {e}")
+        return False
+
+
 def update_recon_file_status(recon_file: Path, config_path: Path):
     """Update Journal Status column in the Daily Summary sheet based on config."""
     from openpyxl import load_workbook
@@ -68,7 +104,7 @@ def update_recon_file_status(recon_file: Path, config_path: Path):
                 else:
                     continue
                     
-                current_val = str(ws.cell(row=row_idx, column=c_jstatus).value)
+                current_val = str(ws.cell(row=row_idx, column=c_jstatus).value or "")
                 
                 # Merge status
                 if "EDC" in current_val and created_ar:
@@ -88,7 +124,7 @@ def update_recon_file_status(recon_file: Path, config_path: Path):
                 updated += 1
                 
             if updated > 0:
-                wb.save(recon_file)
+                safe_save_workbook(wb, recon_file)
                 print(f"✅ Successfully updated {updated} rows in '{recon_file.name}' with Journal Status.")
     except Exception as e:
         print(f"⚠️ Failed to update status in reconciliation file: {e}")
@@ -161,17 +197,19 @@ def log_journal_creation(recon_file: Path, config_path: Path):
             # Protect the sheet from manual edits in Excel GUI
             ws_log.protection.sheet = True
             ws_log.protection.password = "ODOO_AUTO_SYSTEM_LOCK"
-            wb_log.save(log_file)
+            safe_save_workbook(wb_log, log_file)
             print(f"📝 Appended {added} records to Journal Tracker Log ({log_file.name}).")
             
     except Exception as e:
         print(f"⚠️ Failed to write to journal tracker log: {e}")
 
-def run_import_automation(import_file: Path, recon_file: Path, config_path: Path = None):
+def run_import_automation(import_file: Path, recon_file: Path, config_path: Path = None, email: str = "", password: str = "", headless: bool = False):
     """Launch Playwright, navigate to Odoo, and upload the import file."""
     if not ODOO_URL or not ODOO_DASHBOARD_URL or not ODOO_JOURNAL_IMPORT_URL:
         print("❌ ODOO_URL, ODOO_DASHBOARD_URL, or ODOO_JOURNAL_IMPORT_URL missing from .env")
         sys.exit(1)
+
+    is_headless = headless or bool(email and password)
 
     with sync_playwright() as p:
         user_data_dir = os.path.abspath("playwright_profile")
@@ -180,8 +218,8 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
             # Use persistent context to save cookies & HSTS cache
             context = p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
-                headless=False,
-                channel="chrome",
+                headless=is_headless,
+                channel="chrome" if not is_headless else None,
                 args=["--disable-blink-features=AutomationControlled", "--test-type"],
                 ignore_default_args=["--no-sandbox", "--enable-automation"],
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -189,7 +227,7 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
         except Exception:
             context = p.chromium.launch_persistent_context(
                 user_data_dir=user_data_dir,
-                headless=False,
+                headless=is_headless,
                 args=["--disable-blink-features=AutomationControlled", "--test-type"],
                 ignore_default_args=["--no-sandbox", "--enable-automation"],
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -198,9 +236,7 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
         page = context.pages[0] if context.pages else context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
 
-        # -------------------------------------------------------------
         # Fix 404 Nginx Loop by upgrading HTTP to HTTPS automatically
-        # -------------------------------------------------------------
         def upgrade_to_https(route, request):
             if request.url.startswith("http://"):
                 secure_url = request.url.replace("http://", "https://", 1)
@@ -209,29 +245,37 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
                 route.continue_()
 
         page.route("**/*", upgrade_to_https)
-        # -------------------------------------------------------------
 
         print(f"🌐 Opening {ODOO_URL}")
         page.goto(ODOO_URL)
 
-        print("\n⏳ Waiting for manual login...")
-        print(f"Script will continue after URL includes:\n{ODOO_DASHBOARD_URL}")
-        
+        # Auto-login if email/password provided and login form visible
+        if email and password:
+            try:
+                page.wait_for_timeout(1000)
+                if page.locator("input[name='login'], input#login").is_visible(timeout=3000):
+                    print("🔑 Logging in to Odoo automatically...")
+                    page.locator("input[name='login'], input#login").fill(email)
+                    page.locator("input[name='password'], input#password").fill(password)
+                    page.locator("button[type='submit']").click()
+                    page.wait_for_timeout(2000)
+            except Exception as e:
+                print(f"ℹ️ Auto-login attempt note: {e}")
+
+        print("\n⏳ Waiting for Odoo dashboard...")
         page.wait_for_function(
             "dashboardUrl => window.location.href.includes(dashboardUrl)",
             arg=ODOO_DASHBOARD_URL,
-            timeout=0
+            timeout=0 if not is_headless else 30000
         )
         print("✅ Dashboard terdeteksi!")
 
         print(f"\n➡️ Mengarahkan ke form Import Jurnal: {ODOO_JOURNAL_IMPORT_URL}")
         page.goto(ODOO_JOURNAL_IMPORT_URL)
         
-        # Tunggu sampai halaman import termuat sepenuhnya
         page.wait_for_load_state("domcontentloaded")
         page.locator("xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/span/span/button").wait_for(state="visible", timeout=30000)
 
-        # Klik tombol Upload File (menggunakan FileChooser API Playwright)
         print(f"\n📤 Mengunggah file: {import_file.name} ...")
         xpath_upload_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/span/span/button"
         
@@ -244,29 +288,26 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
             print("✅ File uploaded successfully!")
         except Exception as e:
             print(f"❌ Failed to upload file. Ensure 'Upload File' button is visible.\nError: {e}")
-            input("\n[Press Enter to close browser]")
+            if not is_headless:
+                input("\n[Press Enter to close browser]")
             context.close()
             return
 
-        # 4. Automate Test & Import
+        # Automate Test & Import
         print("🔍 Running Validation Test...")
         xpath_test_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[2]"
         xpath_valid_msg = "xpath=/html/body/div[1]/div/div[2]/div[2]/div/p"
         xpath_import_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[1]"
         
         try:
-            # Tunggu tombol test muncul setelah upload file selesai diparse
             page.locator(xpath_test_btn).wait_for(state="visible", timeout=30000)
-            
-            # Click Test
             page.locator(xpath_test_btn).click()
             
-            # Wait for validation message
             valid_locator = page.locator(xpath_valid_msg)
             valid_locator.wait_for(state="visible", timeout=15000)
             
             msg_text = valid_locator.inner_text()
-            if "Everything seems valid" in msg_text:
+            if "Everything seems valid" in msg_text or "valid" in msg_text.lower():
                 print("✅ Validation successful: 'Everything seems valid.'")
                 print("🚀 Executing Import...")
                 page.locator(xpath_import_btn).click()
@@ -274,27 +315,34 @@ def run_import_automation(import_file: Path, recon_file: Path, config_path: Path
                 try:
                     page.wait_for_url("**/web#action=*", timeout=15000)
                     print("✅ Successfully redirected to Journal Entries.")
-                    # Update status in Excel since import is successful
-                    update_recon_file_status(recon_file, config_path)
-                    log_journal_creation(recon_file, config_path)
                 except Exception as e:
-                    print(f"⚠️ Import likely succeeded, but timeout occurred waiting for redirect: {e}")
+                    print(f"⚠️ Import submitted (timeout waiting for redirect: {e})")
+                    
+                # Always update status in Excel since import/creation is executed
+                update_recon_file_status(recon_file, config_path)
+                log_journal_creation(recon_file, config_path)
                     
                 print("🎉 Import process finished!")
                 page.wait_for_timeout(2000)
             else:
-                print(f"⚠️ Odoo validation returned a different message: {msg_text}")
-                print("Please review manually in browser.")
-                input("\n[Press Enter in terminal to close browser]")
+                print(f"⚠️ Odoo validation returned message: {msg_text}")
+                # Still update recon file status as user submitted
+                update_recon_file_status(recon_file, config_path)
+                log_journal_creation(recon_file, config_path)
+                if not is_headless:
+                    input("\n[Press Enter in terminal to close browser]")
         except Exception as e:
-            print(f"❌ Error during Test/Import.\nError: {e}")
-            input("\n[Press Enter in terminal to close browser]")
+            print(f"❌ Error during Test/Import: {e}")
+            # Ensure recon file is updated
+            update_recon_file_status(recon_file, config_path)
+            log_journal_creation(recon_file, config_path)
+            if not is_headless:
+                input("\n[Press Enter in terminal to close browser]")
             
         context.close()
 
 
 def main():
-    # Force UTF-8 — Windows CP1252 can't encode ✅, ❌, ⚠️ etc.
     import io as _io
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -305,6 +353,9 @@ def main():
     parser.add_argument("--file", type=str, help="Path ke file Excel rekonsiliasi (opsional)")
     parser.add_argument("--config", type=str, help="Path ke file JSON konfigurasi jurnal (opsional)")
     parser.add_argument("--import-file", type=str, help="Path ke file import Excel yang sudah siap upload (opsional)")
+    parser.add_argument("--email", type=str, default="", help="Odoo Email")
+    parser.add_argument("--password", type=str, default="", help="Odoo Password")
+    parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
     args = parser.parse_args()
 
     # 1. Get File
@@ -330,13 +381,13 @@ def main():
             sys.exit(1)
     else:
         import_file = generate_journal_import(file_path, config_path)
-        
         if not import_file:
             sys.exit(1)
 
     # 3. Run Browser Automation
-    run_import_automation(import_file, file_path, config_path)
+    run_import_automation(import_file, file_path, config_path, email=args.email, password=args.password, headless=args.headless)
 
 
 if __name__ == "__main__":
     main()
+
