@@ -2853,38 +2853,39 @@ class App(ctk.CTk):
             # Column Minwidth Specifications for Clean Breathing Room
             col_widths = {
                 0: 40,   # Expand ►
-                1: 60,   # Select
+                1: 80,   # Select
                 2: 110,  # Date
-                3: 140,  # Journal
+                3: 140,  # Journal  ← stretchy
                 4: 130,  # Merchant Amt
                 5: 130,  # Odoo Amt
                 6: 145,  # Mutation + Admin
-                7: 80,  # Difference
-                8: 54,   # EDC
-                9: 115,  # EDC Status
-                10: 54,  # AR
-                11: 115   # AR Status
+                7: 100,  # Difference
+                8: 80,   # EDC
+                9: 115,  # EDC Status  ← stretchy
+                10: 80,  # AR
+                11: 115  # AR Status   ← stretchy
             }
+            stretchy = {3, 9, 11}
             for col, w in col_widths.items():
-                scrollable_frame.grid_columnconfigure(col, minsize=w)
+                scrollable_frame.grid_columnconfigure(
+                    col, minsize=w, weight=2 if col in stretchy else 0
+                )
+            # Trailing dummy column soaks up remaining slack
+            scrollable_frame.grid_columnconfigure(len(col_widths), weight=1)
 
             headers = ["", "Select", "Date", "Journal", "Merchant Amt", "Odoo Amt", "Mutation + Admin", "Difference", "EDC", "EDC Status", "AR", "AR Status"]
             for col, h in enumerate(headers):
                 lbl_anchor = "w" if col in [2, 3] else "e" if col in [4, 5, 6, 7] else "center"
-                lbl = tk.Label(
+                tk.Label(
                     scrollable_frame, text=h, bg=PREVIEW_BG, fg=MUTED,
                     font=(FONT_FAMILY, 10, "bold"), anchor=lbl_anchor, padx=14
-                )
-                lbl.grid(row=0, column=col, sticky="nsew", pady=(0, 4), ipady=7)
+                ).grid(row=0, column=col, sticky="nsew", pady=(0, 4), ipady=7)
 
-
-                
-            dummy = tk.Label(scrollable_frame, text="", bg=PREVIEW_BG)
-            dummy.grid(row=0, column=len(headers), sticky="nsew", pady=(0, 4), ipady=8)
-            scrollable_frame.grid_columnconfigure(len(headers), weight=1)
-            
             # Header Bottom Border Line
             tk.Frame(scrollable_frame, bg=BORDER_DARK, height=1).grid(row=1, column=0, columnspan=len(headers)+1, sticky="ew", pady=(0, 4))
+            # Trailing header cell to fill full width
+            tk.Label(scrollable_frame, text="", bg=PREVIEW_BG).grid(row=0, column=len(headers), sticky="nsew", ipady=7)
+
                 
             start_idx = page_idx * ITEMS_PER_PAGE
             end_idx = min(start_idx + ITEMS_PER_PAGE, len(journal_state))
@@ -2923,7 +2924,7 @@ class App(ctk.CTk):
                         props = p
                         break
                         
-                det_frame = tk.Frame(scrollable_frame, bg=PREVIEW_BG, highlightbackground=BORDER_DARK, highlightthickness=1)
+                det_frame = tk.Frame(scrollable_frame, bg=PREVIEW_BG)
                 
                 # EDC Section Preview
                 edc_debit = props.get("edc_debit") or f"{str(item['bank']).upper()} EDC Debit"
@@ -3030,103 +3031,128 @@ class App(ctk.CTk):
                         
                 btn_expand = tk.Label(scrollable_frame, text="►", bg=bg_row, fg=ACCENT, cursor="hand2", font=(FONT_FAMILY, 10, "bold"))
                 btn_expand.bind("<Button-1>", lambda e, b=btn_expand, f=det_frame: _toggle_det(b, f))
-                btn_expand.grid(row=r_main, column=0, padx=8, ipady=6)
+                btn_expand.grid(row=r_main, column=0, padx=8, ipady=6, sticky="nsew")
                 
+                # Select checkbox — create with container as parent
+                _cell1 = tk.Frame(scrollable_frame, bg=bg_row)
+                _cell1.grid(row=r_main, column=1, sticky="nsew", pady=4)
                 if state["disabled_edc"] and state["disabled_ar"]:
-                    cb_item = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 11, "bold"))
+                    tk.Label(_cell1, text="—", bg=bg_row, fg=MUTED,
+                             font=(FONT_FAMILY, 11, "bold")).pack(anchor="center", expand=True, fill="both")
                 else:
-                    cb_item = ctk.CTkCheckBox(
-                        scrollable_frame, text="", variable=var_item,
+                    ctk.CTkCheckBox(
+                        _cell1, text="", variable=var_item,
                         width=18, height=18, checkbox_width=18, checkbox_height=18,
                         fg_color=ACCENT, hover_color=ACCENT_DARK,
+                        bg_color=bg_row,
                         command=_on_jurnal_toggle
-                    )
-                cb_item.grid(row=r_main, column=1, padx=6, pady=4)
-                
+                    ).place(relx=0.5, rely=0.5, anchor="center")
+
                 tk.Label(scrollable_frame, text=str(item['tanggal']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=2, sticky="w", padx=14, ipady=6)
                 tk.Label(scrollable_frame, text=str(item['group']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=3, sticky="w", padx=14, ipady=6)
                 amt_merch = float(item.get('merchant_amount') or 0)
                 amt_odoo = float(item.get('odoo_amount') or 0)
                 tk.Label(scrollable_frame, text=f"Rp {amt_merch:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=4, sticky="e", padx=14, ipady=6)
                 tk.Label(scrollable_frame, text=f"Rp {amt_odoo:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=5, sticky="e", padx=14, ipady=6)
-                
                 mut_amt = float(item.get("mutation_amount", 0))
                 tk.Label(scrollable_frame, text=f"Rp {mut_amt:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=6, sticky="e", padx=14, ipady=6)
-                
                 sel_color = WARN if sel != 0 else TEXT
                 tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=bg_row, fg=sel_color, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=7, sticky="e", padx=14, ipady=6)
-                
+
+                # EDC checkbox
+                _cell8 = tk.Frame(scrollable_frame, bg=bg_row)
+                _cell8.grid(row=r_main, column=8, sticky="nsew", pady=4)
                 if state["disabled_edc"]:
-                    cb_edc = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 11, "bold"))
+                    tk.Label(_cell8, text="—", bg=bg_row, fg=MUTED,
+                             font=(FONT_FAMILY, 11, "bold")).pack(anchor="center", expand=True, fill="both")
                 else:
-                    cb_edc = ctk.CTkCheckBox(
-                        scrollable_frame, text="", variable=var_edc,
+                    ctk.CTkCheckBox(
+                        _cell8, text="", variable=var_edc,
                         width=18, height=18, checkbox_width=18, checkbox_height=18,
-                        fg_color=ACCENT, hover_color=ACCENT_DARK
-                    )
-                cb_edc.grid(row=r_main, column=8, padx=12, pady=4)
-                
+                        fg_color=ACCENT, hover_color=ACCENT_DARK,
+                        bg_color=bg_row
+                    ).place(relx=0.5, rely=0.5, anchor="center")
+
+                # AR checkbox
+                _cell10 = tk.Frame(scrollable_frame, bg=bg_row)
+                _cell10.grid(row=r_main, column=10, sticky="nsew", pady=4)
                 if state["disabled_ar"]:
-                    cb_ar = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 11, "bold"))
+                    tk.Label(_cell10, text="—", bg=bg_row, fg=MUTED,
+                             font=(FONT_FAMILY, 11, "bold")).pack(anchor="center", expand=True, fill="both")
                 else:
-                    cb_ar = ctk.CTkCheckBox(
-                        scrollable_frame, text="", variable=var_ar,
+                    ctk.CTkCheckBox(
+                        _cell10, text="", variable=var_ar,
                         width=18, height=18, checkbox_width=18, checkbox_height=18,
-                        fg_color=ACCENT, hover_color=ACCENT_DARK
-                    )
-                cb_ar.grid(row=r_main, column=10, padx=12, pady=4)
+                        fg_color=ACCENT, hover_color=ACCENT_DARK,
+                        bg_color=bg_row
+                    ).place(relx=0.5, rely=0.5, anchor="center")
                 
                 edc_info_texts = []
                 ar_info_texts = []
                 is_reconciled = str(item.get("reconciled", "")).strip().lower() == "yes"
                 status_valid = item.get("status_valid", True)
-                
+
+                # Build status lists: (label_text, is_good)
+                edc_badges = []
+                ar_badges = []
+
                 if not is_reconciled:
-                    edc_info_texts.append("⚠️ Unreconciled")
+                    edc_badges.append(("Unreconciled", False))
                 elif not status_valid:
-                    edc_info_texts.append("⚠️ Difference")
-                
+                    edc_badges.append(("Difference", False))
+
                 if not is_reconciled:
-                    ar_info_texts.append("⚠️ Unreconciled")
+                    ar_badges.append(("Unreconciled", False))
                 elif not status_valid:
-                    ar_info_texts.append("⚠️ Difference")
+                    ar_badges.append(("Difference", False))
                 elif not item.get("mutation_matched", False):
                     if not item.get("mutation_found", False):
-                        ar_info_texts.append("⚠️ No Mutation")
+                        ar_badges.append(("No Mutation", False))
                     else:
-                        ar_info_texts.append("⚠️ Mut Difference")
-                
+                        ar_badges.append(("Mut Difference", False))
+
                 j_status = item.get("journal_status")
                 if j_status:
                     j_status_str = str(j_status).strip()
                     if j_status_str not in ["", "None", "Not Yet"]:
                         parts = [p.strip() for p in j_status_str.split("|")]
                         for p in parts:
+                            if "Posted" in p:
+                                label = "Posted (Diff)" if "Difference" in p else "Posted"
+                                is_good = "Difference" not in p
+                            elif "Draft" in p:
+                                label = "Draft"
+                                is_good = True
+                            else:
+                                label = p
+                                is_good = False
                             if "(Both" in p:
-                                stripped = p.replace("(Both Difference)", "(Diff)").replace("(Both)", "").replace("Posted", "✅ Posted").replace("Draft", "📌 Draft").strip()
-                                if not edc_info_texts:
-                                    edc_info_texts.append(stripped)
-                                if not ar_info_texts:
-                                    ar_info_texts.append(stripped)
+                                if not edc_badges: edc_badges.append((label, is_good))
+                                if not ar_badges: ar_badges.append((label, is_good))
                             elif "(EDC" in p:
-                                stripped = p.replace("(EDC Difference)", "(Diff)").replace("(EDC)", "").replace("Posted", "✅ Posted").replace("Draft", "📌 Draft").strip()
-                                if not edc_info_texts:
-                                    edc_info_texts.append(stripped)
+                                if not edc_badges: edc_badges.append((label, is_good))
                             elif "(AR" in p:
-                                stripped = p.replace("(AR Difference)", "(Diff)").replace("(AR)", "").replace("Posted", "✅ Posted").replace("Draft", "📌 Draft").strip()
-                                if not ar_info_texts:
-                                    ar_info_texts.append(stripped)
-                    
-                if edc_info_texts:
-                    lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in edc_info_texts) else WARN
-                    tk.Label(scrollable_frame, text="\n".join(edc_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=9, sticky="w", padx=14, ipady=6)
-                    
-                if ar_info_texts:
-                    lbl_color = SUCCESS if all(t in ["✅ Posted", "📌 Draft"] for t in ar_info_texts) else WARN
-                    tk.Label(scrollable_frame, text="\n".join(ar_info_texts), bg=bg_row, fg=lbl_color, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=11, sticky="w", padx=14, ipady=6)
-                
+                                if not ar_badges: ar_badges.append((label, is_good))
+
+                def _render_status(parent, col, badges, bg_row):
+                    if not badges:
+                        return
+                    txt = "\n".join(t for t, _ in badges)
+                    good = all(g for _, g in badges)
+                    tk.Label(
+                        parent, text=txt, bg=bg_row,
+                        fg=SUCCESS if good else WARN,
+                        font=(FONT_FAMILY, 10, "bold"),
+                        justify="center", anchor="center"
+                    ).grid(row=r_main, column=col, sticky="nsew", padx=6, ipady=6)
+
+                _render_status(scrollable_frame, 9, edc_badges, bg_row)
+                _render_status(scrollable_frame, 11, ar_badges, bg_row)
+
                 # Row Divider Line
                 tk.Frame(scrollable_frame, bg=BORDER, height=1).grid(row=r_sep, column=0, columnspan=len(headers)+1, sticky="ew")
+
+
                 
             total_pages = max(1, (len(journal_state) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
             lbl_page.configure(text=f"Page {page_idx + 1} of {total_pages}")
