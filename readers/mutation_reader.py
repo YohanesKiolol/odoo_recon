@@ -64,37 +64,44 @@ def read_mutation_bca(filepath: Path, alias: str):
     mutations = []
     unknowns = []
     
-    # We might need the year from the "Periode" line (row 3)
+    # Fallback year from "Periode" line or current year
     year = datetime.today().year
     
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, "r", encoding="utf-8-sig", errors="replace") as f:
         reader = csv.reader(f, delimiter=",")
         
-        # Read header / metadata
-        for i, row in enumerate(reader):
-            if i == 2 and len(row) > 0 and "Periode" in row[0]:
-                # Extract year from e.g. "Periode : 01/07/2026 - 31/07/2026"
-                parts = row[0].split("/")
+        # 1. Dynamically read metadata until header row is found
+        for row in reader:
+            if not row:
+                continue
+            first_cell = row[0].strip()
+            if "Periode" in first_cell:
+                parts = first_cell.split("/")
                 if len(parts) >= 3:
                     try:
                         year = int(parts[2].split(" ")[0][:4])
-                    except:
+                    except Exception:
                         pass
-            
-            # Header is at row 5 (index 4)
-            if i == 4:
+            # Header row starts with "Tanggal" or "Date"
+            if "Tanggal" in first_cell or "Date" in first_cell:
                 break
                 
-        # Read data rows
+        # 2. Read transaction data rows
         for row in reader:
-            if len(row) < 5:
+            if len(row) < 4:
                 continue
                 
             date_str = row[0].strip()
             desc = row[1].strip()
-            jumlah = row[3].strip()
             
-            # We want both Credit and Debit transactions
+            # Amount with CR/DB indicator may be in column 3 or column 4
+            jumlah = row[3].strip() if len(row) > 3 else ""
+            if not (jumlah.endswith(" CR") or jumlah.endswith(" DB")):
+                if len(row) > 4 and (row[4].strip().endswith(" CR") or row[4].strip().endswith(" DB")):
+                    jumlah = row[4].strip()
+                else:
+                    continue
+            
             if jumlah.endswith(" CR"):
                 cr_db_type = "Credit"
                 amount = _clean_amount(jumlah.replace(" CR", ""))
@@ -104,11 +111,23 @@ def read_mutation_bca(filepath: Path, alias: str):
             else:
                 continue
             
-            # Parse Date (BCA format is "DD/MM")
-            try:
-                dt = datetime.strptime(f"{date_str}/{year}", "%d/%m/%Y")
-            except ValueError:
-                continue
+            # Parse Date (BCA format can be "DD/MM/YYYY", "YYYY-MM-DD", or "DD/MM")
+            dt = None
+            if len(date_str) == 10 and date_str.count("/") == 2:
+                try:
+                    dt = datetime.strptime(date_str, "%d/%m/%Y")
+                except ValueError:
+                    pass
+            if not dt and len(date_str) == 10 and date_str.count("-") == 2:
+                try:
+                    dt = datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    pass
+            if not dt:
+                try:
+                    dt = datetime.strptime(f"{date_str}/{year}", "%d/%m/%Y")
+                except ValueError:
+                    continue
 
             # Determine Type
             desc_upper = desc.upper()
@@ -139,7 +158,7 @@ def read_mutation_bca(filepath: Path, alias: str):
                     fee_str = m.group(1).replace(",", "")
                     try:
                         admin_fee = Decimal(fee_str)
-                    except:
+                    except Exception:
                         pass
                         
             record = {
@@ -159,6 +178,7 @@ def read_mutation_bca(filepath: Path, alias: str):
                 mutations.append(record)
 
     return mutations, unknowns
+
 
 
 def _read_mutation_mandiri_raw(filepath: Path, alias: str):

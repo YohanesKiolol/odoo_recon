@@ -1145,10 +1145,10 @@ class App(ctk.CTk):
                         dates = []
                         for csv_f in alias_dir.glob("*.csv"):
                             try:
-                                if bank_name == "bca":       rows2, _ = read_mutation_bca(csv_f, alias)
-                                elif bank_name == "mandiri": rows2, _ = read_mutation_mandiri(csv_f, alias)
-                                else:                        rows2, _ = read_mutation_bri(csv_f, alias)
-                                for r in rows2:
+                                if bank_name == "bca":       rows2, unks2 = read_mutation_bca(csv_f, alias)
+                                elif bank_name == "mandiri": rows2, unks2 = read_mutation_mandiri(csv_f, alias)
+                                else:                        rows2, unks2 = read_mutation_bri(csv_f, alias)
+                                for r in (rows2 + unks2):
                                     d = r.get("date")
                                     if d: dates.append(d)
                             except Exception: pass
@@ -1412,20 +1412,19 @@ class App(ctk.CTk):
 
     def _on_cleanse(self):
         try:
-            from config import BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, ODO_EXCEL_PATH, OUTPUT_DIR
+            from config import INPUT_DIR, MUTATION_DIR, OUTPUT_DIR, ODO_EXCEL_PATH
             
             recap_base = BASE_DIR / "recap"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             target_recap = recap_base / timestamp
             
             files_to_move = []
-            dirs_to_clean = [BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, OUTPUT_DIR]
-            for d in dirs_to_clean:
-                if d.exists() and d.is_dir():
-                    for f in d.glob("*"):
+            for base_dir in [INPUT_DIR, MUTATION_DIR, OUTPUT_DIR]:
+                if base_dir.exists() and base_dir.is_dir():
+                    for f in base_dir.rglob("*"):
                         if f.is_file() and f.name != "journal_creation_log.xlsx":
                             files_to_move.append(f)
-            if ODO_EXCEL_PATH.exists():
+            if ODO_EXCEL_PATH.exists() and ODO_EXCEL_PATH.is_file() and ODO_EXCEL_PATH not in files_to_move:
                 files_to_move.append(ODO_EXCEL_PATH)
                 
             if not files_to_move:
@@ -1451,7 +1450,7 @@ class App(ctk.CTk):
             hdr = ctk.CTkFrame(content, fg_color="transparent")
             hdr.pack(fill="x", padx=16, pady=(16, 8))
             ctk.CTkLabel(hdr, text="🗑️  Confirm Workspace Data Cleanup", font=(FONT_FAMILY, 13, "bold"), text_color=ERROR).pack(anchor="w")
-            ctk.CTkLabel(hdr, text=f"This will relocate {len(files_to_move)} file(s) out of active input & output folders.", font=(FONT_BODY, 11), text_color=MUTED).pack(anchor="w", pady=(2, 0))
+            ctk.CTkLabel(hdr, text=f"This will relocate {len(files_to_move)} file(s) out of active input, mutation & output folders.", font=(FONT_BODY, 11), text_color=MUTED).pack(anchor="w", pady=(2, 0))
             
             info_box = ctk.CTkFrame(content, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
             info_box.pack(fill="x", padx=16, pady=12)
@@ -1470,12 +1469,13 @@ class App(ctk.CTk):
                     self._log_write("\n── Cleaning Workspace Data ──\n", "head")
                     moved_count = 0
                     for f in files_to_move:
-                        if f == ODO_EXCEL_PATH:
-                            tdir = target_recap
-                        else:
-                            tdir = target_recap / f.parent.name
-                        tdir.mkdir(parents=True, exist_ok=True)
-                        shutil.move(str(f), str(tdir / f.name))
+                        try:
+                            rel_path = f.relative_to(BASE_DIR)
+                        except ValueError:
+                            rel_path = Path(f.name)
+                        target_file = target_recap / rel_path
+                        target_file.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(f), str(target_file))
                         moved_count += 1
                         
                     self._log_write(f"✅ {moved_count} file(s) archived to: recap/{timestamp}/\n", "ok")
@@ -1483,6 +1483,7 @@ class App(ctk.CTk):
                     self._set_status(f"Cleaned {moved_count} files", SUCCESS)
                 except Exception as ex:
                     self._log_write(f"\n❌ Error during Data Cleanup: {ex}\n", "err")
+
                     
             ctk.CTkButton(
                 btn_frame, text="Cancel", height=36, width=100,
