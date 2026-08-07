@@ -103,25 +103,58 @@ def run_downloader():
         else:
             ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         
-        try:
-            context = p.chromium.launch_persistent_context(
-                user_data_dir=user_data_dir,
-                headless=is_headless,
-                channel="chrome",
-                args=["--disable-blink-features=AutomationControlled", "--test-type"],
-                ignore_default_args=["--no-sandbox", "--enable-automation"],
-                user_agent=ua,
-                viewport={"width": 1920, "height": 1080}
-            )
-        except Exception:
-            context = p.chromium.launch_persistent_context(
-                user_data_dir=user_data_dir,
-                headless=is_headless,
-                args=["--disable-blink-features=AutomationControlled", "--test-type"],
-                ignore_default_args=["--no-sandbox", "--enable-automation"],
-                user_agent=ua,
-                viewport={"width": 1920, "height": 1080}
-            )
+        context = None
+        for channel in ["chrome", "msedge", None]:
+            try:
+                kwargs = {
+                    "user_data_dir": user_data_dir,
+                    "headless": is_headless,
+                    "args": ["--disable-blink-features=AutomationControlled", "--test-type"],
+                    "ignore_default_args": ["--no-sandbox", "--enable-automation"],
+                    "user_agent": ua,
+                    "viewport": {"width": 1920, "height": 1080}
+                }
+                if channel:
+                    kwargs["channel"] = channel
+                context = p.chromium.launch_persistent_context(**kwargs)
+                break
+            except Exception:
+                continue
+
+        if not context:
+            possible_paths = []
+            if platform.system() == "Windows":
+                possible_paths = [
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                ]
+            elif platform.system() == "Darwin":
+                possible_paths = [
+                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                ]
+            for exe in possible_paths:
+                if os.path.exists(exe):
+                    try:
+                        context = p.chromium.launch_persistent_context(
+                            user_data_dir=user_data_dir,
+                            headless=is_headless,
+                            executable_path=exe,
+                            args=["--disable-blink-features=AutomationControlled", "--test-type"],
+                            ignore_default_args=["--no-sandbox", "--enable-automation"],
+                            user_agent=ua,
+                            viewport={"width": 1920, "height": 1080}
+                        )
+                        break
+                    except Exception:
+                        continue
+
+        if not context:
+            print("❌ Failed to launch browser (Chrome or Edge). Please ensure Google Chrome or Microsoft Edge is installed.")
+            sys.exit(1)
+
 
         page = context.pages[0] if context.pages else context.new_page()
         page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
