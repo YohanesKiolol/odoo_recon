@@ -3033,20 +3033,87 @@ class App(ctk.CTk):
                 btn_expand.bind("<Button-1>", lambda e, b=btn_expand, f=det_frame: _toggle_det(b, f))
                 btn_expand.grid(row=r_main, column=0, padx=8, ipady=6, sticky="nsew")
                 
-                # Select checkbox — create with container as parent
-                _cell1 = tk.Frame(scrollable_frame, bg=bg_row)
-                _cell1.grid(row=r_main, column=1, sticky="nsew", pady=4)
+                def _make_cb(parent, variable, bg_color, command=None):
+                    """18x18 canvas checkbox with proper rounded corners."""
+                    s = 18
+                    r = 3   # corner radius
+                    m = 1   # margin from canvas edge
+                    x, y = m, m
+                    w, h = s - 2*m, s - 2*m  # 16x16 box
+                    d = 2 * r                 # arc diameter
+
+                    cv = tk.Canvas(parent, width=s, height=s, bg=bg_color,
+                                   highlightthickness=0, cursor="hand2")
+
+                    def _rrect(fill, outline, bw):
+                        cv.delete("all")
+                        if fill and fill != bg_color:
+                            # Flood-fill using overlapping rects + ovals
+                            cv.create_rectangle(x+r, y, x+w-r, y+h,
+                                                fill=fill, outline="")
+                            cv.create_rectangle(x, y+r, x+w, y+h-r,
+                                                fill=fill, outline="")
+                            cv.create_oval(x, y, x+d, y+d,
+                                           fill=fill, outline="")
+                            cv.create_oval(x+w-d, y, x+w, y+d,
+                                           fill=fill, outline="")
+                            cv.create_oval(x, y+h-d, x+d, y+h,
+                                           fill=fill, outline="")
+                            cv.create_oval(x+w-d, y+h-d, x+w, y+h,
+                                           fill=fill, outline="")
+                        # Border arcs (4 corners)
+                        cv.create_arc(x, y, x+d, y+d,
+                                      start=90,  extent=90, style="arc",
+                                      outline=outline, width=bw)
+                        cv.create_arc(x+w-d, y, x+w, y+d,
+                                      start=0,   extent=90, style="arc",
+                                      outline=outline, width=bw)
+                        cv.create_arc(x, y+h-d, x+d, y+h,
+                                      start=180, extent=90, style="arc",
+                                      outline=outline, width=bw)
+                        cv.create_arc(x+w-d, y+h-d, x+w, y+h,
+                                      start=270, extent=90, style="arc",
+                                      outline=outline, width=bw)
+                        # Straight edges
+                        cv.create_line(x+r, y,   x+w-r, y,   fill=outline, width=bw)
+                        cv.create_line(x+r, y+h, x+w-r, y+h, fill=outline, width=bw)
+                        cv.create_line(x,   y+r, x,   y+h-r, fill=outline, width=bw)
+                        cv.create_line(x+w, y+r, x+w, y+h-r, fill=outline, width=bw)
+
+                    def _draw(*_):
+                        cv.delete("all")
+                        if variable.get():
+                            _rrect(fill=ACCENT, outline=ACCENT_DARK, bw=1)
+                            cv.create_line(4, 9, 7, 13, fill=WHITE, width=2,
+                                           capstyle="round", joinstyle="round")
+                            cv.create_line(7, 13, 14, 5, fill=WHITE, width=2,
+                                           capstyle="round", joinstyle="round")
+                        else:
+                            _rrect(fill=bg_color, outline="#94A3B8", bw=2)
+
+                    def _toggle(e):
+                        variable.set(1 - variable.get())
+                        _draw()
+                        if command:
+                            command()
+
+                    cv.bind("<Button-1>", _toggle)
+                    variable.trace_add("write", _draw)
+                    _draw()
+                    return cv
+
+                # Select checkbox
                 if state["disabled_edc"] and state["disabled_ar"]:
+                    _cell1 = tk.Frame(scrollable_frame, bg=bg_row)
+                    _cell1.grid(row=r_main, column=1, sticky="nsew", pady=4)
+                    _cell1.grid_rowconfigure(0, weight=1)
+                    _cell1.grid_columnconfigure(0, weight=1)
                     tk.Label(_cell1, text="—", bg=bg_row, fg=MUTED,
-                             font=(FONT_FAMILY, 11, "bold")).pack(anchor="center", expand=True, fill="both")
+                             font=(FONT_FAMILY, 11, "bold")).grid(row=0, column=0)
                 else:
-                    ctk.CTkCheckBox(
-                        _cell1, text="", variable=var_item,
-                        width=18, height=18, checkbox_width=18, checkbox_height=18,
-                        fg_color=ACCENT, hover_color=ACCENT_DARK,
-                        bg_color=bg_row,
-                        command=_on_jurnal_toggle
-                    ).place(relx=0.5, rely=0.5, anchor="center")
+                    _make_cb(scrollable_frame, var_item, bg_row,
+                             command=_on_jurnal_toggle
+                             ).grid(row=r_main, column=1, pady=4)
 
                 tk.Label(scrollable_frame, text=str(item['tanggal']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=2, sticky="w", padx=14, ipady=6)
                 tk.Label(scrollable_frame, text=str(item['group']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=3, sticky="w", padx=14, ipady=6)
@@ -3060,32 +3127,28 @@ class App(ctk.CTk):
                 tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=bg_row, fg=sel_color, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=7, sticky="e", padx=14, ipady=6)
 
                 # EDC checkbox
-                _cell8 = tk.Frame(scrollable_frame, bg=bg_row)
-                _cell8.grid(row=r_main, column=8, sticky="nsew", pady=4)
                 if state["disabled_edc"]:
+                    _cell8 = tk.Frame(scrollable_frame, bg=bg_row)
+                    _cell8.grid(row=r_main, column=8, sticky="nsew", pady=4)
+                    _cell8.grid_rowconfigure(0, weight=1)
+                    _cell8.grid_columnconfigure(0, weight=1)
                     tk.Label(_cell8, text="—", bg=bg_row, fg=MUTED,
-                             font=(FONT_FAMILY, 11, "bold")).pack(anchor="center", expand=True, fill="both")
+                             font=(FONT_FAMILY, 11, "bold")).grid(row=0, column=0)
                 else:
-                    ctk.CTkCheckBox(
-                        _cell8, text="", variable=var_edc,
-                        width=18, height=18, checkbox_width=18, checkbox_height=18,
-                        fg_color=ACCENT, hover_color=ACCENT_DARK,
-                        bg_color=bg_row
-                    ).place(relx=0.5, rely=0.5, anchor="center")
+                    _make_cb(scrollable_frame, var_edc, bg_row
+                             ).grid(row=r_main, column=8, pady=4)
 
                 # AR checkbox
-                _cell10 = tk.Frame(scrollable_frame, bg=bg_row)
-                _cell10.grid(row=r_main, column=10, sticky="nsew", pady=4)
                 if state["disabled_ar"]:
+                    _cell10 = tk.Frame(scrollable_frame, bg=bg_row)
+                    _cell10.grid(row=r_main, column=10, sticky="nsew", pady=4)
+                    _cell10.grid_rowconfigure(0, weight=1)
+                    _cell10.grid_columnconfigure(0, weight=1)
                     tk.Label(_cell10, text="—", bg=bg_row, fg=MUTED,
-                             font=(FONT_FAMILY, 11, "bold")).pack(anchor="center", expand=True, fill="both")
+                             font=(FONT_FAMILY, 11, "bold")).grid(row=0, column=0)
                 else:
-                    ctk.CTkCheckBox(
-                        _cell10, text="", variable=var_ar,
-                        width=18, height=18, checkbox_width=18, checkbox_height=18,
-                        fg_color=ACCENT, hover_color=ACCENT_DARK,
-                        bg_color=bg_row
-                    ).place(relx=0.5, rely=0.5, anchor="center")
+                    _make_cb(scrollable_frame, var_ar, bg_row
+                             ).grid(row=r_main, column=10, pady=4)
                 
                 edc_info_texts = []
                 ar_info_texts = []
