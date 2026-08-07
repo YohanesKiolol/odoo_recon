@@ -155,6 +155,10 @@ if fonts_dir.exists():
 FONT_FAMILY = "Space Grotesk"
 FONT_BODY   = "IBM Plex Sans"
 FONT_MONO   = "Consolas" if IS_WINDOWS else "Menlo"
+# On Windows, tk.Label widgets with emoji must use Segoe UI Emoji explicitly
+# because Space Grotesk has no emoji glyphs and GDI can't apply font-linking
+# to non-GDI-registered fonts. CTkLabel/CTkButton are handled by AddFontResourceExW.
+_EMOJI_FONT = "Segoe UI Emoji" if IS_WINDOWS else FONT_FAMILY
 
 
 def _open_path(path: str):
@@ -178,7 +182,7 @@ class CTkDateInput(ctk.CTkFrame):
         
         self._cal_icon = tk.Label(
             self, text="📅", bg=WHITE, fg=MUTED,
-            font=(FONT_FAMILY, 7), cursor="hand2"
+            font=(_EMOJI_FONT, 7), cursor="hand2"
         )
         self._cal_icon.pack(side="right", padx=(0, 4), pady=2)
         
@@ -252,9 +256,35 @@ class App(ctk.CTk):
         self.resizable(True, True)
         self._running = False
         self._last_output: str | None = None
+        self._set_app_icon()
         self._build_ui()
         self._center()
         self.after(200, self._auto_scan_on_startup)
+
+    def _set_app_icon(self):
+        """Set high-res native window icon.
+        Windows: .ico with 16/24/32/48/64/128/256 px embedded → crisp at all DPI.
+        Mac:     PhotoImage from PNG → used by iconphoto()."""
+        try:
+            assets = (
+                Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "assets"
+                if getattr(sys, "frozen", False)
+                else BASE_DIR / "assets"
+            )
+            if IS_WINDOWS:
+                ico = assets / "app_icon.ico"
+                if ico.exists():
+                    self.iconbitmap(str(ico))
+            else:
+                png = assets / "app_icon.png"
+                if png.exists():
+                    from PIL import Image as _Img, ImageTk as _ImgTk
+                    _icon = _ImgTk.PhotoImage(_Img.open(png).resize((256, 256)))
+                    self.iconphoto(True, _icon)
+                    self._icon_ref = _icon  # keep reference — GC will blank it otherwise
+        except Exception:
+            pass  # Never crash over a missing icon
+
 
     def _apply_dpi_scaling(self):
         """Query the real monitor DPI and correct Tkinter's scaling factor.
@@ -1906,8 +1936,8 @@ class App(ctk.CTk):
                 b, o, diff = pair["bank"], pair["odoo"], pair["diff"]
                 impact_color = ERROR if diff < 0 else WARN if diff > 0 else SUCCESS
 
-                tk.Label(q_scroll, text=f"📅 {b['date']}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=idx, column=0, padx=12, pady=2, sticky="w")
-                tk.Label(q_scroll, text=f"🏦 {b['journal']}", bg=PREVIEW_BG, fg=ACCENT, font=(FONT_FAMILY, 9, "bold")).grid(row=idx, column=1, padx=12, pady=2, sticky="w")
+                tk.Label(q_scroll, text=f"📅 {b['date']}", bg=PREVIEW_BG, fg=TEXT, font=(_EMOJI_FONT, 9, "bold")).grid(row=idx, column=0, padx=12, pady=2, sticky="w")
+                tk.Label(q_scroll, text=f"🏦 {b['journal']}", bg=PREVIEW_BG, fg=ACCENT, font=(_EMOJI_FONT, 9, "bold")).grid(row=idx, column=1, padx=12, pady=2, sticky="w")
                 tk.Label(q_scroll, text=f"Rp {b['amount']:,.0f}", bg=PREVIEW_BG, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=idx, column=2, padx=12, pady=2, sticky="w")
                 tk.Label(q_scroll, text=f"Rp {o['amount']:,.0f}", bg=PREVIEW_BG, fg=ACCENT, font=(FONT_FAMILY, 10, "bold")).grid(row=idx, column=3, padx=12, pady=2, sticky="w")
                 tk.Label(q_scroll, text=f"Rp {diff:,.0f}", bg=PREVIEW_BG, fg=impact_color, font=(FONT_FAMILY, 10, "bold")).grid(row=idx, column=4, padx=12, pady=2, sticky="w")
@@ -1920,7 +1950,7 @@ class App(ctk.CTk):
                     else:
                         render_manual_tab()
 
-                btn_unp = tk.Label(q_scroll, text="❌ Unpair", bg=PREVIEW_BG, fg=ERROR, cursor="hand2", font=(FONT_FAMILY, 9, "bold"))
+                btn_unp = tk.Label(q_scroll, text="❌ Unpair", bg=PREVIEW_BG, fg=ERROR, cursor="hand2", font=(_EMOJI_FONT, 9, "bold"))
                 btn_unp.bind("<Button-1>", lambda e, func=_unpair: func())
                 btn_unp.grid(row=idx, column=5, padx=12, pady=2, sticky="w")
 

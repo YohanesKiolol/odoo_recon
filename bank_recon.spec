@@ -41,7 +41,7 @@ a = Analysis(
         (str(ROOT / 'journal_generator.py'),'.'),
         (str(ROOT / 'odoo_journal_creator.py'),'.'),
         (str(ROOT / 'readers'),           'readers'),
-        (str(ROOT / 'assets'),            'assets'),
+        (str(ROOT / 'assets'),            'assets'),   # includes app_icon.ico + app_icon.png
     ] + _pw_driver + _ctk_data,
     hiddenimports=[
         'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
@@ -86,6 +86,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # Windows only: set app icon if you have one
-    # icon='icon.ico',
+    # .exe file icon shown in Windows Explorer, taskbar, and Alt+Tab.
+    # The multi-resolution .ico (16/24/32/48/64/128/256 px) ensures Windows
+    # picks the best size for each context automatically.
+    icon=str(ROOT / 'assets' / 'app_icon.ico'),
 )
