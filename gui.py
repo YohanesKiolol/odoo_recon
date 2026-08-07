@@ -86,7 +86,7 @@ _venv_python = (
 )
 
 # ── Design System & Color Palette ─────────────────────────────────────────────
-FONT_FAMILY = "Segoe UI" if IS_WINDOWS else "Helvetica Neue"
+FONT_FAMILY = ("Segoe UI", "Segoe UI Emoji", "Arial") if IS_WINDOWS else "Helvetica Neue"
 FONT_MONO   = "Consolas" if IS_WINDOWS else "Menlo"
 
 # Theme Palette (Modern High-Contrast Clean Light)
@@ -226,6 +226,17 @@ class App(ctk.CTk):
         self._last_output: str | None = None
         self._build_ui()
         self._center()
+        self.after(200, self._auto_scan_on_startup)
+
+    def _auto_scan_on_startup(self):
+        self._refresh_folder_status()
+        from config import MUTATION_DIR
+        all_files = []
+        for d in [INPUT_DIR, MUTATION_DIR]:
+            if d.exists():
+                all_files.extend([f for f in d.rglob("*") if f.is_file()])
+        if all_files and not self._running:
+            self._on_scan()
 
     # ── UI Construction ───────────────────────────────────────────────────────
     def _build_ui(self):
@@ -481,20 +492,32 @@ class App(ctk.CTk):
             text_color=MUTED, fg_color="transparent"
         ).pack(anchor="w", padx=10, pady=(6, 2))
 
-        def _link_btn(parent, text, cmd):
-            b = ctk.CTkButton(
-                parent, text=text, height=28,
+        def _link_btn(parent, icon, label_text, cmd):
+            row = ctk.CTkFrame(parent, fg_color="transparent", height=28)
+            row.pack(fill="x", padx=4, pady=1)
+            row.pack_propagate(False)
+
+            ico_font = ("Segoe UI Emoji", 10) if IS_WINDOWS else (FONT_FAMILY, 10)
+            lbl_ico = tk.Label(
+                row, text=icon, font=ico_font,
+                bg=PANEL, fg=MUTED, width=3, anchor="center"
+            )
+            lbl_ico.pack(side="left", padx=(4, 2))
+            lbl_ico.bind("<Button-1>", lambda e: cmd())
+
+            btn = ctk.CTkButton(
+                row, text=label_text, height=28,
                 fg_color="transparent", hover_color=PREVIEW_BG,
                 text_color=ACCENT, font=(FONT_FAMILY, 10, "bold"),
                 anchor="w", command=cmd
             )
-            b.pack(fill="x", padx=6, pady=1)
-            return b
+            btn.pack(side="left", fill="both", expand=True)
+            return btn
 
-        _link_btn(sec_links, "📂 Open Merchant", self._open_input)
-        _link_btn(sec_links, "📁 Open Mutation", self._open_mutation)
-        self._open_btn_sidebar = _link_btn(sec_links, "📊 Open Result", self._open_output)
-        _link_btn(sec_links, "🗄️ Open Recap", self._open_recap)
+        _link_btn(sec_links, "📂", "Open Merchant", self._open_input)
+        _link_btn(sec_links, "📁", "Open Mutation", self._open_mutation)
+        self._open_btn_sidebar = _link_btn(sec_links, "📊", "Open Result", self._open_output)
+        _link_btn(sec_links, "🗄", "Open Recap", self._open_recap)
 
         # ── Primary CTA Action Stack — Pinned Bottom ─────────────────────────
         ctk.CTkFrame(sidebar_outer, height=1, fg_color=BORDER).pack(fill="x")
@@ -556,13 +579,11 @@ class App(ctk.CTk):
         self._folder_label.pack(side="left", anchor="w")
         self._refresh_folder_status()
 
-        ctk.CTkFrame(main_area, height=1, fg_color=BORDER).pack(fill="x")
-
         # ── Action Buttons & Console Log Area ─────────────────────────────────
         card_wrap = ctk.CTkFrame(main_area, fg_color="transparent")
         card_wrap.pack(fill="both", expand=True, padx=16, pady=14)
 
-        # Action Buttons Toolbar (positioned directly on top of Console Log)
+        # ── Action Buttons Toolbar ───────────────────────────────────────────
         action_bar = ctk.CTkFrame(card_wrap, fg_color="transparent")
         action_bar.pack(fill="x", pady=(0, 10))
 
@@ -583,6 +604,105 @@ class App(ctk.CTk):
         self._scan_btn.pack(side="left", padx=(0, 6))
         self._cleanse_btn  = _sec_btn(action_bar, "🗑 Clean", self._on_cleanse, color=ERROR, hover=ERROR_LIGHT)
         self._cleanse_btn.pack(side="left")
+
+        # ── Live Input Summary Dashboard ──────────────────────────────────────
+        dash_card = ctk.CTkFrame(card_wrap, fg_color=PANEL, corner_radius=10, border_color=BORDER, border_width=1)
+        dash_card.pack(fill="x", pady=(0, 10))
+
+        dash_hdr = ctk.CTkFrame(dash_card, fg_color="transparent")
+        dash_hdr.pack(fill="x", padx=16, pady=(10, 6))
+
+        ctk.CTkLabel(
+            dash_hdr, text="📊 Live Input Data Summary",
+            font=(FONT_FAMILY, 11, "bold"), text_color=TEXT,
+            fg_color="transparent"
+        ).pack(side="left")
+
+        self._dash_last_update = ctk.CTkLabel(
+            dash_hdr, text="Updated: —",
+            font=(FONT_FAMILY, 9), text_color=MUTED,
+            fg_color="transparent"
+        )
+        self._dash_last_update.pack(side="right")
+
+        ctk.CTkFrame(dash_card, height=1, fg_color=BORDER).pack(fill="x", padx=16)
+
+        kpi_grid = ctk.CTkFrame(dash_card, fg_color="transparent")
+        kpi_grid.pack(fill="x", padx=12, pady=10)
+        for c in range(5):
+            kpi_grid.columnconfigure(c, weight=1)
+
+        def _make_kpi_card(parent, col, icon, title, val_attr, sub_attr):
+            card = ctk.CTkFrame(parent, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
+            card.grid(row=0, column=col, padx=3, pady=2, sticky="ew")
+            
+            top_f = ctk.CTkFrame(card, fg_color="transparent")
+            top_f.pack(fill="x", padx=8, pady=(8, 2))
+            
+            ico_font = ("Segoe UI Emoji", 11) if IS_WINDOWS else (FONT_FAMILY, 11)
+            ico_lbl = tk.Label(top_f, text=icon, font=ico_font, bg=PREVIEW_BG, fg=ACCENT)
+            ico_lbl.pack(side="left")
+            
+            t_lbl = ctk.CTkLabel(top_f, text=title, font=(FONT_FAMILY, 8.5, "bold"), text_color=MUTED)
+            t_lbl.pack(side="left", padx=(3, 0))
+            
+            val_lbl = ctk.CTkLabel(card, text="0 Files", font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w")
+            val_lbl.pack(fill="x", padx=8, pady=(2, 0))
+            setattr(self, val_attr, val_lbl)
+            
+            sub_lbl = ctk.CTkLabel(card, text="—", font=(FONT_FAMILY, 8), text_color=MUTED, anchor="w")
+            sub_lbl.pack(fill="x", padx=8, pady=(0, 8))
+            setattr(self, sub_attr, sub_lbl)
+
+        _make_kpi_card(kpi_grid, 0, "🏦", "MERCHANT REPORT", "_kpi_bank_val", "_kpi_bank_sub")
+        _make_kpi_card(kpi_grid, 1, "💳", "ODOO PAYMENTS",   "_kpi_odoo_val", "_kpi_odoo_sub")
+        _make_kpi_card(kpi_grid, 2, "📊", "MUTATIONS & FEES", "_kpi_mut_val", "_kpi_mut_sub")
+        _make_kpi_card(kpi_grid, 3, "📋", "RECON REPORT",    "_kpi_rep_val",  "_kpi_rep_sub")
+        _make_kpi_card(kpi_grid, 4, "⚡", "ENGINE STATUS",   "_kpi_eng_val",  "_kpi_eng_sub")
+
+        # ── Per-Account Drill-Down Panel ─────────────────────────────────────
+        drill_card = ctk.CTkFrame(card_wrap, fg_color=PANEL, corner_radius=10, border_color=BORDER, border_width=1)
+        drill_card.pack(fill="x", pady=(0, 10))
+
+        drill_hdr = ctk.CTkFrame(drill_card, fg_color="transparent")
+        drill_hdr.pack(fill="x", padx=16, pady=(10, 6))
+
+        ctk.CTkLabel(
+            drill_hdr, text="🔍 Per-Account Date Coverage",
+            font=(FONT_FAMILY, 11, "bold"), text_color=TEXT,
+            fg_color="transparent"
+        ).pack(side="left")
+
+        self._drill_status_lbl = ctk.CTkLabel(
+            drill_hdr, text="",
+            font=(FONT_FAMILY, 9), text_color=MUTED,
+            fg_color="transparent"
+        )
+        self._drill_status_lbl.pack(side="right", padx=(0, 4))
+
+        ctk.CTkFrame(drill_card, height=1, fg_color=BORDER).pack(fill="x", padx=16)
+
+        # Grid header row
+        drill_grid = ctk.CTkFrame(drill_card, fg_color="transparent")
+        drill_grid.pack(fill="x", padx=12, pady=(6, 8))
+        for c, w in enumerate([2, 3, 3, 3]):
+            drill_grid.columnconfigure(c, weight=w)
+
+        hdr_cols = ["ACCOUNT / ALIAS", "MERCHANT REPORT", "MUTATION FILE"]
+        for ci, h in enumerate(["ACCOUNT / ALIAS", "MERCHANT REPORT", "MUTATION FILE"]):
+            ctk.CTkLabel(
+                drill_grid, text=h,
+                font=(FONT_FAMILY, 8, "bold"), text_color=MUTED,
+                fg_color="transparent", anchor="w"
+            ).grid(row=0, column=ci, padx=(8, 4), pady=(2, 4), sticky="w")
+
+        ctk.CTkFrame(drill_grid, height=1, fg_color=BORDER).grid(
+            row=1, column=0, columnspan=3, sticky="ew", padx=4, pady=(0, 4)
+        )
+
+        # Placeholder rows (will be populated by _update_drill_rows)
+        self._drill_grid  = drill_grid
+        self._drill_rows  = []  # list of (account_lbl, stmt_lbl, mut_lbl)
 
         # Console Log Card
         log_card = ctk.CTkFrame(card_wrap, fg_color=PANEL, corner_radius=10, border_color=BORDER, border_width=1)
@@ -666,6 +786,368 @@ class App(ctk.CTk):
             text=f"📂 Input folder: {INPUT_DIR}   ({n} file{'s' if n != 1 else ''} found)",
             text_color=color,
         )
+        self._update_dashboard_summary()
+
+    def _update_dashboard_summary(self, skip_drill: bool = False):
+        try:
+            # 1. Bank Files
+            c_bca = [f for f in ((INPUT_DIR / "bca").rglob("*") if (INPUT_DIR / "bca").exists() else []) if f.is_file()]
+            c_man = [f for f in ((INPUT_DIR / "mandiri").rglob("*") if (INPUT_DIR / "mandiri").exists() else []) if f.is_file()]
+            c_bri = [f for f in ((INPUT_DIR / "bri").rglob("*") if (INPUT_DIR / "bri").exists() else []) if f.is_file()]
+            
+            tot_bank = len(c_bca) + len(c_man) + len(c_bri)
+            if hasattr(self, "_kpi_bank_val"):
+                self._kpi_bank_val.configure(text=f"{tot_bank} File{'s' if tot_bank!=1 else ''}", text_color=SUCCESS if tot_bank > 0 else TEXT)
+                parts = []
+                if c_bca: parts.append(f"BCA: {len(c_bca)}")
+                if c_man: parts.append(f"Mandiri: {len(c_man)}")
+                if c_bri: parts.append(f"BRI: {len(c_bri)}")
+                self._kpi_bank_sub.configure(text=" | ".join(parts) if parts else "No merchant files")
+
+            # 2. Odoo Payments File
+            from config import ODO_EXCEL_PATH
+            if hasattr(self, "_kpi_odoo_val"):
+                if ODO_EXCEL_PATH.exists():
+                    sz = ODO_EXCEL_PATH.stat().st_size / 1024
+                    self._kpi_odoo_val.configure(text="Ready", text_color=SUCCESS)
+                    self._kpi_odoo_sub.configure(text=f"{ODO_EXCEL_PATH.name} ({sz:.1f} KB)")
+                else:
+                    self._kpi_odoo_val.configure(text="Not Found", text_color=WARN)
+                    self._kpi_odoo_sub.configure(text="Will download via Odoo")
+
+            # 3. Mutations & Fees
+            from config import MUTATION_DIR
+            # Count per-bank mutation files
+            mut_by_bank = {"bca": 0, "mandiri": 0, "bri": 0}
+            for bank in ["bca", "mandiri", "bri"]:
+                bd = MUTATION_DIR / bank
+                if bd.exists():
+                    mut_by_bank[bank] = sum(1 for f in bd.rglob("*.csv") if f.is_file())
+            tot_mut = sum(mut_by_bank.values())
+            if hasattr(self, "_kpi_mut_val"):
+                if tot_mut > 0:
+                    self._kpi_mut_val.configure(text=f"{tot_mut} CSV File{'s' if tot_mut!=1 else ''}", text_color=SUCCESS)
+                    mut_parts = []
+                    if mut_by_bank["bca"]:     mut_parts.append(f"BCA: {mut_by_bank['bca']}")
+                    if mut_by_bank["mandiri"]: mut_parts.append(f"Mandiri: {mut_by_bank['mandiri']}")
+                    if mut_by_bank["bri"]:     mut_parts.append(f"BRI: {mut_by_bank['bri']}")
+                    self._kpi_mut_sub.configure(text=" | ".join(mut_parts) if mut_parts else "Mutation files")
+                else:
+                    self._kpi_mut_val.configure(text="None Loaded", text_color=MUTED)
+                    self._kpi_mut_sub.configure(text="No mutation CSV files found")
+
+            # Drill-down: per-account date coverage (run in background thread)
+            if hasattr(self, "_drill_grid") and not skip_drill:
+                self._start_drill_update(MUTATION_DIR)
+
+            # 4. Recon Report Details
+            import glob, openpyxl
+            output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
+            if hasattr(self, "_kpi_rep_val"):
+                if output_files:
+                    latest = max(output_files, key=os.path.getmtime)
+                    report_name = Path(latest).name
+                    try:
+                        wb = openpyxl.load_workbook(latest, read_only=True, data_only=True)
+                        b_set = set()
+                        d_list = []
+                        if "Daily Summary" in wb.sheetnames:
+                            ws = wb["Daily Summary"]
+                            for r in ws.iter_rows(min_row=4, values_only=True):
+                                if r and len(r) >= 5:
+                                    p_d, b_n = r[2], r[3]
+                                    if b_n: b_set.add(str(b_n).strip())
+                                    if p_d: d_list.append(str(p_d).strip())
+                        wb.close()
+                        
+                        b_str = ", ".join(sorted(list(b_set))) if b_set else "Summary"
+                        min_d = min(d_list) if d_list else ""
+                        max_d = max(d_list) if d_list else ""
+                        d_str = f" ({min_d[:5]}–{max_d[:5]})" if min_d and max_d else ""
+                        
+                        self._kpi_rep_val.configure(text="Report Ready", text_color=SUCCESS)
+                        self._kpi_rep_sub.configure(text=f"{b_str}{d_str}")
+                    except Exception:
+                        self._kpi_rep_val.configure(text="Report Ready", text_color=SUCCESS)
+                        self._kpi_rep_sub.configure(text=report_name)
+                else:
+                    self._kpi_rep_val.configure(text="Not Found", text_color=MUTED)
+                    self._kpi_rep_sub.configure(text="No report in output folder")
+
+            # 5. Engine Status
+            if hasattr(self, "_kpi_eng_val"):
+                if getattr(self, "_running", False):
+                    self._kpi_eng_val.configure(text="Running...", text_color=ACCENT)
+                    self._kpi_eng_sub.configure(text="Reconciling data...")
+                else:
+                    self._kpi_eng_val.configure(text="Ready", text_color=SUCCESS)
+                    if output_files:
+                        latest = max(output_files, key=os.path.getmtime)
+                        mtime = datetime.fromtimestamp(os.path.getmtime(latest)).strftime("%d/%m %H:%M")
+                        self._kpi_eng_sub.configure(text=f"Last report: {mtime}")
+                    else:
+                        self._kpi_eng_sub.configure(text="No report generated yet")
+
+            if hasattr(self, "_dash_last_update"):
+                self._dash_last_update.configure(text=f"Updated: {datetime.now().strftime('%H:%M:%S')}")
+        except Exception:
+            pass
+
+    # ── Drill-down threading helpers ─────────────────────────────────────────
+    def _start_drill_update(self, mutation_dir):
+        """Show loader, cancel any in-flight scan, run compute in background thread.
+        All Tkinter widget calls happen only on the main thread."""
+        import threading
+        # Generation counter: if a new scan starts before old one finishes,
+        # the old thread sees its gen is stale and skips the render step.
+        self._drill_gen = getattr(self, "_drill_gen", 0) + 1
+        my_gen = self._drill_gen
+
+        # ── Main-thread: show loading state immediately ──────────────────────
+        if hasattr(self, "_drill_status_lbl"):
+            self._drill_status_lbl.configure(text="⏳ Scanning...", text_color=WARN)
+        # Destroy previous rows
+        for trio in getattr(self, "_drill_rows", []):
+            for w in trio:
+                try: w.destroy()
+                except Exception: pass
+        self._drill_rows = []
+        # Destroy any leftover loading label
+        try:
+            self._drill_loading_lbl.destroy()
+        except Exception:
+            pass
+        # Create fresh loading placeholder
+        loading_lbl = ctk.CTkLabel(
+            self._drill_grid, text="Reading files, please wait...",
+            font=(FONT_FAMILY, 9), text_color=MUTED,
+            fg_color="transparent", anchor="w"
+        )
+        loading_lbl.grid(row=2, column=0, columnspan=3, padx=8, pady=4, sticky="w")
+        self._drill_loading_lbl = loading_lbl
+        # Force a repaint NOW so the loading label is visible before the
+        # compute thread starts (without this, the event loop never gets a cycle
+        # to paint and the label is instantly replaced by the result).
+        self.update_idletasks()
+
+        def _compute():
+            """Pure data computation — no Tkinter calls allowed here."""
+            rows_data = self._compute_drill_rows(mutation_dir)
+            # Schedule render on main thread, but only if our gen is still current
+            self.after(0, lambda: self._render_drill_rows(rows_data, my_gen))
+
+        threading.Thread(target=_compute, daemon=True).start()
+
+    def _render_drill_rows(self, rows_data, gen):
+        """Main-thread: render the computed rows_data into the grid."""
+        # Stale scan — a newer one is already running
+        if gen != getattr(self, "_drill_gen", 0):
+            return
+
+        # Destroy loading placeholder
+        try:
+            self._drill_loading_lbl.destroy()
+        except Exception:
+            pass
+
+        # Destroy any leftover rows from previous render
+        for trio in getattr(self, "_drill_rows", []):
+            for w in trio:
+                try: w.destroy()
+                except Exception: pass
+        self._drill_rows = []
+
+        def _bank_color(label):
+            if label.startswith("BCA"):     return "#1565C0"
+            if label.startswith("MANDIRI"): return "#E65100"
+            if label.startswith("BRI"):     return "#2E7D32"
+            return ACCENT
+
+        for i, (label, stmt_r, mut_r) in enumerate(rows_data):
+            row_num = i + 2
+            bcolor = _bank_color(label)
+
+            acc_lbl = ctk.CTkLabel(
+                self._drill_grid, text=label,
+                font=(FONT_FAMILY, 9, "bold"), text_color=bcolor,
+                fg_color="transparent", anchor="w"
+            )
+            acc_lbl.grid(row=row_num, column=0, padx=(8, 4), pady=2, sticky="w")
+
+            stmt_lbl = ctk.CTkLabel(
+                self._drill_grid, text=stmt_r or "No files",
+                font=(FONT_FAMILY, 9), text_color=SUCCESS if stmt_r else MUTED,
+                fg_color="transparent", anchor="w"
+            )
+            stmt_lbl.grid(row=row_num, column=1, padx=(4, 4), pady=2, sticky="w")
+
+            mut_lbl = ctk.CTkLabel(
+                self._drill_grid, text=mut_r or "No mutation CSV",
+                font=(FONT_FAMILY, 9), text_color=SUCCESS if mut_r else WARN,
+                fg_color="transparent", anchor="w"
+            )
+            mut_lbl.grid(row=row_num, column=2, padx=(4, 8), pady=2, sticky="w")
+
+            self._drill_rows.append((acc_lbl, stmt_lbl, mut_lbl))
+
+        if hasattr(self, "_drill_status_lbl"):
+            self._drill_status_lbl.configure(text="✓ Up to date", text_color=SUCCESS)
+            self.after(3000, lambda: self._drill_status_lbl.configure(text="", text_color=MUTED) if hasattr(self, "_drill_status_lbl") else None)
+
+    def _compute_drill_rows(self, mutation_dir):
+        """Pure data computation — no Tkinter calls, safe for background threads.
+        All reader print output is suppressed to avoid racing with the GUI log widget."""
+        import io as _io, contextlib
+        rows_data = []
+        _sink = _io.StringIO()
+        with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
+            try:
+                from config import (
+                    BCA_EXCEL_DIR, BCA_EXCEL_PATTERN, BCA_EXCEL_PASSWORD,
+                    BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN,
+                    MANDIRI_ZIP_DIR, MANDIRI_ZIP_PASSWORD,
+                    MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN,
+                    BRI_ZIP_DIR, BRI_PDF_PATTERN,
+                    BRI_AMOUNT_COLUMN, BRI_NUMBER_COLUMN,
+                    BANK_ACCOUNTS,
+                )
+
+                def _parse_dates(dates):
+                    from datetime import date as _d, datetime as _dt
+                    clean = set()
+                    for d in dates:
+                        if d is None: continue
+                        if hasattr(d, "date") and callable(d.date) and not isinstance(d, _d):
+                            d = d.date()
+                        if isinstance(d, str):
+                            try: d = _dt.strptime(d[:10], "%Y-%m-%d").date()
+                            except Exception: continue
+                        if hasattr(d, "strftime"): clean.add(d)
+                    return sorted(clean)
+
+                def _date_range(dates):
+                    clean = _parse_dates(dates)
+                    if not clean: return None
+                    mn, mx = clean[0], clean[-1]
+                    if mn == mx: return mn.strftime("%d/%m/%y")
+                    return f"{mn.strftime('%d/%m/%y')} \u2013 {mx.strftime('%d/%m/%y')}"
+
+                def _stmt_dates(dates):
+                    clean = _parse_dates(dates)
+                    if not clean: return None
+                    if len(clean) == 1: return clean[0].strftime("%d/%m/%y")
+                    is_contiguous = all((clean[i+1]-clean[i]).days == 1 for i in range(len(clean)-1))
+                    if is_contiguous:
+                        return f"{clean[0].strftime('%d/%m/%y')} \u2013 {clean[-1].strftime('%d/%m/%y')}"
+                    if len(clean) <= 5:
+                        return " | ".join(d.strftime("%d/%m/%y") for d in clean)
+                    return f"{clean[0].strftime('%d/%m/%y')} | \u2026 | {clean[-1].strftime('%d/%m/%y')} ({len(clean)} dates)"
+
+                def _mut_range_alias(alias_dir):
+                    if not alias_dir.exists(): return None
+                    try:
+                        from readers.mutation_reader import read_mutation_bca, read_mutation_mandiri, read_mutation_bri
+                        bank_name = alias_dir.parent.name
+                        alias = alias_dir.name
+                        dates = []
+                        for csv_f in alias_dir.glob("*.csv"):
+                            try:
+                                if bank_name == "bca":       rows2, _ = read_mutation_bca(csv_f, alias)
+                                elif bank_name == "mandiri": rows2, _ = read_mutation_mandiri(csv_f, alias)
+                                else:                        rows2, _ = read_mutation_bri(csv_f, alias)
+                                for r in rows2:
+                                    d = r.get("date")
+                                    if d: dates.append(d)
+                            except Exception: pass
+                        return _date_range(dates)
+                    except Exception:
+                        return None
+
+                # ── BCA ──────────────────────────────────────────────────────
+                bca_stmt_dates = []
+                try:
+                    from readers.bca_reader import _find_bca_excels, _read_one_bca
+                    search_dirs = []
+                    if BCA_EXCEL_DIR.exists():
+                        for item in BCA_EXCEL_DIR.iterdir():
+                            if item.is_dir(): search_dirs.append(item)
+                        if not search_dirs: search_dirs = [BCA_EXCEL_DIR]
+                    for sdir in search_dirs:
+                        try:
+                            for f in _find_bca_excels(sdir, BCA_EXCEL_PATTERN):
+                                for r in _read_one_bca(f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN):
+                                    d = r.get("date") or r.get("txn_date")
+                                    if d: bca_stmt_dates.append(d)
+                        except Exception: pass
+                except Exception: pass
+
+                bca_mut_dir = mutation_dir / "bca"
+                bca_mut_r = _mut_range_alias(bca_mut_dir / "main") if (bca_mut_dir / "main").exists() else None
+                if not bca_mut_r and bca_mut_dir.exists():
+                    for a in bca_mut_dir.iterdir():
+                        if a.is_dir():
+                            bca_mut_r = _mut_range_alias(a)
+                            break
+                rows_data.append(("BCA", _stmt_dates(bca_stmt_dates), bca_mut_r))
+
+                # ── Mandiri ───────────────────────────────────────────────────
+                mandiri_stmt_by_alias = {}
+                try:
+                    import readers.mandiri_reader as mr
+                    for alias_d in sorted(MANDIRI_ZIP_DIR.iterdir()):
+                        if alias_d.is_dir():
+                            try:
+                                rows2, _ = mr.read_mandiri(alias_d, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
+                                dates = [r.get("txn_date") or r.get("date") for r in rows2]
+                                mandiri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
+                            except Exception: pass
+                    if not mandiri_stmt_by_alias:
+                        rows2, _ = mr.read_mandiri(MANDIRI_ZIP_DIR, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
+                        dates = [r.get("txn_date") or r.get("date") for r in rows2]
+                        mandiri_stmt_by_alias["main"] = [d for d in dates if d]
+                except Exception: pass
+
+                mandiri_mut_dir = mutation_dir / "mandiri"
+                seen_man = set()
+                for alias, dates in sorted(mandiri_stmt_by_alias.items()):
+                    seen_man.add(alias)
+                    label = "MANDIRI" if alias == "main" else f"MANDIRI / {alias}"
+                    rows_data.append((label, _stmt_dates(dates), _mut_range_alias(mandiri_mut_dir / alias)))
+                if mandiri_mut_dir.exists():
+                    for a in sorted(mandiri_mut_dir.iterdir()):
+                        if a.is_dir() and a.name not in seen_man:
+                            label = "MANDIRI" if a.name == "main" else f"MANDIRI / {a.name}"
+                            rows_data.append((label, None, _mut_range_alias(a)))
+
+                # ── BRI ───────────────────────────────────────────────────────
+                bri_stmt_by_alias = {}
+                try:
+                    import readers.bri_reader as br
+                    for alias_d in sorted(BRI_ZIP_DIR.iterdir()):
+                        if alias_d.is_dir():
+                            try:
+                                rows2, _ = br.read_bri(alias_d, "", BRI_PDF_PATTERN, BRI_AMOUNT_COLUMN, BRI_NUMBER_COLUMN)
+                                dates = [r.get("txn_date") or r.get("date") for r in rows2]
+                                bri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
+                            except Exception: pass
+                except Exception: pass
+
+                bri_mut_dir = mutation_dir / "bri"
+                seen_bri = set()
+                for alias, dates in sorted(bri_stmt_by_alias.items()):
+                    seen_bri.add(alias)
+                    label = "BRI" if alias == "main" else f"BRI / {alias}"
+                    rows_data.append((label, _stmt_dates(dates), _mut_range_alias(bri_mut_dir / alias)))
+                if bri_mut_dir.exists():
+                    for a in sorted(bri_mut_dir.iterdir()):
+                        if a.is_dir() and a.name not in seen_bri:
+                            label = "BRI" if a.name == "main" else f"BRI / {a.name}"
+                            rows_data.append((label, None, _mut_range_alias(a)))
+
+            except Exception:
+                pass
+        return rows_data
+
 
     def _log_write(self, text: str, tag: str = ""):
         self._log.config(state="normal")
@@ -942,8 +1424,16 @@ class App(ctk.CTk):
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
         self._set_status("Scanning data...", WARN)
-        self._refresh_folder_status()
-        threading.Thread(target=self._run_script, args=(selected_banks, True), daemon=True).start()
+        # Force the UI to repaint (show disabled buttons + status) BEFORE
+        # any blocking work. _refresh_folder_status reads the filesystem
+        # synchronously, which would freeze the main thread otherwise.
+        self.update_idletasks()
+        # Defer scan: give the event loop one full cycle to render the loading
+        # state, then start the background thread.
+        def _deferred_scan():
+            self._refresh_folder_status()
+            threading.Thread(target=self._run_script, args=(selected_banks, True), daemon=True).start()
+        self.after(50, _deferred_scan)
 
     def _on_run(self):
         if self._running:
@@ -962,13 +1452,19 @@ class App(ctk.CTk):
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
         self._set_status("Processing...", WARN)
-        self._refresh_folder_status()
-        
-        if self._offline_var.get():
-            self._log_write("\n── Running Offline Reconciliation (Skipping Downloader) ──\n", "head")
-            threading.Thread(target=self._run_script, args=(selected_banks, False), daemon=True).start()
-            return
-            
+        self.update_idletasks()
+
+        def _deferred_run():
+            self._refresh_folder_status()
+            if self._offline_var.get():
+                self._log_write("\n── Running Offline Reconciliation (Skipping Downloader) ──\n", "head")
+                threading.Thread(target=self._run_script, args=(selected_banks, False), daemon=True).start()
+                return
+            threading.Thread(target=run_all, daemon=True).start()
+
+        self.after(50, _deferred_run)
+        return  # execution continues inside _deferred_run
+
         def run_all():
             try:
                 self.after(0, self._log_write, f"\n── Starting Single Browser Auto-Recon ──\n", "head")
@@ -1078,28 +1574,32 @@ class App(ctk.CTk):
         proc.wait()
         
         if proc.returncode == 0 and last_output_file and not is_scan:
-            self.after(0, self._log_write, f"\n── Checking Journal Entries ──\n", "head")
-            
-            j_cmd = [sys.executable, "journal_checker.py", last_output_file] if getattr(sys, "frozen", False) else [_venv_python, "journal_checker.py", last_output_file]
-            j_proc = subprocess.Popen(
-                j_cmd,
-                cwd=str(BASE_DIR),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                creationflags=flags,
-                env=env
-            )
-            
-            if j_proc.stdout:
-                for line in j_proc.stdout:
-                    self.after(0, self._log_write, line)
-            j_proc.wait()
-            
-            if j_proc.returncode != 0:
-                self.after(0, self._log_write, f"\n❌ Journal Entries Check failed.\n", "err")
+            from config import ODO_JOURNAL_EXCEL_PATH
+            if not ODO_JOURNAL_EXCEL_PATH.exists():
+                self.after(0, self._log_write, f"\n⚠️ File '{ODO_JOURNAL_EXCEL_PATH.name}' tidak ditemukan. Skipping Journal Entries check.\n", "warn")
+            else:
+                self.after(0, self._log_write, f"\n── Checking Journal Entries ──\n", "head")
+                
+                j_cmd = [sys.executable, "journal_checker.py", last_output_file] if getattr(sys, "frozen", False) else [_venv_python, "journal_checker.py", last_output_file]
+                j_proc = subprocess.Popen(
+                    j_cmd,
+                    cwd=str(BASE_DIR),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    creationflags=flags,
+                    env=env
+                )
+                
+                if j_proc.stdout:
+                    for line in j_proc.stdout:
+                        self.after(0, self._log_write, line)
+                j_proc.wait()
+                
+                if j_proc.returncode != 0:
+                    self.after(0, self._log_write, f"\n⚠️ Journal Entries Check ended with warnings.\n", "warn")
                 
         self.after(0, self._on_done, proc.returncode, last_output_file)
 
@@ -1118,6 +1618,10 @@ class App(ctk.CTk):
         self._run_btn.configure(state="normal", text="▶  Reconciliation")
         self._journal_btn.configure(state="normal")
         self._open_btn.configure(state="normal")
+        # Refresh KPI cards only — skip drill re-scan (it already ran at scan start
+        # and _compute_drill_rows is heavy; running it again here would race with
+        # any in-flight background thread and freeze the Live Data component).
+        self._update_dashboard_summary(skip_drill=True)
         
         if code == 0:
             self._set_status("Finished ✓", SUCCESS)

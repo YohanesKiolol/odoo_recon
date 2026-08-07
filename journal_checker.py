@@ -101,54 +101,57 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
         print("[+] Pastikan Journal Entries sudah didownload menggunakan odoo_downloader.py")
         
     # Load downloaded journals
+    if not ODO_JOURNAL_EXCEL_PATH.exists():
+        print(f"\n⚠️ File '{ODO_JOURNAL_EXCEL_PATH.name}' tidak ditemukan. Skipping Journal Entries check.\n")
+        return True
+
     existing_journals = [] # list of dicts: {"journal": str, "date": str, "reference": str}
-    if ODO_JOURNAL_EXCEL_PATH.exists():
-        try:
-            j_wb = openpyxl.load_workbook(ODO_JOURNAL_EXCEL_PATH, read_only=True, data_only=True)
-            j_ws = j_wb.active
-            
-            # Map columns for Journal Entries
-            j_headers = {}
-            for col_idx, cell in enumerate(next(j_ws.iter_rows(min_row=1, max_row=1, values_only=True))):
-                if cell:
-                    j_headers[str(cell).strip().lower()] = col_idx
-                    
-            c_j_journal = j_headers.get("journal")
-            c_j_date = j_headers.get("date")
-            c_j_ref = j_headers.get("reference") or j_headers.get("label")
-            c_j_status = j_headers.get("status")
-            c_j_total = j_headers.get("total signed")
-            
-            if c_j_journal is not None and c_j_date is not None:
-                for j_row in j_ws.iter_rows(min_row=2, values_only=True):
-                    j_val = str(j_row[c_j_journal] or "").strip()
-                    
-                    d_val_raw = j_row[c_j_date]
-                    if isinstance(d_val_raw, datetime):
-                        d_val = d_val_raw.strftime("%Y-%m-%d")
-                    else:
-                        d_val = str(d_val_raw or "").strip()
-                        if " " in d_val and ":" in d_val:
-                            d_val = d_val.split(" ")[0]
-                            
-                    ref_val = str(j_row[c_j_ref] or "").strip() if c_j_ref is not None else ""
-                    status_val = str(j_row[c_j_status] or "").strip() if c_j_status is not None else ""
-                    
-                    try:
-                        total_val = float(j_row[c_j_total]) if c_j_total is not None and j_row[c_j_total] is not None else 0.0
-                    except:
-                        total_val = 0.0
-                    
-                    if j_val and d_val:
-                        existing_journals.append({
-                            "journal": j_val,
-                            "date": d_val,
-                            "reference": ref_val.lower(),
-                            "status": status_val,
-                            "total": total_val
-                        })
-        except Exception as e:
-            print(f"⚠️ Failed to read {ODO_JOURNAL_EXCEL_PATH.name}: {e}")
+    try:
+        j_wb = openpyxl.load_workbook(ODO_JOURNAL_EXCEL_PATH, read_only=True, data_only=True)
+        j_ws = j_wb.active
+        
+        # Map columns for Journal Entries
+        j_headers = {}
+        for col_idx, cell in enumerate(next(j_ws.iter_rows(min_row=1, max_row=1, values_only=True))):
+            if cell:
+                j_headers[str(cell).strip().lower()] = col_idx
+                
+        c_j_journal = j_headers.get("journal")
+        c_j_date = j_headers.get("date")
+        c_j_ref = j_headers.get("reference") or j_headers.get("label")
+        c_j_status = j_headers.get("status")
+        c_j_total = j_headers.get("total signed")
+        
+        if c_j_journal is not None and c_j_date is not None:
+            for j_row in j_ws.iter_rows(min_row=2, values_only=True):
+                j_val = str(j_row[c_j_journal] or "").strip()
+                
+                d_val_raw = j_row[c_j_date]
+                if isinstance(d_val_raw, datetime):
+                    d_val = d_val_raw.strftime("%Y-%m-%d")
+                else:
+                    d_val = str(d_val_raw or "").strip()
+                    if " " in d_val and ":" in d_val:
+                        d_val = d_val.split(" ")[0]
+                        
+                ref_val = str(j_row[c_j_ref] or "").strip() if c_j_ref is not None else ""
+                status_val = str(j_row[c_j_status] or "").strip() if c_j_status is not None else ""
+                
+                try:
+                    total_val = float(j_row[c_j_total]) if c_j_total is not None and j_row[c_j_total] is not None else 0.0
+                except:
+                    total_val = 0.0
+                
+                if j_val and d_val:
+                    existing_journals.append({
+                        "journal": j_val,
+                        "date": d_val,
+                        "reference": ref_val.lower(),
+                        "status": status_val,
+                        "total": total_val
+                    })
+    except Exception as e:
+        print(f"⚠️ Failed to read {ODO_JOURNAL_EXCEL_PATH.name}: {e}")
             
     # Update Daily Summary
     from journal_generator import format_date_indo

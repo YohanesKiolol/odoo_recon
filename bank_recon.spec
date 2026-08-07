@@ -41,6 +41,7 @@ a = Analysis(
         (str(ROOT / 'journal_generator.py'),'.'),
         (str(ROOT / 'odoo_journal_creator.py'),'.'),
         (str(ROOT / 'readers'),           'readers'),
+        (str(ROOT / 'assets'),            'assets'),
     ] + _pw_driver + _ctk_data,
     hiddenimports=[
         'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
@@ -52,6 +53,7 @@ a = Analysis(
         'playwright._impl._driver', 'playwright._repo_version',
         'tkcalendar', 'babel.numbers',
         'customtkinter', 'darkdetect',
+        'PIL', 'PIL.Image', 'PIL._imaging',
     ],
     hookspath=[],
     hooksconfig={},
