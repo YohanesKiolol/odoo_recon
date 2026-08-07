@@ -2852,9 +2852,10 @@ class App(ctk.CTk):
                 lbl_anchor = "w" if col in [2, 3] else "e" if col in [4, 5, 6, 7] else "center"
                 lbl = tk.Label(
                     scrollable_frame, text=h, bg=PREVIEW_BG, fg=MUTED,
-                    font=(FONT_FAMILY, 9, "bold"), anchor=lbl_anchor, padx=14
+                    font=(FONT_FAMILY, 10, "bold"), anchor=lbl_anchor, padx=14
                 )
-                lbl.grid(row=0, column=col, sticky="nsew", pady=(0, 4), ipady=6)
+                lbl.grid(row=0, column=col, sticky="nsew", pady=(0, 4), ipady=7)
+
 
                 
             dummy = tk.Label(scrollable_frame, text="", bg=PREVIEW_BG)
@@ -3011,36 +3012,48 @@ class App(ctk.CTk):
                 btn_expand.grid(row=r_main, column=0, padx=8, ipady=6)
                 
                 if state["disabled_edc"] and state["disabled_ar"]:
-                    cb_item = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 10))
+                    cb_item = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 11, "bold"))
                 else:
-                    cb_item = tk.Checkbutton(scrollable_frame, variable=var_item, bg=bg_row, selectcolor=bg_row, command=_on_jurnal_toggle)
-                cb_item.grid(row=r_main, column=1, pady=3, ipady=4)
+                    cb_item = ctk.CTkCheckBox(
+                        scrollable_frame, text="", variable=var_item,
+                        width=18, height=18, checkbox_width=18, checkbox_height=18,
+                        fg_color=ACCENT, hover_color=ACCENT_DARK,
+                        command=_on_jurnal_toggle
+                    )
+                cb_item.grid(row=r_main, column=1, padx=6, pady=4)
                 
-                tk.Label(scrollable_frame, text=str(item['tanggal']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=2, sticky="w", padx=14, ipady=5)
-                tk.Label(scrollable_frame, text=str(item['group']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9, "bold")).grid(row=r_main, column=3, sticky="w", padx=14, ipady=5)
+                tk.Label(scrollable_frame, text=str(item['tanggal']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=2, sticky="w", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=str(item['group']), bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=3, sticky="w", padx=14, ipady=6)
                 amt_merch = float(item.get('merchant_amount') or 0)
                 amt_odoo = float(item.get('odoo_amount') or 0)
-                tk.Label(scrollable_frame, text=f"Rp {amt_merch:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=4, sticky="e", padx=14, ipady=5)
-                tk.Label(scrollable_frame, text=f"Rp {amt_odoo:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=5, sticky="e", padx=14, ipady=5)
+                tk.Label(scrollable_frame, text=f"Rp {amt_merch:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=4, sticky="e", padx=14, ipady=6)
+                tk.Label(scrollable_frame, text=f"Rp {amt_odoo:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=5, sticky="e", padx=14, ipady=6)
                 
                 mut_amt = float(item.get("mutation_amount", 0))
-                tk.Label(scrollable_frame, text=f"Rp {mut_amt:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 9)).grid(row=r_main, column=6, sticky="e", padx=14, ipady=5)
+                tk.Label(scrollable_frame, text=f"Rp {mut_amt:,.0f}", bg=bg_row, fg=TEXT, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=6, sticky="e", padx=14, ipady=6)
                 
                 sel_color = WARN if sel != 0 else TEXT
-                tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=bg_row, fg=sel_color, font=(FONT_FAMILY, 9, "bold" if sel != 0 else "normal")).grid(row=r_main, column=7, sticky="e", padx=14, ipady=5)
-
+                tk.Label(scrollable_frame, text=f"Rp {sel:,.0f}", bg=bg_row, fg=sel_color, font=(FONT_FAMILY, 10, "bold")).grid(row=r_main, column=7, sticky="e", padx=14, ipady=6)
                 
                 if state["disabled_edc"]:
-                    cb_edc = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 10))
+                    cb_edc = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 11, "bold"))
                 else:
-                    cb_edc = tk.Checkbutton(scrollable_frame, variable=var_edc, bg=bg_row, selectcolor=bg_row)
-                cb_edc.grid(row=r_main, column=8, padx=12, ipady=4)
+                    cb_edc = ctk.CTkCheckBox(
+                        scrollable_frame, text="", variable=var_edc,
+                        width=18, height=18, checkbox_width=18, checkbox_height=18,
+                        fg_color=ACCENT, hover_color=ACCENT_DARK
+                    )
+                cb_edc.grid(row=r_main, column=8, padx=12, pady=4)
                 
                 if state["disabled_ar"]:
-                    cb_ar = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 10))
+                    cb_ar = tk.Label(scrollable_frame, text="—", bg=bg_row, fg=MUTED, font=(FONT_FAMILY, 11, "bold"))
                 else:
-                    cb_ar = tk.Checkbutton(scrollable_frame, variable=var_ar, bg=bg_row, selectcolor=bg_row)
-                cb_ar.grid(row=r_main, column=10, padx=12, ipady=4)
+                    cb_ar = ctk.CTkCheckBox(
+                        scrollable_frame, text="", variable=var_ar,
+                        width=18, height=18, checkbox_width=18, checkbox_height=18,
+                        fg_color=ACCENT, hover_color=ACCENT_DARK
+                    )
+                cb_ar.grid(row=r_main, column=10, padx=12, pady=4)
                 
                 edc_info_texts = []
                 ar_info_texts = []
