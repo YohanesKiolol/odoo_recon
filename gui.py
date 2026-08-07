@@ -240,6 +240,29 @@ class CTkDateInput(ctk.CTkFrame):
             pass
 
 
+def _maximize_window(win):
+    """Maximize a Tk/CTk window cross-platform."""
+    import sys
+    system = sys.platform
+    if system == "win32":
+        win.state("zoomed")
+    elif system == "darwin":
+        # Mac: no -zoomed attr; set geometry to fill screen
+        win.update_idletasks()
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f"{sw}x{sh}+0+0")
+    else:
+        # Linux / other X11
+        try:
+            win.attributes("-zoomed", True)
+        except Exception:
+            win.update_idletasks()
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            win.geometry(f"{sw}x{sh}+0+0")
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -254,6 +277,8 @@ class App(ctk.CTk):
         self.geometry("1280x860")
         self.minsize(1100, 720)
         self.resizable(True, True)
+        # Maximise on startup — platform-correct
+        self.after(50, lambda: _maximize_window(self))
         self._running = False
         self._active_proc = None
         self._last_output: str | None = None
@@ -1936,16 +1961,11 @@ class App(ctk.CTk):
         top.withdraw()
         top.title("Manual Match — Reconcile Differences")
 
-        screen_w, screen_h = top.winfo_screenwidth(), top.winfo_screenheight()
-        window_w = min(1440, int(screen_w * 0.94))
-        window_h = min(920, int(screen_h * 0.90))
-        cx = max(0, int(screen_w / 2 - window_w / 2))
-        cy = max(0, int(screen_h / 2 - window_h / 2))
-        top.geometry(f"{window_w}x{window_h}+{cx}+{cy}")
         top.minsize(1200, 750)
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
+        top.after(50, lambda: _maximize_window(top))
 
         active_matched = []
         auto_page = [0]
@@ -2495,17 +2515,12 @@ class App(ctk.CTk):
 
         top.protocol("WM_DELETE_WINDOW", _on_close_modal)
         top.title("Confirm Journal Creation")
-        screen_w, screen_h = top.winfo_screenwidth(), top.winfo_screenheight()
-        window_w = min(1440, int(screen_w * 0.94))
-        window_h = min(920, int(screen_h * 0.90))
-        cx = max(0, int(screen_w / 2 - window_w / 2))
-        cy = max(0, int(screen_h / 2 - window_h / 2))
-        top.geometry(f"{window_w}x{window_h}+{cx}+{cy}")
         top.minsize(1200, 750)
         top.resizable(True, True)
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
+        top.after(50, lambda: _maximize_window(top))
 
 
         items = []
