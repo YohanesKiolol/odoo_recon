@@ -729,7 +729,7 @@ class App(ctk.CTk):
         ctk.CTkFrame(log_card, height=1, fg_color=BORDER).pack(fill="x", padx=16)
 
         log_frame = ctk.CTkFrame(log_card, fg_color="transparent")
-        log_frame.pack(fill="both", expand=True, padx=10, pady=(6, 0))
+        log_frame.pack(fill="both", expand=True, padx=10, pady=(6, 10))
 
         self._log = tk.Text(
             log_frame, bg=PANEL, fg=TEXT,
@@ -737,9 +737,14 @@ class App(ctk.CTk):
             wrap="word", borderwidth=0, highlightthickness=0,
             padx=10, pady=10, insertbackground=TEXT
         )
-        _log_scroll = tk.Scrollbar(log_frame, command=self._log.yview)
+        _log_scroll = ctk.CTkScrollbar(
+            log_frame, command=self._log.yview,
+            button_color=BORDER,
+            button_hover_color=MUTED,
+            corner_radius=4, width=12,
+        )
         self._log.configure(yscrollcommand=_log_scroll.set)
-        _log_scroll.pack(side="right", fill="y")
+        _log_scroll.pack(side="right", fill="y", padx=(0, 2), pady=4)
         self._log.pack(fill="both", expand=True)
 
         self._log.tag_config("ok",   foreground=SUCCESS)
