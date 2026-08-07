@@ -2489,21 +2489,18 @@ class App(ctk.CTk):
 
         top.protocol("WM_DELETE_WINDOW", _on_close_modal)
         top.title("Confirm Journal Creation")
+        screen_w, screen_h = top.winfo_screenwidth(), top.winfo_screenheight()
+        window_w = min(1440, int(screen_w * 0.94))
+        window_h = min(920, int(screen_h * 0.90))
+        cx = max(0, int(screen_w / 2 - window_w / 2))
+        cy = max(0, int(screen_h / 2 - window_h / 2))
+        top.geometry(f"{window_w}x{window_h}+{cx}+{cy}")
+        top.minsize(1200, 750)
         top.resizable(True, True)
-        top.minsize(1050, 700)
         top.configure(fg_color=BG)
-
-        if IS_WINDOWS:
-            try:
-                top.state("zoomed")
-            except Exception:
-                pass
-        else:
-            screen_w, screen_h = top.winfo_screenwidth(), top.winfo_screenheight()
-            top.geometry(f"{min(1400, screen_w)}x{min(900, screen_h)}+0+0")
-
         top.transient(self)
         top.grab_set()
+
 
         items = []
         journal_state = []
