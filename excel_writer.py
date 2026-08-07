@@ -388,7 +388,7 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
             rows.append((bank_clean, acc_name, d, pd, b_sum, o_sum, recon))
 
     COLOR_MATCH   = "E2EFDA"
-    COLOR_DIFF    = "F8CBAD"
+    COLOR_DIFF    = "FCE4D6"
     COLOR_MISSING = "FFF2CC"
 
     for idx, (bank, acc_name, d, pd, b_sum, o_sum, recon) in enumerate(rows, 1):

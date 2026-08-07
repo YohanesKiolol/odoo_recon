@@ -323,7 +323,7 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
             total_credits = float(amount)
             diff = total_debits - total_credits
             
-            from config import ODOO_JOURNAL_AR
+            from config import ODOO_JOURNAL_AR, ODOO_ACCOUNT_BANK_DIFF_INCOME, ODOO_ACCOUNT_BANK_DIFF_LOSS
             
             first_row = True
             
@@ -354,14 +354,14 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
             if round(diff, 2) > 0:
                 ws_out.append([
                     None, None, None, None, None, None,
-                    "82005 Bank Difference Income",
+                    ODOO_ACCOUNT_BANK_DIFF_INCOME,
                     abs(diff),
                     None
                 ])
             elif round(diff, 2) < 0:
                 ws_out.append([
                     None, None, None, None, None, None,
-                    "8107 Bank Difference Loss",
+                    ODOO_ACCOUNT_BANK_DIFF_LOSS,
                     None,
                     abs(diff)
                 ])
