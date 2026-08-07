@@ -45,7 +45,14 @@ if "--worker" in sys.argv:
 if IS_WINDOWS:
     try:
         from ctypes import windll
-        windll.shcore.SetProcessDpiAwareness(1)
+        # Per-Monitor V2 DPI awareness (level 2): each monitor reports its own
+        # DPI and Windows does NOT bitmap-scale the window — gives sharp custom
+        # fonts at any display scaling (100%, 125%, 150%, 200%).
+        # Falls back to level 1 (System DPI) if shcore is unavailable.
+        try:
+            windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
 
@@ -127,6 +134,21 @@ if fonts_dir.exists():
     for f_file in fonts_dir.glob("*.ttf"):
         try:
             ctk.FontManager.load_font(str(f_file))
+        except Exception:
+            pass
+    # Windows: also register fonts via GDI32's AddFontResourceExW so that
+    # ClearType sub-pixel rendering applies to the custom TTF stems.
+    # CTkFontManager alone uses Tk's font path which GDI treats as "foreign"
+    # and falls back to grayscale AA — strokes appear thin and patchy.
+    if IS_WINDOWS:
+        try:
+            import ctypes
+            _gdi32 = ctypes.windll.gdi32
+            _FR_PRIVATE = 0x10  # font unloads when the process exits
+            for f_file in fonts_dir.glob("*.ttf"):
+                _gdi32.AddFontResourceExW(str(f_file), _FR_PRIVATE, 0)
+            # Notify the system that new fonts are available
+            ctypes.windll.user32.SendMessageW(0xFFFF, 0x001D, 0, 0)
         except Exception:
             pass
 
@@ -219,14 +241,46 @@ class App(ctk.CTk):
         super().__init__()
         self.title("Bank Reconciliation Studio")
         self.configure(fg_color=BG)
-        self.geometry("1100x740")
-        self.minsize(900, 600)
+        # Apply DPI scaling BEFORE building UI so every widget is created at
+        # the correct physical scale from the start. Applying it after causes
+        # some widgets to render at default 96-DPI scale and others at the
+        # real DPI — the mismatch makes fonts look patchy/inconsistent.
+        if IS_WINDOWS:
+            self._apply_dpi_scaling()
+        self.geometry("1280x860")
+        self.minsize(1100, 720)
         self.resizable(True, True)
         self._running = False
         self._last_output: str | None = None
         self._build_ui()
         self._center()
         self.after(200, self._auto_scan_on_startup)
+
+    def _apply_dpi_scaling(self):
+        """Query the real monitor DPI and correct Tkinter's scaling factor.
+        Without this, Tkinter assumes 96 DPI — at 125%/150% display scaling
+        all fonts render blurry because Windows bitmap-scales the GDI output.
+        With the correct scaling factor, custom TTF fonts go through ClearType
+        at their true physical pixel size and stay sharp."""
+        try:
+            import ctypes
+            # Get the window handle after the window is realized
+            self.update_idletasks()
+            hwnd = ctypes.windll.user32.GetParent(self.winfo_id())
+            if hwnd == 0:
+                hwnd = self.winfo_id()
+            # GetDpiForWindow is available on Windows 10+
+            try:
+                dpi = ctypes.windll.user32.GetDpiForWindow(hwnd)
+            except AttributeError:
+                # Fall back to system DPI on older Windows
+                dpi = ctypes.windll.user32.GetDpiForSystem()
+            if dpi and dpi > 0:
+                scale = dpi / 96.0
+                # Tell Tkinter the true physical scaling so it sizes fonts correctly
+                self.tk.call("tk", "scaling", scale)
+        except Exception:
+            pass
 
     def _auto_scan_on_startup(self):
         self._refresh_folder_status()
@@ -614,13 +668,13 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             dash_hdr, text="📊 Live Input Data Summary",
-            font=(FONT_FAMILY, 11, "bold"), text_color=TEXT,
+            font=(FONT_FAMILY, 13, "bold"), text_color=TEXT,
             fg_color="transparent"
         ).pack(side="left")
 
         self._dash_last_update = ctk.CTkLabel(
             dash_hdr, text="Updated: —",
-            font=(FONT_FAMILY, 9), text_color=MUTED,
+            font=(FONT_FAMILY, 10), text_color=MUTED,
             fg_color="transparent"
         )
         self._dash_last_update.pack(side="right")
@@ -639,18 +693,18 @@ class App(ctk.CTk):
             top_f = ctk.CTkFrame(card, fg_color="transparent")
             top_f.pack(fill="x", padx=8, pady=(8, 2))
             
-            ico_font = ("Segoe UI Emoji", 11) if IS_WINDOWS else (FONT_FAMILY, 11)
+            ico_font = ("Segoe UI Emoji", 13) if IS_WINDOWS else (FONT_FAMILY, 13)
             ico_lbl = tk.Label(top_f, text=icon, font=ico_font, bg=PREVIEW_BG, fg=ACCENT)
             ico_lbl.pack(side="left")
-            
-            t_lbl = ctk.CTkLabel(top_f, text=title, font=(FONT_FAMILY, 8.5, "bold"), text_color=MUTED)
+
+            t_lbl = ctk.CTkLabel(top_f, text=title, font=(FONT_FAMILY, 10, "bold"), text_color=MUTED)
             t_lbl.pack(side="left", padx=(3, 0))
-            
-            val_lbl = ctk.CTkLabel(card, text="0 Files", font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w")
+
+            val_lbl = ctk.CTkLabel(card, text="0 Files", font=(FONT_FAMILY, 14, "bold"), text_color=TEXT, anchor="w")
             val_lbl.pack(fill="x", padx=8, pady=(2, 0))
             setattr(self, val_attr, val_lbl)
-            
-            sub_lbl = ctk.CTkLabel(card, text="—", font=(FONT_FAMILY, 8), text_color=MUTED, anchor="w")
+
+            sub_lbl = ctk.CTkLabel(card, text="—", font=(FONT_FAMILY, 10), text_color=MUTED, anchor="w")
             sub_lbl.pack(fill="x", padx=8, pady=(0, 8))
             setattr(self, sub_attr, sub_lbl)
 
@@ -669,13 +723,13 @@ class App(ctk.CTk):
 
         ctk.CTkLabel(
             drill_hdr, text="🔍 Per-Account Date Coverage",
-            font=(FONT_FAMILY, 11, "bold"), text_color=TEXT,
+            font=(FONT_FAMILY, 13, "bold"), text_color=TEXT,
             fg_color="transparent"
         ).pack(side="left")
 
         self._drill_status_lbl = ctk.CTkLabel(
             drill_hdr, text="",
-            font=(FONT_FAMILY, 9), text_color=MUTED,
+            font=(FONT_FAMILY, 10), text_color=MUTED,
             fg_color="transparent"
         )
         self._drill_status_lbl.pack(side="right", padx=(0, 4))
@@ -692,7 +746,7 @@ class App(ctk.CTk):
         for ci, h in enumerate(["ACCOUNT / ALIAS", "MERCHANT REPORT", "MUTATION FILE"]):
             ctk.CTkLabel(
                 drill_grid, text=h,
-                font=(FONT_FAMILY, 8, "bold"), text_color=MUTED,
+                font=(FONT_FAMILY, 10, "bold"), text_color=MUTED,
                 fg_color="transparent", anchor="w"
             ).grid(row=0, column=ci, padx=(8, 4), pady=(2, 4), sticky="w")
 
@@ -713,7 +767,7 @@ class App(ctk.CTk):
         
         ctk.CTkLabel(
             log_hdr, text="Logs",
-            font=(FONT_FAMILY, 12, "bold"), text_color=TEXT,
+            font=(FONT_FAMILY, 13, "bold"), text_color=TEXT,
             fg_color="transparent"
         ).pack(side="left")
 
@@ -733,7 +787,7 @@ class App(ctk.CTk):
 
         self._log = tk.Text(
             log_frame, bg=PANEL, fg=TEXT,
-            font=(FONT_MONO, 9), relief="flat", state="disabled",
+            font=(FONT_MONO, 10), relief="flat", state="disabled",
             wrap="word", borderwidth=0, highlightthickness=0,
             padx=10, pady=10, insertbackground=TEXT
         )
@@ -925,7 +979,7 @@ class App(ctk.CTk):
         # Create fresh loading placeholder
         loading_lbl = ctk.CTkLabel(
             self._drill_grid, text="Reading files, please wait...",
-            font=(FONT_FAMILY, 9), text_color=MUTED,
+            font=(FONT_FAMILY, 11), text_color=MUTED,
             fg_color="transparent", anchor="w"
         )
         loading_lbl.grid(row=2, column=0, columnspan=3, padx=8, pady=4, sticky="w")
@@ -974,21 +1028,21 @@ class App(ctk.CTk):
 
             acc_lbl = ctk.CTkLabel(
                 self._drill_grid, text=label,
-                font=(FONT_FAMILY, 9, "bold"), text_color=bcolor,
+                font=(FONT_FAMILY, 11, "bold"), text_color=bcolor,
                 fg_color="transparent", anchor="w"
             )
             acc_lbl.grid(row=row_num, column=0, padx=(8, 4), pady=2, sticky="w")
 
             stmt_lbl = ctk.CTkLabel(
                 self._drill_grid, text=stmt_r or "No files",
-                font=(FONT_FAMILY, 9), text_color=SUCCESS if stmt_r else MUTED,
+                font=(FONT_FAMILY, 11), text_color=SUCCESS if stmt_r else MUTED,
                 fg_color="transparent", anchor="w"
             )
             stmt_lbl.grid(row=row_num, column=1, padx=(4, 4), pady=2, sticky="w")
 
             mut_lbl = ctk.CTkLabel(
                 self._drill_grid, text=mut_r or "No mutation CSV",
-                font=(FONT_FAMILY, 9), text_color=SUCCESS if mut_r else WARN,
+                font=(FONT_FAMILY, 11), text_color=SUCCESS if mut_r else WARN,
                 fg_color="transparent", anchor="w"
             )
             mut_lbl.grid(row=row_num, column=2, padx=(4, 8), pady=2, sticky="w")
@@ -1005,7 +1059,11 @@ class App(ctk.CTk):
         import io as _io, contextlib
         rows_data = []
         _sink = _io.StringIO()
-        with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
+        # Guard: frozen Windows GUI apps (--windowed) set sys.stdout/stderr = None.
+        # redirect_* needs a real stream to swap in/out, so fall back to _sink.
+        _real_stdout = sys.stdout if sys.stdout is not None else _sink
+        _real_stderr = sys.stderr if sys.stderr is not None else _sink
+        with contextlib.redirect_stdout(_real_stdout), contextlib.redirect_stderr(_real_stderr):
             try:
                 from config import (
                     BCA_EXCEL_DIR, BCA_EXCEL_PATTERN, BCA_EXCEL_PASSWORD,
@@ -1459,35 +1517,24 @@ class App(ctk.CTk):
         self._set_status("Processing...", WARN)
         self.update_idletasks()
 
-        def _deferred_run():
-            self._refresh_folder_status()
-            if self._offline_var.get():
-                self._log_write("\n── Running Offline Reconciliation (Skipping Downloader) ──\n", "head")
-                threading.Thread(target=self._run_script, args=(selected_banks, False), daemon=True).start()
-                return
-            threading.Thread(target=run_all, daemon=True).start()
-
-        self.after(50, _deferred_run)
-        return  # execution continues inside _deferred_run
-
         def run_all():
             try:
-                self.after(0, self._log_write, f"\n── Starting Single Browser Auto-Recon ──\n", "head")
-                
+                self.after(0, self._log_write, f"\n\u2500\u2500 Starting Single Browser Auto-Recon \u2500\u2500\n", "head")
+
                 if getattr(sys, "frozen", False):
                     cmd = [sys.executable, "--run-downloader", "--mode", "auto_recon"]
                 else:
                     cmd = [_venv_python, "odoo_downloader.py", "--mode", "auto_recon"]
-                    
+
                 email = self._email_var.get().strip()
                 password = self._password_var.get()
                 if email and password:
                     cmd.extend(["--email", email, "--password", password])
-                    
+
                 banks_for_dl = [b for b, var in self._bank_vars.items() if var.get()]
                 if banks_for_dl:
                     cmd.extend(["--banks", ",".join(banks_for_dl)])
-                    
+
                 env = os.environ.copy()
                 env.pop("TCL_LIBRARY", None)
                 env.pop("TK_LIBRARY", None)
@@ -1502,25 +1549,32 @@ class App(ctk.CTk):
                     errors="replace",
                     env=env
                 )
-                
+
                 for line in process.stdout:
                     self.after(0, self._log_write, line)
-                    
+
                 process.wait()
                 if process.returncode != 0:
-                    self.after(0, self._log_write, f"\n❌ Auto-Recon Failed.\n", "err")
+                    self.after(0, self._log_write, f"\n\u274c Auto-Recon Failed.\n", "err")
                     self.after(0, self._on_done, process.returncode, None)
                     return
-                
-                self.after(0, self._log_write, "\n✅ Auto-Recon Completed Successfully!\n", "ok")
+
+                self.after(0, self._log_write, "\n\u2705 Auto-Recon Completed Successfully!\n", "ok")
                 self.after(0, self._on_done, 0, None)
-                
+
             except Exception as e:
-                self.after(0, self._log_write, f"\n❌ Error during Auto-Recon: {e}\n", "err")
+                self.after(0, self._log_write, f"\n\u274c Error during Auto-Recon: {e}\n", "err")
                 self.after(0, self._on_done, 1, None)
+
+        def _deferred_run():
+            self._refresh_folder_status()
+            if self._offline_var.get():
+                self._log_write("\n\u2500\u2500 Running Offline Reconciliation (Skipping Downloader) \u2500\u2500\n", "head")
+                threading.Thread(target=self._run_script, args=(selected_banks, False), daemon=True).start()
                 return
-            
-        threading.Thread(target=run_all, daemon=True).start()
+            threading.Thread(target=run_all, daemon=True).start()
+
+        self.after(50, _deferred_run)
 
     def _run_script(self, selected_banks, is_scan=False):
         if getattr(sys, "frozen", False):
@@ -3160,9 +3214,11 @@ if __name__ == "__main__":
 
     if len(sys.argv) > 1:
         try:
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-        except AttributeError:
+            if sys.stdout is not None and hasattr(sys.stdout, "buffer"):
+                sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+            if sys.stderr is not None and hasattr(sys.stderr, "buffer"):
+                sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+        except (AttributeError, TypeError):
             pass
             
         if sys.argv[1] == "--run-downloader":
