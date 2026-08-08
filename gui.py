@@ -1627,6 +1627,7 @@ class App(ctk.CTk):
                 env.pop("TCL_LIBRARY", None)
                 env.pop("TK_LIBRARY", None)
                 env["PYTHONIOENCODING"] = "utf-8"
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -1635,6 +1636,7 @@ class App(ctk.CTk):
                     bufsize=1,
                     encoding="utf-8",
                     errors="replace",
+                    creationflags=flags,
                     env=env
                 )
                 self._active_proc = process
@@ -1657,8 +1659,10 @@ class App(ctk.CTk):
                     bufsize=1,
                     encoding="utf-8",
                     errors="replace",
+                    creationflags=flags,
                     env=env
                 )
+
                 
                 for line in self._active_proc.stdout:
                     self.after(0, self._log_write, line)
@@ -1857,6 +1861,7 @@ class App(ctk.CTk):
                 env.pop("TCL_LIBRARY", None)
                 env.pop("TK_LIBRARY", None)
                 env["PYTHONIOENCODING"] = "utf-8"
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
                 process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
@@ -1865,9 +1870,11 @@ class App(ctk.CTk):
                     bufsize=1,
                     encoding="utf-8",
                     errors="replace",
+                    creationflags=flags,
                     env=env
                 )
                 self._active_proc = process
+
 
 
                 for line in process.stdout:
@@ -3530,9 +3537,14 @@ class App(ctk.CTk):
             import json
             from journal_generator import generate_journal_import
             config_path = BASE_DIR / ".journal_config.json"
+            if sys.platform == "win32" and config_path.exists():
+                try:
+                    import subprocess
+                    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    subprocess.run(["attrib", "-H", str(config_path)], check=False, capture_output=True, creationflags=flags)
+                except Exception:
+                    pass
             config_path.write_text(json.dumps(selected))
-            if sys.platform == "win32":
-                import subprocess; subprocess.run(["attrib", "+H", str(config_path)], check=False, capture_output=True)
             try:
                 out_path = generate_journal_import(latest_file, config_path, mode=mode, is_preview=True)
                 if out_path:
@@ -3556,9 +3568,15 @@ class App(ctk.CTk):
                 return
             import json
             config_path = BASE_DIR / ".journal_config.json"
+            if sys.platform == "win32" and config_path.exists():
+                try:
+                    import subprocess
+                    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                    subprocess.run(["attrib", "-H", str(config_path)], check=False, capture_output=True, creationflags=flags)
+                except Exception:
+                    pass
             config_path.write_text(json.dumps(selected))
-            if sys.platform == "win32":
-                import subprocess; subprocess.run(["attrib", "+H", str(config_path)], check=False, capture_output=True)
+
             
             from journal_generator import generate_journal_import
             recon_file = Path(latest_file)

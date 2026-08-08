@@ -23,13 +23,8 @@ MANUAL_MATCHES_FILE = ".manual_matches.json"  # dot-prefix = hidden on Mac/Linux
 
 
 def _hide_file(path: Path) -> None:
-    """Best-effort: set hidden attribute on Windows (dot-prefix covers Mac/Linux)."""
-    import sys, subprocess
-    if sys.platform == "win32":
-        try:
-            subprocess.run(["attrib", "+H", str(path)], check=False, capture_output=True)
-        except Exception:
-            pass
+    """Dot-prefix covers Mac/Linux. On Windows, do NOT set +H attribute because it causes PermissionError when Python tries to write/overwrite it later."""
+    pass
 
 
 def save_manual_matches(output_dir: Path, matches: list[dict]) -> None:
@@ -38,14 +33,24 @@ def save_manual_matches(output_dir: Path, matches: list[dict]) -> None:
                  odoo_date, odoo_journal, odoo_amount}
     Merges with any pre-existing entries (deduped by pair_tag).
     """
+    import sys
     path = output_dir / MANUAL_MATCHES_FILE
+    # If file exists on Windows with +H set from earlier versions, unhide it first to prevent PermissionError
+    if sys.platform == "win32" and path.exists():
+        try:
+            import subprocess
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.run(["attrib", "-H", str(path)], check=False, capture_output=True, creationflags=flags)
+        except Exception:
+            pass
+
     existing = load_manual_matches(output_dir)
     # index by pair_tag so re-saves don't duplicate
     by_tag: dict[str, dict] = {m["pair_tag"]: m for m in existing}
     for m in matches:
         by_tag[m["pair_tag"]] = m
     path.write_text(json.dumps(list(by_tag.values()), indent=2, ensure_ascii=False), encoding="utf-8")
-    _hide_file(path)
+
 
 
 def load_manual_matches(output_dir: Path) -> list[dict]:
