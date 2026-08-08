@@ -44,23 +44,51 @@ def _parse_bca_date(raw) -> date | None:
 
 def _find_bca_excels(excel_dir: Path, excel_pattern: str) -> list[Path]:
     """
-    Find ALL BCA Excel files in excel_dir whose name contains excel_pattern.
-    Returns sorted list (oldest first by filename).
+    Find ALL BCA Excel files in excel_dir.
+
+    Primary:  filename contains excel_pattern (fast, zero I/O).
+    Fallback: if no filename matches, probe every .xlsx by content —
+              decrypts with BCA password and checks for BCA-specific headers.
+              This handles renamed files (e.g. 'BCA 1.xlsx').
     """
+    # Primary: filename-based
     candidates = sorted(
         p for p in excel_dir.iterdir()
         if p.suffix.lower() in (".xlsx", ".xls")
         and excel_pattern.lower() in p.name.lower()
-        and not p.name.startswith("~$")   # skip Excel temp/lock files
+        and not p.name.startswith("~$")
     )
-    if not candidates:
-        all_xlsx = [p.name for p in excel_dir.glob("*.xlsx")] + [p.name for p in excel_dir.glob("*.xls")]
-        raise FileNotFoundError(
-            f"No BCA Excel containing '{excel_pattern}' found in: {excel_dir}\n"
-            f"Available Excel files: {all_xlsx}\n"
-            f"Check BCA_EXCEL_PATTERN in your .env file."
-        )
-    return candidates
+    if candidates:
+        return candidates
+
+    # Fallback: content-based probe for renamed files
+    try:
+        from readers.file_detector import _probe_and_alias_bca_xlsx
+        from config import BCA_EXCEL_PASSWORD
+    except Exception:
+        pass
+    else:
+        content_matches = []
+        for p in sorted(excel_dir.iterdir()):
+            if p.suffix.lower() not in (".xlsx", ".xls"):
+                continue
+            if p.name.startswith("~$"):
+                continue
+            try:
+                is_bca, _ = _probe_and_alias_bca_xlsx(p, BCA_EXCEL_PASSWORD, {})
+                if is_bca:
+                    content_matches.append(p)
+            except Exception:
+                continue
+        if content_matches:
+            return content_matches
+
+    all_xlsx = [p.name for p in excel_dir.glob("*.xlsx")] + [p.name for p in excel_dir.glob("*.xls")]
+    raise FileNotFoundError(
+        f"No BCA Excel containing '{excel_pattern}' found in: {excel_dir}\n"
+        f"Available Excel files: {all_xlsx}\n"
+        f"Check BCA_EXCEL_PATTERN in your .env file."
+    )
 
 
 def _read_one_bca(

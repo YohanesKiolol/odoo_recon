@@ -59,7 +59,6 @@ if IS_WINDOWS:
 import threading
 import subprocess
 import shutil
-import fnmatch
 from datetime import datetime, timedelta
 import tkinter as tk
 from tkinter import filedialog, messagebox
@@ -987,8 +986,11 @@ class App(ctk.CTk):
         self.geometry(f"+{(sw-w)//2}+{(sh-h)//2}")
 
     def _refresh_folder_status(self):
-        files = list(INPUT_DIR.rglob("*")) if INPUT_DIR.exists() else []
-        n = sum(1 for f in files if f.is_file())
+        files = [
+            f for f in (INPUT_DIR.rglob("*") if INPUT_DIR.exists() else [])
+            if f.is_file() and not f.name.startswith(".") and not f.name.startswith("~$")
+        ]
+        n = len(files)
         color = SUCCESS if n > 0 else WARN
         self._folder_label.configure(
             text=f"📂 Input folder: {INPUT_DIR}   ({n} file{'s' if n != 1 else ''} found)",
@@ -1011,10 +1013,19 @@ class App(ctk.CTk):
                     pass
 
         try:
+            def _bank_files(bank_dir):
+                if not bank_dir.exists():
+                    return []
+                return [
+                    f for f in bank_dir.rglob("*")
+                    if f.is_file()
+                    and not f.name.startswith(".")
+                    and not f.name.startswith("~$")
+                ]
             # 1. Bank Files
-            c_bca = [f for f in ((INPUT_DIR / "bca").rglob("*") if (INPUT_DIR / "bca").exists() else []) if f.is_file()]
-            c_man = [f for f in ((INPUT_DIR / "mandiri").rglob("*") if (INPUT_DIR / "mandiri").exists() else []) if f.is_file()]
-            c_bri = [f for f in ((INPUT_DIR / "bri").rglob("*") if (INPUT_DIR / "bri").exists() else []) if f.is_file()]
+            c_bca = _bank_files(INPUT_DIR / "bca")
+            c_man = _bank_files(INPUT_DIR / "mandiri")
+            c_bri = _bank_files(INPUT_DIR / "bri")
             
             tot_bank = len(c_bca) + len(c_man) + len(c_bri)
             if hasattr(self, "_kpi_bank_val"):
@@ -1396,94 +1407,116 @@ class App(ctk.CTk):
     # ── Feature Operations ────────────────────────────────────────────────────
     def _on_upload(self):
         try:
-            from config import (
-                BCA_EXCEL_DIR, BCA_EXCEL_PATTERN, 
-                MANDIRI_ZIP_DIR, MANDIRI_ZIP_PATTERN, 
-                BRI_ZIP_DIR, BRI_PDF_PATTERN, ODO_EXCEL_PATH,
-                MUTATION_DIR, BCA_MUTATION_PATTERN,
-                MANDIRI_MUTATION_PATTERN, BRI_MUTATION_PATTERN
-            )
-            
+            from readers.file_detector import detect_file, copy_file
+
             files = filedialog.askopenfilenames(title="Select Bank or Odoo File", filetypes=[("All Files", "*.*")])
             if not files:
                 return
-                
+
             self._log_write("\n── Uploading Files ──\n", "head")
+
+            # ── Pre-scan for conflicts (#1) ────────────────────────────────
+            detections: list[tuple[Path, object]] = []
             for f in files:
                 path = Path(f)
-                name = path.name.lower()
-                
-                target_dir = None
-                matched_bank = None
-                is_mutation = False
-                
-                # 1. Check Mutations First
-                if BCA_MUTATION_PATTERN and BCA_MUTATION_PATTERN.lower() in name:
-                    target_dir = MUTATION_DIR / "bca"
-                    matched_bank = "bca"
-                    is_mutation = True
-                elif MANDIRI_MUTATION_PATTERN and MANDIRI_MUTATION_PATTERN.lower() in name:
-                    target_dir = MUTATION_DIR / "mandiri"
-                    matched_bank = "mandiri"
-                    is_mutation = True
-                elif BRI_MUTATION_PATTERN and BRI_MUTATION_PATTERN.lower() in name:
-                    target_dir = MUTATION_DIR / "bri"
-                    matched_bank = "bri"
-                    is_mutation = True
-                
-                # 2. If not mutation, check Input (EDC)
-                elif BCA_EXCEL_PATTERN and BCA_EXCEL_PATTERN.lower() in name:
-                    target_dir = BCA_EXCEL_DIR
-                    matched_bank = "bca"
-                elif fnmatch.fnmatch(name, MANDIRI_ZIP_PATTERN.lower()):
-                    target_dir = MANDIRI_ZIP_DIR
-                    matched_bank = "mandiri"
-                elif "payments" in name and name.endswith(".xlsx"):
-                    target_dir = ODO_EXCEL_PATH.parent
+                if path.suffix.lower() == ".pdf":
+                    # Give helpful message for raw PDFs that aren't BRI EDC
+                    result = detect_file(path)
+                    if result is None:
+                        self._log_write(
+                            f"⚠️ Ignored: {path.name} — BRI PDFs must be inside their ZIP, or must contain an AMT_TRX table to be detected as BRI EDC.\n", "warn"
+                        )
+                        continue
+                    detections.append((path, result))
                 else:
-                    from config import BANK_ACCOUNTS, BRI_ZIP_PATTERN
-                    if name.endswith(".zip") or name.endswith(".pdf") or name.endswith(".csv"):
-                        for alias, acc_info in BANK_ACCOUNTS.get("bri", {}).items():
-                            mid = acc_info.get("mid", "")
-                            if mid and mid.lower() in name:
-                                target_dir = BRI_ZIP_DIR
-                                matched_bank = "bri"
-                                break
-                        
-                        if not matched_bank and BRI_ZIP_PATTERN and BRI_ZIP_PATTERN.lower() in name:
-                            target_dir = BRI_ZIP_DIR
-                            matched_bank = "bri"
-                
-                if matched_bank:
-                    from config import BANK_ACCOUNTS
-                    matched_alias = None
-                    accounts = BANK_ACCOUNTS.get(matched_bank, {})
-                    for alias, acc_info in accounts.items():
-                        identifier = acc_info.get("acc", "") if is_mutation else acc_info.get("mid", "")
-                        if identifier and identifier.lower() in name:
-                            matched_alias = alias
-                            break
-                    
-                    if not matched_alias:
-                        if "main" in accounts:
-                            matched_alias = "main"
-                        elif accounts:
-                            matched_alias = list(accounts.keys())[0]
-                        else:
-                            matched_alias = "main"
-                    target_dir = target_dir / matched_alias
+                    result = detect_file(path)
+                    if result is None:
+                        self._log_write(f"⚠️ Ignored: {path.name} (No bank pattern matched)\n", "warn")
+                    else:
+                        detections.append((path, result))
 
-                if target_dir:
-                    target_dir.mkdir(parents=True, exist_ok=True)
-                    dest = target_dir / path.name
-                    shutil.copy2(path, dest)
-                    self._log_write(f"✅ Copied: {path.name} -> {target_dir.parent.name}/{target_dir.name}/\n", "ok")
-                else:
-                    self._log_write(f"⚠️ Ignored: {path.name} (No bank pattern matched)\n", "warn")
-                    
+            if not detections:
+                self._refresh_folder_status()
+                return
+
+            # Check for conflicts (destination already exists)
+            conflicts = []
+            for path, result in detections:
+                dest_name = (path.name + ".zip") if result.wrap_as_zip else path.name
+                dest = result.target_dir / dest_name
+                if dest.exists():
+                    conflicts.append((path, result, dest))
+
+            # Single upfront dialog for all conflicts (#1)
+            overwrite_action = "replace"  # default if no conflicts
+            if conflicts:
+                import tkinter.simpledialog as _sd
+                names = "\n".join(f"  • {p.name}" for p, _, _ in conflicts[:8])
+                if len(conflicts) > 8:
+                    names += f"\n  ... and {len(conflicts) - 8} more"
+                dlg = ctk.CTkToplevel(self)
+                dlg.title("File Conflict")
+                dlg.geometry("480x280")
+                dlg.resizable(False, False)
+                dlg.transient(self)
+                dlg.grab_set()
+                dlg.configure(fg_color=BG)
+                sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+                dlg.geometry(f"480x280+{max(0,sw//2-240)}+{max(0,sh//2-140)}")
+
+                choice = tk.StringVar(value="")
+                panel = ctk.CTkFrame(dlg, fg_color=PANEL, corner_radius=10, border_color=BORDER, border_width=1)
+                panel.pack(fill="both", expand=True, padx=14, pady=14)
+                ctk.CTkLabel(panel, text=f"⚠️  {len(conflicts)} file(s) already exist in destination:", font=(FONT_FAMILY, 12, "bold"), text_color=WARN).pack(anchor="w", padx=14, pady=(14, 4))
+                ctk.CTkLabel(panel, text=names, font=(FONT_MONO, 10), text_color=MUTED, justify="left").pack(anchor="w", padx=14)
+                btn_frame = ctk.CTkFrame(panel, fg_color="transparent")
+                btn_frame.pack(fill="x", side="bottom", padx=14, pady=14)
+
+                def _pick(v):
+                    choice.set(v)
+                    dlg.destroy()
+
+                ctk.CTkButton(btn_frame, text="Replace All", width=120, height=34, fg_color=ERROR, hover_color="#B91C1C", text_color=WHITE, font=(FONT_FAMILY, 11, "bold"), command=lambda: _pick("replace")).pack(side="left", padx=(0, 8))
+                ctk.CTkButton(btn_frame, text="Keep Both", width=120, height=34, fg_color=ACCENT, hover_color=ACCENT_HOVER, text_color=WHITE, font=(FONT_FAMILY, 11, "bold"), command=lambda: _pick("keep")).pack(side="left", padx=(0, 8))
+                ctk.CTkButton(btn_frame, text="Skip Conflicts", width=120, height=34, fg_color=WHITE, hover_color=PREVIEW_BG, border_color=BORDER_DARK, border_width=1, text_color=TEXT, font=(FONT_FAMILY, 11, "bold"), command=lambda: _pick("skip")).pack(side="left")
+                dlg.wait_window()
+                overwrite_action = choice.get() or "skip"
+
+            # ── Copy files ────────────────────────────────────────────────
+            from datetime import datetime as _dt
+            ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            for path, result in detections:
+                dest_name = (path.name + ".zip") if result.wrap_as_zip else path.name
+                dest = result.target_dir / dest_name
+                is_conflict = dest.exists()
+
+                if is_conflict:
+                    if overwrite_action == "skip":
+                        self._log_write(f"⏭️  Skipped: {path.name} (already exists)\n", "dim")
+                        continue
+                    elif overwrite_action == "keep":
+                        # Rename incoming: insert timestamp before extension
+                        stem = Path(dest_name).stem
+                        suf = Path(dest_name).suffix
+                        dest_name = f"{stem}_{ts}{suf}"
+                        dest = result.target_dir / dest_name
+
+                try:
+                    final_dest = copy_file(result, path)
+                    if overwrite_action == "keep" and is_conflict:
+                        # copy_file wrote to original name, rename it
+                        final_dest.rename(dest)
+                        final_dest = dest
+                    verb = "Wrapped & Copied" if result.wrap_as_zip else "Copied"
+                    folder_display = f"{result.target_dir.parent.name}/{result.target_dir.name}/" if result.alias else f"{result.target_dir.name}/"
+                    self._log_write(f"✅ {verb}: {path.name} → {folder_display}{final_dest.name}\n", "ok")
+                except Exception as fe:
+                    self._log_write(f"❌ Failed: {path.name} — {fe}\n", "err")
+
             self._refresh_folder_status()
         except Exception as e:
             self._log_write(f"\n❌ Error during Upload: {e}\nEnsure your .env file is configured correctly!\n", "err")
+
 
     def _on_download(self):
         if DateEntry:
@@ -1585,8 +1618,17 @@ class App(ctk.CTk):
             for base_dir in [INPUT_DIR, MUTATION_DIR, OUTPUT_DIR]:
                 if base_dir.exists() and base_dir.is_dir():
                     for f in base_dir.rglob("*"):
-                        if f.is_file() and f.name != "journal_creation_log.xlsx":
-                            files_to_move.append(f)
+                        if not f.is_file():
+                            continue
+                        n = f.name
+                        # Exclude: journal log, hidden sidecars, DS_Store, Excel temp files
+                        if n == "journal_creation_log.xlsx":
+                            continue
+                        if n.startswith("."):  # .manual_matches.json, .journal_config.json, .DS_Store
+                            continue
+                        if n.startswith("~$"):  # Excel temp/lock files
+                            continue
+                        files_to_move.append(f)
             if ODO_EXCEL_PATH.exists() and ODO_EXCEL_PATH.is_file() and ODO_EXCEL_PATH not in files_to_move:
                 files_to_move.append(ODO_EXCEL_PATH)
                 
@@ -1677,6 +1719,8 @@ class App(ctk.CTk):
         self._scan_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled")
         self._open_btn.configure(state="disabled")
+        self._upload_btn.configure(state="disabled")
+        self._download_btn.configure(state="disabled")
         self._log.config(state="normal")
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
@@ -1708,6 +1752,8 @@ class App(ctk.CTk):
         self._scan_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled", text="⏳ Processing...")
         self._open_btn.configure(state="disabled")
+        self._upload_btn.configure(state="disabled")
+        self._download_btn.configure(state="disabled")
         self._log.config(state="normal")
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
@@ -1885,6 +1931,8 @@ class App(ctk.CTk):
         self._run_btn.configure(state="normal", text="▶  Reconciliation")
         self._journal_btn.configure(state="normal")
         self._open_btn.configure(state="normal")
+        self._upload_btn.configure(state="normal")
+        self._download_btn.configure(state="normal")
 
         if code == 0:
             if output_path:
@@ -1918,6 +1966,8 @@ class App(ctk.CTk):
         self._run_btn.configure(state="normal", text="▶  Reconciliation")
         self._journal_btn.configure(state="normal")
         self._open_btn.configure(state="normal")
+        self._upload_btn.configure(state="normal")
+        self._download_btn.configure(state="normal")
         self._update_dashboard_summary(skip_drill=True)
 
             
@@ -2562,9 +2612,9 @@ class App(ctk.CTk):
                                 "odoo_amount":  pair["odoo"]["amount"],
                             })
                         save_manual_matches(output_dir, sidecar_entries)
-                        self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to manual_matches.json\n", "ok")
+                        self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
                     except Exception as _se:
-                        self._log_write(f"⚠️ Could not save manual_matches.json: {_se}\n", "warn")
+                        self._log_write(f"⚠️ Could not save .manual_matches.json: {_se}\n", "warn")
                 else:
                     self._log_write(f"\n⚠️ Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel manually.\n", "warn")
                 top.destroy()
@@ -3371,6 +3421,27 @@ class App(ctk.CTk):
             if not selected:
                 messagebox.showwarning("Warning", "Select at least 1 transaction")
                 return
+
+            # Guard: check that the requested mode has at least 1 row to export
+            if mode == "ar":
+                ar_items = [item for item in selected if item.get("ar", False)]
+                if not ar_items:
+                    messagebox.showinfo(
+                        "No AR Entries",
+                        "None of the selected transactions have AR checked.\n\n"
+                        "To export an AR journal, tick the AR checkbox on at least one transaction first."
+                    )
+                    return
+            elif mode == "edc":
+                edc_items = [item for item in selected if item.get("edc", False)]
+                if not edc_items:
+                    messagebox.showinfo(
+                        "No EDC Entries",
+                        "None of the selected transactions have EDC checked.\n\n"
+                        "To export an EDC journal, tick the EDC checkbox on at least one transaction first."
+                    )
+                    return
+
             import json
             from journal_generator import generate_journal_import
             config_path = BASE_DIR / ".journal_config.json"
@@ -3383,9 +3454,15 @@ class App(ctk.CTk):
                     messagebox.showinfo("Success", f"{mode.upper()} Journal exported:\n{out_path.name}")
                     _open_path(str(out_path))
                 else:
-                    messagebox.showerror("Error", f"Failed to generate {mode.upper()} journal.")
+                    messagebox.showwarning(
+                        "Nothing Exported",
+                        f"No {mode.upper()} journal rows were generated.\n\n"
+                        "This can happen if all matching transactions are within the rounding tolerance "
+                        "or if the reconciliation file has no data in the Daily Summary sheet."
+                    )
             except Exception as e:
                 messagebox.showerror("Error", f"Error exporting {mode.upper()}: {e}")
+
 
         def _process():
             selected = _get_selected_config()

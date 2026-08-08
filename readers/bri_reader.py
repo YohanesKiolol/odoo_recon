@@ -32,21 +32,29 @@ from amount_utils import parse_amount, normalize_for_compare
 
 def _find_bri_zips(zip_dir: Path, zip_pattern: str) -> list[Path]:
     """
-    Find ALL BRI ZIP files in zip_dir whose name contains zip_pattern.
-    Returns sorted list.
+    Find ALL BRI ZIP files in zip_dir.
+
+    Primary:  filename contains zip_pattern (fast, zero I/O).
+    Fallback: if no filename matches, return all .zip files in zip_dir —
+              since ZIPs are now stored in alias-specific subdirectories,
+              the directory itself is the alias filter. This handles renamed ZIPs.
     """
     candidates = sorted(
         p for p in zip_dir.iterdir()
         if p.suffix.lower() == ".zip" and zip_pattern.lower() in p.name.lower()
     )
-    if not candidates:
-        all_zips = [p.name for p in zip_dir.glob("*.zip")]
-        raise FileNotFoundError(
-            f"No BRI ZIP containing '{zip_pattern}' found in: {zip_dir}\n"
-            f"Available ZIPs: {all_zips}\n"
-            f"Check BRI_ZIP_PATTERN in your .env file."
-        )
-    return candidates
+    if candidates:
+        return candidates
+
+    # Fallback: return all ZIPs in the alias-specific directory
+    all_zips = sorted(p for p in zip_dir.iterdir() if p.suffix.lower() == ".zip")
+    if all_zips:
+        return all_zips
+
+    raise FileNotFoundError(
+        f"No BRI ZIP files found in: {zip_dir}\n"
+        f"Check BRI_ZIP_DIR in your .env file."
+    )
 
 
 def _extract_detail_pdf(zip_path: Path, pdf_pattern: str) -> bytes:

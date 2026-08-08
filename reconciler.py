@@ -40,7 +40,7 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
         lambda: defaultdict(list)
     )
     for txn in odo_txns:
-        d = txn.get("date", "") or ""
+        d = str(txn.get("date", "") or "")   # normalize: date obj or str → str
         odo_by_date[d][txn["amount"]].append(txn)
 
     # Counter per date to track remaining matches
@@ -54,7 +54,7 @@ def reconcile(bank_txns: list[dict], odo_txns: list[dict]) -> list[dict]:
     # ── Bank transactions ─────────────────────────────────────────────────────
     for txn in bank_txns:
         amt      = txn["amount"]
-        bank_d   = txn.get("date", "") or ""
+        bank_d   = str(txn.get("date", "") or "")   # normalize
         bank_num = txn.get("number", "")
 
         day_counter = odo_remaining.get(bank_d, Counter())
