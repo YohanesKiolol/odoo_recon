@@ -86,6 +86,11 @@ def safe_save_workbook(wb, file_path: Path):
         except Exception:
             pass
         return False
+    finally:
+        try:
+            wb.close()
+        except Exception:
+            pass
 
     # ── Step 2: atomic replace ──────────────────────────────────────────────
     try:
@@ -152,55 +157,61 @@ def update_recon_file_status(recon_file: Path, config_path: Path):
             selected_items = json.load(f)
             
         wb = load_workbook(recon_file)
-        if "Daily Summary" in wb.sheetnames:
-            ws = wb["Daily Summary"]
-            updated = 0
-            
-            # Map column indices from row 3
-            col_map = {str(ws.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws.max_column + 1) if ws.cell(row=3, column=c).value}
-            c_status = col_map.get("status", 10)
-            c_jstatus = col_map.get("journal status", 11)
-            
-            for item in selected_items:
-                row_idx = item.get("row")
-                if not row_idx:
-                    continue
+        try:
+            if "Daily Summary" in wb.sheetnames:
+                ws = wb["Daily Summary"]
+                updated = 0
                 
-                created_edc = item.get("edc", False)
-                created_ar = item.get("ar", False)
+                # Map column indices from row 3
+                col_map = {str(ws.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws.max_column + 1) if ws.cell(row=3, column=c).value}
+                c_status = col_map.get("status", 10)
+                c_jstatus = col_map.get("journal status", 11)
                 
-                new_status = ""
-                if created_edc and created_ar:
-                    new_status = "✅ Both"
-                elif created_edc:
-                    new_status = "✅ EDC"
-                elif created_ar:
-                    new_status = "✅ AR"
-                else:
-                    continue
+                for item in selected_items:
+                    row_idx = item.get("row")
+                    if not row_idx:
+                        continue
                     
-                current_val = str(ws.cell(row=row_idx, column=c_jstatus).value or "")
-                
-                # Merge status
-                if "EDC" in current_val and created_ar:
-                    new_status = "✅ Both"
-                elif "AR" in current_val and created_edc:
-                    new_status = "✅ Both"
-                elif "Both" in current_val:
-                    new_status = "✅ Both"
-                
-                ws.cell(row=row_idx, column=c_jstatus, value=new_status)
-                
-                # Keep original checkmark logic
-                status9 = ws.cell(row=row_idx, column=c_status).value
-                if status9 and "Match" in str(status9):
-                    ws.cell(row=row_idx, column=c_status, value="✅ Journal Created")
+                    created_edc = item.get("edc", False)
+                    created_ar = item.get("ar", False)
                     
-                updated += 1
-                
-            if updated > 0:
-                safe_save_workbook(wb, recon_file)
-                print(f"✅ Successfully updated {updated} rows in '{recon_file.name}' with Journal Status.")
+                    new_status = ""
+                    if created_edc and created_ar:
+                        new_status = "✅ Both"
+                    elif created_edc:
+                        new_status = "✅ EDC"
+                    elif created_ar:
+                        new_status = "✅ AR"
+                    else:
+                        continue
+                        
+                    current_val = str(ws.cell(row=row_idx, column=c_jstatus).value or "")
+                    
+                    # Merge status
+                    if "EDC" in current_val and created_ar:
+                        new_status = "✅ Both"
+                    elif "AR" in current_val and created_edc:
+                        new_status = "✅ Both"
+                    elif "Both" in current_val:
+                        new_status = "✅ Both"
+                    
+                    ws.cell(row=row_idx, column=c_jstatus, value=new_status)
+                    
+                    # Keep original checkmark logic
+                    status9 = ws.cell(row=row_idx, column=c_status).value
+                    if status9 and "Match" in str(status9):
+                        ws.cell(row=row_idx, column=c_status, value="✅ Journal Created")
+                        
+                    updated += 1
+                    
+                if updated > 0:
+                    safe_save_workbook(wb, recon_file)
+                    print(f"✅ Successfully updated {updated} rows in '{recon_file.name}' with Journal Status.")
+        finally:
+            try:
+                wb.close()
+            except Exception:
+                pass
     except Exception as e:
         print(f"⚠️ Failed to update status in reconciliation file: {e}")
 
@@ -220,63 +231,76 @@ def log_journal_creation(recon_file: Path, config_path: Path):
             selected_items = json.load(f)
             
         wb_recon = load_workbook(recon_file, data_only=True)
-        ws_recon = wb_recon["Daily Summary"]
-        col_map = {str(ws_recon.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws_recon.max_column + 1) if ws_recon.cell(row=3, column=c).value}
-        
-        # Open or create log file
-        if log_file.exists():
-            wb_log = load_workbook(log_file)
-            ws_log = wb_log.active
-        else:
-            wb_log = Workbook()
-            ws_log = wb_log.active
-            ws_log.title = "Journal Log"
-            headers = ["Created At", "Original Recon File", "Bank", "Journal", "Transaction Date", "Merchant Amt", "Odoo Amt", "Created"]
-            ws_log.append(headers)
+        try:
+            ws_recon = wb_recon["Daily Summary"]
+            col_map = {str(ws_recon.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws_recon.max_column + 1) if ws_recon.cell(row=3, column=c).value}
             
-        added = 0
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
-        for item in selected_items:
-            row_idx = item.get("row")
-            if not row_idx:
-                continue
+            # Open or create log file
+            if log_file.exists():
+                wb_log = load_workbook(log_file)
+            else:
+                wb_log = Workbook()
+            try:
+                ws_log = wb_log.active
+                if not log_file.exists():
+                    ws_log.title = "Journal Log"
+                    headers = ["Created At", "Original Recon File", "Bank", "Journal", "Transaction Date", "Merchant Amt", "Odoo Amt", "Created"]
+                    ws_log.append(headers)
+                    
+                added = 0
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 
-            created_edc = item.get("edc", False)
-            created_ar = item.get("ar", False)
-            
-            if not created_edc and not created_ar:
-                continue
-                
-            created_str = "Both" if (created_edc and created_ar) else ("EDC" if created_edc else "AR")
-            
-            bank = ws_recon.cell(row=row_idx, column=col_map.get("bank", 4)).value
-            journal = ws_recon.cell(row=row_idx, column=col_map.get("journal", 5)).value
-            date_val = ws_recon.cell(row=row_idx, column=col_map.get("date", 2)).value
-            merch_amt = ws_recon.cell(row=row_idx, column=col_map.get("total bank", 6)).value
-            odoo_amt = ws_recon.cell(row=row_idx, column=col_map.get("total odoo", 7)).value
-            
-            ws_log.append([
-                now_str,
-                recon_file.name,
-                str(bank) if bank else "",
-                str(journal) if journal else "",
-                str(date_val) if date_val else "",
-                merch_amt,
-                odoo_amt,
-                created_str
-            ])
-            added += 1
-            
-        if added > 0:
-            # Protect the sheet from manual edits in Excel GUI
-            ws_log.protection.sheet = True
-            ws_log.protection.password = "ODOO_AUTO_SYSTEM_LOCK"
-            safe_save_workbook(wb_log, log_file)
-            print(f"📝 Appended {added} records to Journal Tracker Log ({log_file.name}).")
+                for item in selected_items:
+                    row_idx = item.get("row")
+                    if not row_idx:
+                        continue
+                        
+                    created_edc = item.get("edc", False)
+                    created_ar = item.get("ar", False)
+                    
+                    if not created_edc and not created_ar:
+                        continue
+                        
+                    created_str = "Both" if (created_edc and created_ar) else ("EDC" if created_edc else "AR")
+                    
+                    bank = ws_recon.cell(row=row_idx, column=col_map.get("bank", 4)).value
+                    journal = ws_recon.cell(row=row_idx, column=col_map.get("journal", 5)).value
+                    date_val = ws_recon.cell(row=row_idx, column=col_map.get("date", 2)).value
+                    merch_amt = ws_recon.cell(row=row_idx, column=col_map.get("total bank", 6)).value
+                    odoo_amt = ws_recon.cell(row=row_idx, column=col_map.get("total odoo", 7)).value
+                    
+                    ws_log.append([
+                        now_str,
+                        recon_file.name,
+                        str(bank) if bank else "",
+                        str(journal) if journal else "",
+                        str(date_val) if date_val else "",
+                        merch_amt,
+                        odoo_amt,
+                        created_str
+                    ])
+                    added += 1
+                    
+                if added > 0:
+                    # Protect the sheet from manual edits in Excel GUI
+                    ws_log.protection.sheet = True
+                    ws_log.protection.password = "ODOO_AUTO_SYSTEM_LOCK"
+                    safe_save_workbook(wb_log, log_file)
+                    print(f"📝 Appended {added} records to Journal Tracker Log ({log_file.name}).")
+            finally:
+                try:
+                    wb_log.close()
+                except Exception:
+                    pass
+        finally:
+            try:
+                wb_recon.close()
+            except Exception:
+                pass
             
     except Exception as e:
         print(f"⚠️ Failed to write to journal tracker log: {e}")
+
 
 def run_import_automation(import_file: Path, recon_file: Path, config_path: Path = None, email: str = "", password: str = "", headless: bool = False):
     """Launch Playwright, navigate to Odoo, and upload the import file."""

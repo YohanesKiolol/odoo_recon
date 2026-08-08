@@ -2075,16 +2075,19 @@ class App(ctk.CTk):
 
         try:
             wb = load_workbook(latest_file, data_only=True)
+            try:
+                if "Differences" not in wb.sheetnames:
+                    self._set_status("No 'Differences' sheet found in recon file", ERROR)
+                    return
+
+                ws = wb["Differences"]
+                rows = list(ws.iter_rows(values_only=True))
+            finally:
+                wb.close()
         except Exception as e:
             self._set_status(f"Error loading recon file: {e}", ERROR)
             return
 
-        if "Differences" not in wb.sheetnames:
-            self._set_status("No 'Differences' sheet found in recon file", ERROR)
-            return
-
-        ws = wb["Differences"]
-        rows = list(ws.iter_rows(values_only=True))
         bank_items = []
         odo_items = []
         from collections import defaultdict
@@ -2913,6 +2916,13 @@ class App(ctk.CTk):
             except Exception as e:
                 self._set_status(f"Error reading excel: {e}", ERROR)
                 return
+            finally:
+                try:
+                    wb.close()
+                except Exception:
+                    pass
+
+
 
             journal_state.clear()
             for item in items:

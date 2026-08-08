@@ -166,9 +166,12 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
             item["create_edc"] = True
             item["create_ar"] = True
 
+    wb_source.close()
+
     if not items:
         print(f"ℹ️ No data with difference <= {JOURNAL_TOLERANCE} in Daily Summary.")
         return None
+
 
     headers = [
         "Company", "Date", "Journal", "Number", "Partner", "Reference", 
@@ -398,9 +401,13 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
         out_filename = f"Journal_Import_{mode_str}_{timestamp}.xlsx"
         
     out_path = journal_dir / out_filename
-    wb_out.save(out_path)
+    try:
+        wb_out.save(out_path)
+    finally:
+        wb_out.close()
     print(f"✅ Journal Import File created successfully: {out_path.name}")
     return out_path
+
 
 if __name__ == "__main__":
     # Test script directly

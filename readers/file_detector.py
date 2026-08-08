@@ -146,21 +146,24 @@ def _probe_odoo_xlsx(path: Path) -> bool:
     try:
         import openpyxl
         wb = openpyxl.load_workbook(path, data_only=True, read_only=True)
-        ws = wb.active
-        if ws is None:
-            return False
-        texts: list[str] = []
-        for row in ws.iter_rows(max_row=3, values_only=True):
-            for cell in row:
-                if cell is not None:
-                    texts.append(str(cell).lower())
-        wb.close()
+        try:
+            ws = wb.active
+            if ws is None:
+                return False
+            texts: list[str] = []
+            for row in ws.iter_rows(max_row=3, values_only=True):
+                for cell in row:
+                    if cell is not None:
+                        texts.append(str(cell).lower())
+        finally:
+            wb.close()
         joined = " ".join(texts)
         has_payment = "payment" in joined or "account.payment" in joined
         has_odoo_col = any(k in joined for k in ("journal", "partner", "reconcil"))
         return has_payment and has_odoo_col
     except Exception:
         return False
+
 
 
 # --------------------------------------------------------------------------- #

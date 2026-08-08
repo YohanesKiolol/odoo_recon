@@ -84,130 +84,133 @@ def read_odoo(
         )
 
     wb = openpyxl.load_workbook(excel_path, data_only=True)
-    ws = wb.active
-    assert ws is not None, "No active worksheet in ODO Excel"
+    try:
+        ws = wb.active
+        assert ws is not None, "No active worksheet in ODO Excel"
 
-    # ── Date from A3 ──────────────────────────────────────────────────────────
-    a3_val = ws["A3"].value
-    if a3_val is None:
-        raise ValueError("Cell A3 in ODO file is empty — cannot determine date.")
-    odo_date = _parse_odo_date(str(a3_val))
+        # ── Date from A3 ──────────────────────────────────────────────────────────
+        a3_val = ws["A3"].value
+        if a3_val is None:
+            raise ValueError("Cell A3 in ODO file is empty — cannot determine date.")
+        odo_date = _parse_odo_date(str(a3_val))
 
-    # ── Resolve column indices from header row 1 ───────────────────────────────
-    header_row = [cell.value for cell in ws[1]]
-    headers = [str(h).strip() if h is not None else "" for h in header_row]
+        # ── Resolve column indices from header row 1 ───────────────────────────────
+        header_row = [cell.value for cell in ws[1]]
+        headers = [str(h).strip() if h is not None else "" for h in header_row]
 
-    def _col_idx(col_name: str, required: bool = True) -> int | None:
-        if not col_name:
+        def _col_idx(col_name: str, required: bool = True) -> int | None:
+            if not col_name:
+                return None
+            col_name = col_name.strip()
+            for i, h in enumerate(headers):
+                if h == col_name or h.lower() == col_name.lower():
+                    return i
+            if required:
+                raise ValueError(
+                    f"Column '{col_name}' not found in ODO file.\n"
+                    f"Available columns: {[h for h in headers if h]}\n"
+                    f"Check config in your .env file."
+                )
+            print(f"  [WARN] ODO: column '{col_name}' not found — skipping")
             return None
-        col_name = col_name.strip()
-        for i, h in enumerate(headers):
-            if h == col_name or h.lower() == col_name.lower():
-                return i
-        if required:
-            raise ValueError(
-                f"Column '{col_name}' not found in ODO file.\n"
-                f"Available columns: {[h for h in headers if h]}\n"
-                f"Check config in your .env file."
-            )
-        print(f"  [WARN] ODO: column '{col_name}' not found — skipping")
-        return None
 
-    amount_idx = _col_idx(amount_col, required=True)
-    number_idx = _col_idx(number_col, required=False)
-    reference_idx = _col_idx(reference_col, required=False)
+        amount_idx = _col_idx(amount_col, required=True)
+        number_idx = _col_idx(number_col, required=False)
+        reference_idx = _col_idx(reference_col, required=False)
 
-    assert amount_idx is not None  # guaranteed by required=True above
+        assert amount_idx is not None  # guaranteed by required=True above
 
-    group_names = list(group_map.keys())
+        group_names = list(group_map.keys())
 
-    # ── Parse rows ────────────────────────────────────────────────────────────
-    bank_txns: dict[str, list[dict]] = {v: [] for v in group_map.values()}
-    if include_others:
-        bank_txns["other"] = []
-    current_bank_key: str | None = None
-    current_group_name: str = ""
-    current_is_reconciled: str | None = None
+        # ── Parse rows ────────────────────────────────────────────────────────────
+        bank_txns: dict[str, list[dict]] = {v: [] for v in group_map.values()}
+        if include_others:
+            bank_txns["other"] = []
+        current_bank_key: str | None = None
+        current_group_name: str = ""
+        current_is_reconciled: str | None = None
 
-    for row in ws.iter_rows(min_row=2, values_only=True):
-        if not any(c is not None for c in row):
-            continue  # fully blank row
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if not any(c is not None for c in row):
+                continue  # fully blank row
 
-        col_a = row[0]
-        raw_amount = row[amount_idx] if amount_idx < len(row) else None
+            col_a = row[0]
+            raw_amount = row[amount_idx] if amount_idx < len(row) else None
 
-        # ── Group header detection ─────────────────────────────────────────────
-        # col A is a datetime for data rows; a string for group headers.
-        if not _is_date_cell(col_a):
-            val = str(col_a).strip() if col_a is not None else ""
-            if not val:
-                continue  # empty col A, blank-ish row
+            # ── Group header detection ─────────────────────────────────────────────
+            # col A is a datetime for data rows; a string for group headers.
+            if not _is_date_cell(col_a):
+                val = str(col_a).strip() if col_a is not None else ""
+                if not val:
+                    continue  # empty col A, blank-ish row
 
-            # Odoo sometimes appends counts like "True (26)"
-            import re
-            clean_val = re.sub(r"\(\d+\)$", "", val).strip()
+                # Odoo sometimes appends counts like "True (26)"
+                import re
+                clean_val = re.sub(r"\(\d+\)$", "", val).strip()
 
-            if clean_val.lower() in ("true", "false"):
-                current_is_reconciled = "Yes" if clean_val.lower() == "true" else "No"
-                print(f"  [ODO] Reconciled status → {current_is_reconciled}")
+                if clean_val.lower() in ("true", "false"):
+                    current_is_reconciled = "Yes" if clean_val.lower() == "true" else "No"
+                    print(f"  [ODO] Reconciled status \u2192 {current_is_reconciled}")
+                    continue
+
+                # Check if it matches a known bank group
+                matched = None
+                for name in group_names:
+                    if name.lower() in val.lower():
+                        matched = name
+                        break
+
+                if matched:
+                    current_bank_key = group_map[matched]
+                    current_group_name = val
+                    print(f"  [ODO] Group \u2192 {current_bank_key}: '{val}'")
+                else:
+                    # Unknown group (PayPal, Petty Cash, etc.)
+                    if include_others:
+                        current_bank_key = "other"
+                        current_group_name = val
+                        print(f"  [ODO] Group \u2192 {current_bank_key}: '{val}'")
+                    else:
+                        if current_bank_key is not None:
+                            print(f"  [ODO] Unknown group '{val}' \u2014 stopping {current_bank_key} collection")
+                        current_bank_key = None
+                continue  # group header row itself is never a data row
+
+            # ── Data row (col A is a date) ─────────────────────────────────────────
+            if current_bank_key is None:
                 continue
 
-            # Check if it matches a known bank group
-            matched = None
-            for name in group_names:
-                if name.lower() in val.lower():
-                    matched = name
-                    break
+            if raw_amount is None or str(raw_amount).strip() in ("", "0", "0.0", "0.00"):
+                continue
 
-            if matched:
-                current_bank_key = group_map[matched]
-                current_group_name = val
-                print(f"  [ODO] Group → {current_bank_key}: '{val}'")
-            else:
-                # Unknown group (PayPal, Petty Cash, etc.)
-                if include_others:
-                    current_bank_key = "other"
-                    current_group_name = val
-                    print(f"  [ODO] Group → {current_bank_key}: '{val}'")
-                else:
-                    if current_bank_key is not None:
-                        print(f"  [ODO] Unknown group '{val}' — stopping {current_bank_key} collection")
-                    current_bank_key = None
-            continue  # group header row itself is never a data row
+            try:
+                amount = normalize_for_compare(parse_amount(raw_amount))
+            except ValueError as e:
+                print(f"  [WARN] ODO row skip: {e}")
+                continue
 
-        # ── Data row (col A is a date) ─────────────────────────────────────────
-        if current_bank_key is None:
-            continue
+            # Actual transaction date from col A (datetime → date string)
+            txn_date = col_a.date() if isinstance(col_a, datetime) else col_a
+            desc = str(txn_date).split()[0] if txn_date else ""   # keep date as desc for compat
+            number = ""
+            if number_idx is not None and number_idx < len(row):
+                number = str(row[number_idx]).strip() if row[number_idx] is not None else ""
 
-        if raw_amount is None or str(raw_amount).strip() in ("", "0", "0.0", "0.00"):
-            continue
+            reference = ""
+            if reference_idx is not None and reference_idx < len(row):
+                reference = str(row[reference_idx]).strip() if row[reference_idx] is not None else ""
 
-        try:
-            amount = normalize_for_compare(parse_amount(raw_amount))
-        except ValueError as e:
-            print(f"  [WARN] ODO row skip: {e}")
-            continue
+            bank_txns[current_bank_key].append({
+                "amount":      amount,
+                "amount_raw":  raw_amount,
+                "description": desc if current_bank_key != "other" else f"{current_group_name}",
+                "number":      number,
+                "reference":   reference,
+                "is_reconciled": current_is_reconciled or "Unknown",
+                "date":        str(txn_date).split()[0],   # "2026-07-20" (drop time part)
+                "source":      "Odoo",
+            })
 
-        # Actual transaction date from col A (datetime → date string)
-        txn_date = col_a.date() if isinstance(col_a, datetime) else col_a
-        desc = str(txn_date).split()[0] if txn_date else ""   # keep date as desc for compat
-        number = ""
-        if number_idx is not None and number_idx < len(row):
-            number = str(row[number_idx]).strip() if row[number_idx] is not None else ""
-            
-        reference = ""
-        if reference_idx is not None and reference_idx < len(row):
-            reference = str(row[reference_idx]).strip() if row[reference_idx] is not None else ""
-
-        bank_txns[current_bank_key].append({
-            "amount":      amount,
-            "amount_raw":  raw_amount,
-            "description": desc if current_bank_key != "other" else f"{current_group_name}",
-            "number":      number,
-            "reference":   reference,
-            "is_reconciled": current_is_reconciled or "Unknown",
-            "date":        str(txn_date).split()[0],   # "2026-07-20" (drop time part)
-            "source":      "Odoo",
-        })
-
-    return odo_date, bank_txns
+        return odo_date, bank_txns
+    finally:
+        wb.close()   # always release handle — prevents _MEI* lock on Windows exit
