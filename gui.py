@@ -504,9 +504,48 @@ class App(ctk.CTk):
             "BRI":     tk.BooleanVar(value=False),
             "All":     tk.BooleanVar(value=True),
         }
-        _brand_bg = {"All": ACCENT, "BCA": "#0066AE", "Mandiri": "#F0A500", "BRI": "#004B87"}
-        _brand_fg = {"All": WHITE, "BCA": WHITE, "Mandiri": "#1A1A2E", "BRI": WHITE}
-        _bank_btns: dict = {}
+
+        # Build dynamic subtitles from BANK_ACCOUNTS config
+        try:
+            from config import BANK_ACCOUNTS as _BA
+
+            def _bank_subtitle(bank_key):
+                accs = _BA.get(bank_key.lower(), {})
+                if not accs:
+                    return "Not configured"
+
+                is_single_main = list(accs.keys()) == ["main"]
+
+                if is_single_main:
+                    # Detect supported payment types from AR keys
+                    info = accs["main"]
+                    types = []
+                    if any("creditcard" in k for k in info):
+                        types.append("Credit")
+                    if any("debitcard" in k for k in info):
+                        types.append("Debit")
+                    if any("_qr" in k for k in info):
+                        types.append("QR")
+                    return "  ·  ".join(types) if types else "EDC"
+                else:
+                    # Multi-account → very short alias (≤3 chars, e.g. 'lbf') → UPPER, longer → Title
+                    parts = [a.upper() if len(a) <= 3 else a.capitalize() for a in accs.keys()]
+                    return "  ·  ".join(parts)
+
+            _bank_sub = {
+                "All":     "All configured banks",
+                "BCA":     _bank_subtitle("BCA"),
+                "Mandiri": _bank_subtitle("Mandiri"),
+                "BRI":     _bank_subtitle("BRI"),
+            }
+        except Exception:
+            _bank_sub = {"All": "All configured banks", "BCA": "Credit Card · Debit · QR",
+                         "Mandiri": "Debit Card · QR", "BRI": "LBF · Frans · Nara"}
+
+
+        # Brand accent strip colors per bank
+        _strip_col  = {"All": ACCENT,      "BCA": "#0066AE", "Mandiri": "#F0A500", "BRI": "#004B87"}
+        _card_refs: dict = {}   # bname → (outer_frame, strip_frame, name_lbl, sub_lbl, check_lbl)
 
         def _on_bank_toggle(name):
             if name == "All" and self._bank_vars["All"].get():
@@ -514,26 +553,32 @@ class App(ctk.CTk):
                     self._bank_vars[b].set(False)
             elif name in ["BCA", "Mandiri", "BRI"] and self._bank_vars[name].get():
                 self._bank_vars["All"].set(False)
-            _refresh_bank_btns()
+            _refresh_bank_cards()
 
-        def _refresh_bank_btns():
-            for bname, btn in _bank_btns.items():
-                sel = self._bank_vars[bname].get()
-                btn.configure(
+        def _refresh_bank_cards():
+            for bname, refs in _card_refs.items():
+                outer, strip, name_lbl, sub_lbl, check_lbl = refs
+                sel     = self._bank_vars[bname].get()
+                strip_c = _strip_col[bname]
+                outer.configure(
                     fg_color=WHITE if sel else PREVIEW_BG,
-                    border_color=_brand_bg[bname] if sel else BORDER_DARK,
+                    border_color=strip_c if sel else BORDER,
                     border_width=2 if sel else 1,
                 )
+                strip.configure(fg_color=strip_c if sel else BORDER_DARK)
+                name_lbl.configure(text_color=strip_c if sel else TEXT)
+                sub_lbl.configure(text_color=MUTED)
+                check_lbl.configure(text="✓" if sel else "", text_color=strip_c)
+
 
         bank_grid = ctk.CTkFrame(sec_bank, fg_color="transparent")
-        bank_grid.pack(fill="x", padx=8, pady=(0, 8))
+        bank_grid.pack(fill="x", padx=8, pady=(0, 10))
         bank_grid.columnconfigure(0, weight=1)
         bank_grid.columnconfigure(1, weight=1)
 
-        for bname, row, col in [("All", 0, 0), ("BCA", 0, 1),
-                                  ("Mandiri", 1, 0), ("BRI", 1, 1)]:
-            sel = self._bank_vars[bname].get()
-            logo_img = self._logos.get(bname) if _has_logos else None
+        for bname, grow, gcol in [("All", 0, 0), ("BCA", 0, 1), ("Mandiri", 1, 0), ("BRI", 1, 1)]:
+            sel     = self._bank_vars[bname].get()
+            strip_c = _strip_col[bname]
 
             def _make_cmd(n=bname):
                 def _cmd():
@@ -541,23 +586,61 @@ class App(ctk.CTk):
                     _on_bank_toggle(n)
                 return _cmd
 
-            btn = ctk.CTkButton(
-                bank_grid,
-                text="" if logo_img else bname,
-                image=logo_img,
-                height=42, corner_radius=6,
+            # Outer card — 2-line with accent strip
+            outer = ctk.CTkFrame(
+                bank_grid, height=50, corner_radius=7,
                 fg_color=WHITE if sel else PREVIEW_BG,
-                hover_color=PREVIEW_BG,
-                border_color=_brand_bg[bname] if sel else BORDER_DARK,
+                border_color=strip_c if sel else BORDER,
                 border_width=2 if sel else 1,
-                font=(FONT_FAMILY, 10, "bold"),
-                command=_make_cmd(),
+                cursor="hand2",
             )
-            btn._logo_ref = logo_img
-            btn.grid(row=row, column=col, padx=3, pady=3, sticky="ew")
-            _bank_btns[bname] = btn
-            
-        _refresh_bank_btns()
+            outer.grid(row=grow, column=gcol, padx=3, pady=3, sticky="ew")
+            outer.pack_propagate(False)
+            outer.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
+
+            # Left accent strip (4 px)
+            strip = ctk.CTkFrame(outer, width=4, corner_radius=0,
+                                 fg_color=strip_c if sel else BORDER_DARK)
+            strip.pack(side="left", fill="y")
+            strip.pack_propagate(False)
+            strip.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
+
+            # Text block
+            txt = ctk.CTkFrame(outer, fg_color="transparent")
+            txt.pack(side="left", fill="both", expand=True, padx=(7, 2), pady=5)
+            txt.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
+
+            name_lbl = ctk.CTkLabel(
+                txt, text=bname if bname != "All" else "All Banks",
+                font=(FONT_FAMILY, 10, "bold"),
+                text_color=strip_c if sel else TEXT,
+                fg_color="transparent", anchor="w",
+            )
+            name_lbl.pack(anchor="w")
+            name_lbl.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
+
+            sub_lbl = ctk.CTkLabel(
+                txt, text=_bank_sub[bname],
+                font=(FONT_FAMILY, 8), text_color=MUTED,
+                fg_color="transparent", anchor="w",
+            )
+            sub_lbl.pack(anchor="w")
+            sub_lbl.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
+
+            # Checkmark badge
+            check_lbl = ctk.CTkLabel(
+                outer, text="✓" if sel else "",
+                font=(FONT_FAMILY, 11, "bold"),
+                text_color=strip_c, fg_color="transparent", width=20,
+            )
+            check_lbl.pack(side="right", padx=(0, 8))
+            check_lbl.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
+
+            _card_refs[bname] = (outer, strip, name_lbl, sub_lbl, check_lbl)
+
+        _refresh_bank_cards()
+
+
 
         # ── Date Range Section ────────────────────────────────────────────────
         sec_date = ctk.CTkFrame(scroll, fg_color=PANEL, corner_radius=8, border_color=BORDER, border_width=1)
@@ -2463,6 +2546,25 @@ class App(ctk.CTk):
                 if saved_ok:
                     self._log_write(f"\n✅ Updated reconciliation report ({os.path.basename(latest_file)}) with {len(active_matched)} matched pairs!\n", "ok")
                     self._set_status(f"Updated recon report with {len(active_matched)} matched pairs", SUCCESS)
+                    # Persist matches to sidecar so next rerun re-applies them
+                    try:
+                        from excel_writer import save_manual_matches
+                        output_dir = Path(latest_file).parent
+                        sidecar_entries = []
+                        for pi, pair in enumerate(active_matched, next_pair_idx):
+                            sidecar_entries.append({
+                                "pair_tag": f"Match (M{pi:02d})",
+                                "bank_date":    pair["bank"]["date"],
+                                "bank_journal": pair["bank"]["journal"],
+                                "bank_amount":  pair["bank"]["amount"],
+                                "odoo_date":    pair["odoo"]["date"],
+                                "odoo_journal": pair["odoo"]["journal"],
+                                "odoo_amount":  pair["odoo"]["amount"],
+                            })
+                        save_manual_matches(output_dir, sidecar_entries)
+                        self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to manual_matches.json\n", "ok")
+                    except Exception as _se:
+                        self._log_write(f"⚠️ Could not save manual_matches.json: {_se}\n", "warn")
                 else:
                     self._log_write(f"\n⚠️ Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel manually.\n", "warn")
                 top.destroy()
@@ -3271,8 +3373,10 @@ class App(ctk.CTk):
                 return
             import json
             from journal_generator import generate_journal_import
-            config_path = BASE_DIR / "journal_config.json"
+            config_path = BASE_DIR / ".journal_config.json"
             config_path.write_text(json.dumps(selected))
+            if sys.platform == "win32":
+                import subprocess; subprocess.run(["attrib", "+H", str(config_path)], check=False, capture_output=True)
             try:
                 out_path = generate_journal_import(latest_file, config_path, mode=mode, is_preview=True)
                 if out_path:
@@ -3289,8 +3393,10 @@ class App(ctk.CTk):
                 messagebox.showwarning("Warning", "Select at least 1 transaction")
                 return
             import json
-            config_path = BASE_DIR / "journal_config.json"
+            config_path = BASE_DIR / ".journal_config.json"
             config_path.write_text(json.dumps(selected))
+            if sys.platform == "win32":
+                import subprocess; subprocess.run(["attrib", "+H", str(config_path)], check=False, capture_output=True)
             
             from journal_generator import generate_journal_import
             recon_file = Path(latest_file)

@@ -10,12 +10,138 @@ Output: output/reconciliation_YYYYMMDD_HHMMSS.xlsx
 from datetime import datetime, date
 from decimal import Decimal
 from pathlib import Path
+import json
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from reconciler import STATUS_DONE, STATUS_BANK_ONLY, STATUS_ODO_ONLY
 from config import BANK_ACCOUNTS, ODOO_COMPANY_NAME
+
+# ── Manual-match sidecar helpers ──────────────────────────────────────────────
+MANUAL_MATCHES_FILE = ".manual_matches.json"  # dot-prefix = hidden on Mac/Linux
+
+
+def _hide_file(path: Path) -> None:
+    """Best-effort: set hidden attribute on Windows (dot-prefix covers Mac/Linux)."""
+    import sys, subprocess
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["attrib", "+H", str(path)], check=False, capture_output=True)
+        except Exception:
+            pass
+
+
+def save_manual_matches(output_dir: Path, matches: list[dict]) -> None:
+    """Persist manual-match pairs to a JSON sidecar in output_dir.
+    Each entry: {pair_tag, bank_date, bank_journal, bank_amount,
+                 odoo_date, odoo_journal, odoo_amount}
+    Merges with any pre-existing entries (deduped by pair_tag).
+    """
+    path = output_dir / MANUAL_MATCHES_FILE
+    existing = load_manual_matches(output_dir)
+    # index by pair_tag so re-saves don't duplicate
+    by_tag: dict[str, dict] = {m["pair_tag"]: m for m in existing}
+    for m in matches:
+        by_tag[m["pair_tag"]] = m
+    path.write_text(json.dumps(list(by_tag.values()), indent=2, ensure_ascii=False), encoding="utf-8")
+    _hide_file(path)
+
+
+def load_manual_matches(output_dir: Path) -> list[dict]:
+    """Load persisted manual-match pairs from the JSON sidecar."""
+    path = output_dir / MANUAL_MATCHES_FILE
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+
+
+def _reapply_manual_matches(wb, output_dir: Path) -> None:
+    """After a fresh write_report, re-stamp Match(Mxx) tags from the sidecar.
+    Matches on (date, journal, amount, source) in Differences + bank sheets.
+    Removes entries from sidecar when the recon engine already matched them
+    (status == Match → row no longer appears in Differences).
+    """
+    matches = load_manual_matches(output_dir)
+    if not matches:
+        return
+
+    GREEN_FILL = PatternFill("solid", fgColor="E2EFDA")
+    AMT_TOL = 0.01  # tolerance for float amount comparison
+
+    still_needed: list[dict] = []
+
+    for m in matches:
+        pair_tag = m["pair_tag"]
+        b_date   = str(m.get("bank_date", "")).strip()
+        b_j      = str(m.get("bank_journal", "")).strip().lower()
+        b_amt    = float(m.get("bank_amount", 0))
+        o_date   = str(m.get("odoo_date", "")).strip()
+        o_j      = str(m.get("odoo_journal", "")).strip().lower()
+        o_amt    = float(m.get("odoo_amount", 0))
+
+        stamped_diff   = False
+        stamped_bank_b = False
+        stamped_bank_o = False
+
+        # 1. Differences sheet (col 12 = Status)
+        if "Differences" in wb.sheetnames:
+            ws_d = wb["Differences"]
+            for rn in range(4, ws_d.max_row + 1):
+                d_v  = str(ws_d.cell(rn, 2).value or "").strip()
+                j_v  = str(ws_d.cell(rn, 4).value or "").strip().lower()
+                a_v  = float(ws_d.cell(rn, 9).value or 0)
+                src  = str(ws_d.cell(rn, 10).value or "").strip()
+                cur  = str(ws_d.cell(rn, 12).value or "").strip()
+                if cur == pair_tag:
+                    stamped_diff = True
+                    continue
+                if src == "Bank" and d_v == b_date and j_v == b_j and abs(a_v - b_amt) < AMT_TOL:
+                    ws_d.cell(rn, 12).value = pair_tag
+                    for c in range(1, 13): ws_d.cell(rn, c).fill = GREEN_FILL
+                    stamped_diff = True
+                elif src == "Odoo" and d_v == o_date and j_v == o_j and abs(a_v - o_amt) < AMT_TOL:
+                    ws_d.cell(rn, 12).value = pair_tag
+                    for c in range(1, 13): ws_d.cell(rn, c).fill = GREEN_FILL
+                    stamped_diff = True
+
+        # 2. Individual bank sheets (col 11 = Status)
+        skip_sheets = {"Daily Summary", "Differences", "Mutation Summary",
+                       "Admin Fee", "Excluded Payment", "Other Payment",
+                       "Other Mutation", "Legend"}
+        for sname in wb.sheetnames:
+            if sname in skip_sheets:
+                continue
+            ws_b = wb[sname]
+            for rn in range(4, ws_b.max_row + 1):
+                d_v = str(ws_b.cell(rn, 2).value or "").strip()
+                a_v = float(ws_b.cell(rn, 8).value or 0)
+                src = str(ws_b.cell(rn, 9).value or "").strip()
+                cur = str(ws_b.cell(rn, 11).value or "").strip()
+                if cur == pair_tag:
+                    if src == "Bank": stamped_bank_b = True
+                    else:             stamped_bank_o = True
+                    continue
+                if src == "Bank" and d_v == b_date and abs(a_v - b_amt) < AMT_TOL:
+                    ws_b.cell(rn, 11).value = pair_tag
+                    for c in range(1, 12): ws_b.cell(rn, c).fill = GREEN_FILL
+                    stamped_bank_b = True
+                elif src == "Odoo" and d_v == o_date and abs(a_v - o_amt) < AMT_TOL:
+                    ws_b.cell(rn, 11).value = pair_tag
+                    for c in range(1, 12): ws_b.cell(rn, c).fill = GREEN_FILL
+                    stamped_bank_o = True
+
+        # Keep in sidecar only if it still needs to be re-applied next time
+        # (i.e. at least one side was found and stamped in the Differences sheet)
+        if stamped_diff:
+            still_needed.append(m)
+
+    # Overwrite sidecar with only the entries still relevant
+    path = output_dir / MANUAL_MATCHES_FILE
+    path.write_text(json.dumps(still_needed, indent=2, ensure_ascii=False), encoding="utf-8")
 
 def _get_account_info(acc_key: str) -> tuple[str, str]:
     if acc_key == "other":
@@ -654,6 +780,8 @@ def write_report(
 
     _auto_adjust_headers(wb)
     _auto_adjust_col_widths(wb)
+    # Re-apply any persisted manual matches before saving
+    _reapply_manual_matches(wb, output_dir)
     wb.save(out_path)
     return out_path
 

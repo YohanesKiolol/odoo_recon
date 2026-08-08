@@ -74,7 +74,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='BankRekonsiliasi',
+    name='Recon',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
