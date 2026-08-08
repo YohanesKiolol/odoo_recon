@@ -118,179 +118,184 @@ def _read_one_bca(
 
     decrypted.seek(0)
     wb = openpyxl.load_workbook(decrypted, data_only=True)
-    ws = wb.active
-    assert ws is not None
-
-    header_row = [cell.value for cell in ws[5]]
-    headers = [str(h).strip() if h is not None else "" for h in header_row]
-
-    def _find_col(col_name: str) -> int:
-        col_name = col_name.strip()
-        if col_name in headers:
-            return headers.index(col_name)
-        for i, h in enumerate(headers):
-            if h.lower() == col_name.lower():
-                return i
-        raise ValueError(
-            f"Column '{col_name}' not found in BCA Excel '{excel_path.name}'.\n"
-            f"Available columns: {[h for h in headers if h]}"
-        )
-
-    amount_idx = _find_col(amount_col)
-    date_idx   = _find_col(date_col)
-
-    number_idx: int | None = None
-    if number_col:
-        try:
-            number_idx = _find_col(number_col.strip())
-        except ValueError:
-            print(f"  [WARN] BCA: number column '{number_col}' not found — skipping")
-
-    ref_idx: int | None = None
     try:
-        ref_idx = _find_col("Reference Number")
-    except ValueError:
-        pass
+        ws = wb.active
+        assert ws is not None
 
-    void_idx: int | None = None
-    try:
-        void_idx = _find_col("Void")
-    except ValueError:
-        pass
+        header_row = [cell.value for cell in ws[5]]
+        headers = [str(h).strip() if h is not None else "" for h in header_row]
 
-    reversal_idx: int | None = None
-    try:
-        reversal_idx = _find_col("Reversal")
-    except ValueError:
-        pass
+        def _find_col(col_name: str) -> int:
+            col_name = col_name.strip()
+            if col_name in headers:
+                return headers.index(col_name)
+            for i, h in enumerate(headers):
+                if h.lower() == col_name.lower():
+                    return i
+            raise ValueError(
+                f"Column '{col_name}' not found in BCA Excel '{excel_path.name}'.\n"
+                f"Available columns: {[h for h in headers if h]}"
+            )
 
-    refund_idx: int | None = None
-    try:
-        refund_idx = _find_col("Refund")
-    except ValueError:
-        pass
+        amount_idx = _find_col(amount_col)
+        date_idx   = _find_col(date_col)
 
-    txns = []
-    skipped_empty = 0
-
-    for row_num, row in enumerate(ws.iter_rows(min_row=6, values_only=True), start=6):
-        if not any(c is not None for c in row):
-            continue
-
-        raw_amount = row[amount_idx] if amount_idx < len(row) else None
-        if raw_amount is None or str(raw_amount).strip() in ("", "0", "0.00"):
-            skipped_empty += 1
-            continue
-
-        raw_date = row[date_idx] if date_idx < len(row) else None
-        txn_date = _parse_bca_date(raw_date)
-
-        if txn_date is None:
-            skipped_empty += 1
-            continue
-
-        # Date filter: skip rows whose date is not in the allowed set
-        if filter_dates is not None and txn_date not in filter_dates:
-            continue
-
-        try:
-            amount = normalize_for_compare(parse_amount(raw_amount))
-        except ValueError as e:
-            print(f"  [WARN] BCA row {row_num}: {e} — skipped")
-            skipped_empty += 1
-            continue
-
-        from datetime import date as dt_date, timedelta
-        if isinstance(txn_date, dt_date):
-            payment_date = txn_date + timedelta(days=1)
-        else:
-            payment_date = ""
-
-        desc = ""
-        for desc_col_name in ("Transaction Remark", "Keterangan", "Description", "Remark"):
+        number_idx: int | None = None
+        if number_col:
             try:
-                di = _find_col(desc_col_name)
-                val = str(row[di]).strip() if row[di] is not None else ""
-                if val:
-                    desc = val
-                    break
-            except (ValueError, IndexError):
+                number_idx = _find_col(number_col.strip())
+            except ValueError:
+                print(f"  [WARN] BCA: number column '{number_col}' not found — skipping")
+
+        ref_idx: int | None = None
+        try:
+            ref_idx = _find_col("Reference Number")
+        except ValueError:
+            pass
+
+        void_idx: int | None = None
+        try:
+            void_idx = _find_col("Void")
+        except ValueError:
+            pass
+
+        reversal_idx: int | None = None
+        try:
+            reversal_idx = _find_col("Reversal")
+        except ValueError:
+            pass
+
+        refund_idx: int | None = None
+        try:
+            refund_idx = _find_col("Refund")
+        except ValueError:
+            pass
+
+        txns = []
+        skipped_empty = 0
+
+        for row_num, row in enumerate(ws.iter_rows(min_row=6, values_only=True), start=6):
+            if not any(c is not None for c in row):
                 continue
 
-        if not desc:
-            parts = []
-            # 1. Card Number or Phone Number
-            ident = ""
-            for col in ("Card Number", "Phone Number"):
+            raw_amount = row[amount_idx] if amount_idx < len(row) else None
+            if raw_amount is None or str(raw_amount).strip() in ("", "0", "0.00"):
+                skipped_empty += 1
+                continue
+
+            raw_date = row[date_idx] if date_idx < len(row) else None
+            txn_date = _parse_bca_date(raw_date)
+
+            if txn_date is None:
+                skipped_empty += 1
+                continue
+
+            # Date filter: skip rows whose date is not in the allowed set
+            if filter_dates is not None and txn_date not in filter_dates:
+                continue
+
+            try:
+                amount = normalize_for_compare(parse_amount(raw_amount))
+            except ValueError as e:
+                print(f"  [WARN] BCA row {row_num}: {e} — skipped")
+                skipped_empty += 1
+                continue
+
+            from datetime import date as dt_date, timedelta
+            if isinstance(txn_date, dt_date):
+                payment_date = txn_date + timedelta(days=1)
+            else:
+                payment_date = ""
+
+            desc = ""
+            for desc_col_name in ("Transaction Remark", "Keterangan", "Description", "Remark"):
                 try:
-                    idx = _find_col(col)
-                    val = str(row[idx]).strip() if row[idx] is not None else ""
-                    if val and val.lower() != "none":
-                        ident = val
+                    di = _find_col(desc_col_name)
+                    val = str(row[di]).strip() if row[di] is not None else ""
+                    if val:
+                        desc = val
                         break
                 except (ValueError, IndexError):
-                    pass
-            if ident:
-                parts.append(ident)
-            
-            # 2. Date, Time, Method, Type
-            for col_name in ("Transaction Date", "Transaction Time", "Payment Method", "Payment Type"):
-                try:
-                    idx = _find_col(col_name)
-                    raw_val = row[idx]
-                    if raw_val is not None:
-                        if col_name == "Transaction Date" and hasattr(raw_val, "strftime"):
-                            val = raw_val.strftime("%Y-%m-%d")
-                        elif col_name == "Transaction Time" and hasattr(raw_val, "strftime"):
-                            val = raw_val.strftime("%H:%M:%S")
-                        else:
-                            val = str(raw_val).strip()
-                        
+                    continue
+
+            if not desc:
+                parts = []
+                # 1. Card Number or Phone Number
+                ident = ""
+                for col in ("Card Number", "Phone Number"):
+                    try:
+                        idx = _find_col(col)
+                        val = str(row[idx]).strip() if row[idx] is not None else ""
                         if val and val.lower() != "none":
-                            parts.append(val)
-                except (ValueError, IndexError):
-                    pass
-            desc = ", ".join(parts)
+                            ident = val
+                            break
+                    except (ValueError, IndexError):
+                        pass
+                if ident:
+                    parts.append(ident)
 
-        number = ""
-        if number_idx is not None and number_idx < len(row):
-            number = str(row[number_idx]).strip() if row[number_idx] is not None else ""
-            
-        ref_num = ""
-        if ref_idx is not None and ref_idx < len(row):
-            ref_num = str(row[ref_idx]).strip() if row[ref_idx] is not None else ""
-            
-        is_void = False
-        if void_idx is not None and void_idx < len(row):
-            is_void = (str(row[void_idx]).strip().upper() == "Y")
-            
-        is_reversal = False
-        if reversal_idx is not None and reversal_idx < len(row):
-            is_reversal = (str(row[reversal_idx]).strip().upper() == "Y")
-            
-        is_refund = False
-        if refund_idx is not None and refund_idx < len(row):
-            is_refund = (str(row[refund_idx]).strip().upper() == "Y")
-            if is_refund:
-                print(f"  [WARN] BCA row {row_num}: Refund detected! Manual check required to ensure correct netting.")
+                # 2. Date, Time, Method, Type
+                for col_name in ("Transaction Date", "Transaction Time", "Payment Method", "Payment Type"):
+                    try:
+                        idx = _find_col(col_name)
+                        raw_val = row[idx]
+                        if raw_val is not None:
+                            if col_name == "Transaction Date" and hasattr(raw_val, "strftime"):
+                                val = raw_val.strftime("%Y-%m-%d")
+                            elif col_name == "Transaction Time" and hasattr(raw_val, "strftime"):
+                                val = raw_val.strftime("%H:%M:%S")
+                            else:
+                                val = str(raw_val).strip()
 
-        txns.append({
-            "amount":      amount,
-            "amount_raw":  raw_amount,
-            "date":        str(txn_date) if txn_date else str(raw_date or ""),
-            "payment_date": str(payment_date) if payment_date else "",
-            "description": desc,
-            "number":      number,
-            "ref_num":     ref_num,
-            "is_void":     is_void,
-            "is_reversal": is_reversal,
-            "is_refund":   is_refund,
-            "filename":    excel_path.name,
-            "source":      "Bank (BCA)",
-        })
+                            if val and val.lower() != "none":
+                                parts.append(val)
+                    except (ValueError, IndexError):
+                        pass
+                desc = ", ".join(parts)
 
-    print(f"    → {len(txns)} transactions ({skipped_empty} empty skipped)")
-    return txns
+            number = ""
+            if number_idx is not None and number_idx < len(row):
+                number = str(row[number_idx]).strip() if row[number_idx] is not None else ""
+
+            ref_num = ""
+            if ref_idx is not None and ref_idx < len(row):
+                ref_num = str(row[ref_idx]).strip() if row[ref_idx] is not None else ""
+
+            is_void = False
+            if void_idx is not None and void_idx < len(row):
+                is_void = (str(row[void_idx]).strip().upper() == "Y")
+
+            is_reversal = False
+            if reversal_idx is not None and reversal_idx < len(row):
+                is_reversal = (str(row[reversal_idx]).strip().upper() == "Y")
+
+            is_refund = False
+            if refund_idx is not None and refund_idx < len(row):
+                is_refund = (str(row[refund_idx]).strip().upper() == "Y")
+                if is_refund:
+                    print(f"  [WARN] BCA row {row_num}: Refund detected! Manual check required to ensure correct netting.")
+
+            txns.append({
+                "amount":      amount,
+                "amount_raw":  raw_amount,
+                "date":        str(txn_date) if txn_date else str(raw_date or ""),
+                "payment_date": str(payment_date) if payment_date else "",
+                "description": desc,
+                "number":      number,
+                "ref_num":     ref_num,
+                "is_void":     is_void,
+                "is_reversal": is_reversal,
+                "is_refund":   is_refund,
+                "filename":    excel_path.name,
+                "source":      "Bank (BCA)",
+            })
+
+        print(f"    → {len(txns)} transactions ({skipped_empty} empty skipped)")
+        return txns
+    finally:
+        wb.close()
+        decrypted.close()   # release in-memory BytesIO — Windows holds handles until explicit close
+
 
 
 def read_bca(
