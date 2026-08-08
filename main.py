@@ -139,11 +139,16 @@ def main():
     for bank_key, txns in odo_bank_txns.items():
         print(f"     {bank_key:10} → {len(txns)} transactions")
 
-    # ── Step 2: Read each bank ─────────────────────────────────────────────────
+    # ── Step 2: Read each bank (parallel) ─────────────────────────────────────
+    # BCA / Mandiri / BRI are fully independent — run them concurrently.
+    # Mutations (Step 4) are also independent — overlap with bank reads.
+    from concurrent.futures import ThreadPoolExecutor
+
     bank_txns: dict[str, list[dict]] = {}
     all_excluded_txns: list[dict] = []
 
-    if "bca" in banks:
+    def _do_bca():
+        frag, exc = {}, []
         _banner("Reading BCA transactions...")
         for alias, acc_info in BANK_ACCOUNTS.get("bca", {}).items():
             acc_key = f"bca_{alias}"
@@ -151,26 +156,23 @@ def main():
             if alias == "main" and not target_dir.exists():
                 target_dir = BCA_EXCEL_DIR
             try:
-                from datetime import datetime as _dt
-                filter_dates = None
                 b_txns, exc_txns = read_bca(
-                    excel_dir     = target_dir,
-                    excel_pattern = BCA_EXCEL_PATTERN,
-                    password      = BCA_EXCEL_PASSWORD,
-                    amount_col    = BCA_AMOUNT_COLUMN,
-                    date_col      = BCA_DATE_COLUMN,
-                    number_col    = BCA_NUMBER_COLUMN,
-                    filter_dates  = filter_dates,
+                    excel_dir=target_dir, excel_pattern=BCA_EXCEL_PATTERN,
+                    password=BCA_EXCEL_PASSWORD, amount_col=BCA_AMOUNT_COLUMN,
+                    date_col=BCA_DATE_COLUMN, number_col=BCA_NUMBER_COLUMN,
+                    filter_dates=None,
                 )
-                bank_txns[acc_key] = b_txns
-                all_excluded_txns.extend(exc_txns)
-            except FileNotFoundError as e:
-                print(f"  [!] No BCA files found for {alias}, skipping.")
+                frag[acc_key] = b_txns
+                exc.extend(exc_txns)
+            except FileNotFoundError:
+                print(f"  [!] No BCA files for {alias}, skipping.")
             except Exception as e:
                 print(f"\n[!] ERROR (BCA {alias}): {e}\n")
-                sys.exit(1)
+                raise
+        return frag, exc
 
-    if "mandiri" in banks:
+    def _do_mandiri():
+        frag, exc = {}, []
         _banner("Reading Mandiri transactions...")
         for alias, acc_info in BANK_ACCOUNTS.get("mandiri", {}).items():
             acc_key = f"mandiri_{alias}"
@@ -178,26 +180,23 @@ def main():
             if alias == "main" and not target_dir.exists():
                 target_dir = MANDIRI_ZIP_DIR
             try:
-                from datetime import datetime as _dt
-                filter_dates = None
                 b_txns, exc_txns = read_mandiri(
-                    zip_dir     = target_dir,
-                    password    = MANDIRI_ZIP_PASSWORD,
-                    amount_col  = MANDIRI_AMOUNT_COLUMN,
-                    number_col  = MANDIRI_NUMBER_COLUMN,
-                    zip_pattern = MANDIRI_ZIP_PATTERN,
-                    filter_dates = filter_dates,
+                    zip_dir=target_dir, password=MANDIRI_ZIP_PASSWORD,
+                    amount_col=MANDIRI_AMOUNT_COLUMN, number_col=MANDIRI_NUMBER_COLUMN,
+                    zip_pattern=MANDIRI_ZIP_PATTERN, filter_dates=None,
                 )
-                bank_txns[acc_key] = b_txns
-                all_excluded_txns.extend(exc_txns)
-                print(f"  [+] Mandiri ({alias}): {len(bank_txns.get(acc_key, []))} transactions loaded")
-            except FileNotFoundError as e:
-                print(f"  [-] No Mandiri files found for {alias}, skipping.")
+                frag[acc_key] = b_txns
+                exc.extend(exc_txns)
+                print(f"  [+] Mandiri ({alias}): {len(b_txns)} transactions loaded")
+            except FileNotFoundError:
+                print(f"  [-] No Mandiri files for {alias}, skipping.")
             except Exception as e:
                 print(f"\n[!] ERROR (Mandiri {alias}): {e}\n")
-                sys.exit(1)
+                raise
+        return frag, exc
 
-    if "bri" in banks:
+    def _do_bri():
+        frag, exc = {}, []
         _banner("Reading BRI transactions...")
         for alias, acc_info in BANK_ACCOUNTS.get("bri", {}).items():
             acc_key = f"bri_{alias}"
@@ -205,24 +204,46 @@ def main():
             if alias == "main" and not target_dir.exists():
                 target_dir = BRI_ZIP_DIR
             try:
-                from datetime import datetime as _dt
-                filter_dates = None
                 b_txns, exc_txns = read_bri(
-                    zip_dir      = target_dir,
-                    zip_pattern  = acc_info.get("mid", "") or BRI_ZIP_PATTERN,
-                    pdf_pattern  = BRI_PDF_PATTERN,
-                    amount_col   = BRI_AMOUNT_COLUMN,
-                    number_col   = BRI_NUMBER_COLUMN,
-                    filter_dates = filter_dates,
+                    zip_dir=target_dir,
+                    zip_pattern=acc_info.get("mid", "") or BRI_ZIP_PATTERN,
+                    pdf_pattern=BRI_PDF_PATTERN,
+                    amount_col=BRI_AMOUNT_COLUMN, number_col=BRI_NUMBER_COLUMN,
+                    filter_dates=None,
                 )
-                bank_txns[acc_key] = b_txns
-                all_excluded_txns.extend(exc_txns)
-                print(f"  [+] BRI ({alias}): {len(bank_txns.get(acc_key, []))} transactions loaded")
-            except FileNotFoundError as e:
-                print(f"  [-] No BRI files found for {alias}, skipping.")
+                frag[acc_key] = b_txns
+                exc.extend(exc_txns)
+                print(f"  [+] BRI ({alias}): {len(b_txns)} transactions loaded")
+            except FileNotFoundError:
+                print(f"  [-] No BRI files for {alias}, skipping.")
             except Exception as e:
                 print(f"\n[!] ERROR (BRI {alias}): {e}\n")
+                raise
+        return frag, exc
+
+    # Submit only the banks the user asked for, plus always read mutations
+    workers = {}
+    with ThreadPoolExecutor(max_workers=4, thread_name_prefix="recon") as pool:
+        if "bca" in banks:     workers["bca"]       = pool.submit(_do_bca)
+        if "mandiri" in banks: workers["mandiri"]   = pool.submit(_do_mandiri)
+        if "bri" in banks:     workers["bri"]       = pool.submit(_do_bri)
+        # Mutations are independent — overlap with bank reads
+        workers["mutations"] = pool.submit(read_all_mutations)
+
+        for key, fut in workers.items():
+            if key == "mutations":
+                continue
+            try:
+                frag, exc = fut.result()
+                bank_txns.update(frag)
+                all_excluded_txns.extend(exc)
+            except SystemExit:
+                raise
+            except Exception as e:
+                print(f"\n[!] ERROR ({key}): {e}\n")
                 sys.exit(1)
+
+
 
     # ── Handle Scan Mode ───────────────────────────────────────────────────────
     if args.scan:
@@ -298,9 +319,14 @@ def main():
 
         print(f"  {acc_key:<10} {stats['done']:>6} {stats['bank_only']:>10} {stats['odo_only']:>9} {stats['total']:>7}")
 
-    # ── Step 4: Parse Mutations ───────────────────────────────────────────────
+    # ── Step 4: Parse Mutations (result from background future) ───────────────
     _banner("Reading Mutations...")
-    mutations, unknown_mutations = read_all_mutations()
+    try:
+        mutations, unknown_mutations = workers["mutations"].result()
+    except Exception as e:
+        print(f"  [!] Mutations read failed ({e}), falling back to empty.")
+        mutations, unknown_mutations = [], []
+
     print(f"  [+] Loaded {len(mutations)} recognized mutations")
     if unknown_mutations:
         print(f"  [!] Found {len(unknown_mutations)} unknown mutation patterns")

@@ -777,7 +777,7 @@ class App(ctk.CTk):
             fg_color="transparent", anchor="w"
         )
         self._folder_label.pack(side="left", anchor="w")
-        self._refresh_folder_status()
+        self._update_dashboard_summary(skip_drill=True)  # fast init; drill fires after startup
 
         # ── Action Buttons & Console Log Area ─────────────────────────────────
         card_wrap = ctk.CTkFrame(main_area, fg_color="transparent")
@@ -1092,9 +1092,22 @@ class App(ctk.CTk):
                         wb.close()
                         
                         b_str = ", ".join(sorted(list(b_set))) if b_set else "Summary"
-                        min_d = min(d_list) if d_list else ""
-                        max_d = max(d_list) if d_list else ""
-                        d_str = f" ({min_d[:5]}–{max_d[:5]})" if min_d and max_d else ""
+                        # Parse to real dates first — string min/max on dd/mm/yyyy is lexicographic
+                        # which reverses the order: "01/08" < "29/07" alphabetically → wrong range
+                        from datetime import datetime as _dt
+                        parsed_dates = []
+                        for ds in d_list:
+                            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d/%m/%y", "%m/%d/%Y"):
+                                try:
+                                    parsed_dates.append(_dt.strptime(str(ds).strip()[:10], fmt).date())
+                                    break
+                                except Exception:
+                                    continue
+                        if parsed_dates:
+                            mn_d, mx_d = min(parsed_dates), max(parsed_dates)
+                            d_str = f" ({mn_d.strftime('%d/%m')}–{mx_d.strftime('%d/%m')})" if mn_d != mx_d else f" ({mn_d.strftime('%d/%m')})"
+                        else:
+                            d_str = ""
                         
                         _set_lbl(self._kpi_rep_val, "Report Ready", SUCCESS)
                         _set_lbl(self._kpi_rep_sub, f"{b_str}{d_str}", MUTED)
@@ -1127,29 +1140,40 @@ class App(ctk.CTk):
 
     # ── Drill-down threading helpers ─────────────────────────────────────────
     def _start_drill_update(self, mutation_dir):
-        """Show loader, cancel any in-flight scan, run compute in background thread.
-        All Tkinter widget calls happen only on the main thread."""
-        import threading
-        # Generation counter: if a new scan starts before old one finishes,
-        # the old thread sees its gen is stale and skips the render step.
+        """Debounced drill scan: coalesces rapid successive calls into one.
+        Actual I/O starts after a 400 ms idle window — if another call arrives
+        before the timer fires, the timer resets and only ONE thread ever runs."""
+        # Cancel any pending debounce timer
+        pending = getattr(self, "_drill_pending_id", None)
+        if pending:
+            try:
+                self.after_cancel(pending)
+            except Exception:
+                pass
+        # Bump gen immediately so any already-running thread sees itself as stale
         self._drill_gen = getattr(self, "_drill_gen", 0) + 1
-        my_gen = self._drill_gen
-
-        # ── Main-thread: show loading state immediately ──────────────────────
+        # Show "Scanning" hint right away (cheap, main-thread)
         if hasattr(self, "_drill_status_lbl"):
             self._drill_status_lbl.configure(text="⏳ Scanning...", text_color=WARN)
-        # Destroy previous rows
+        # Debounce: launch the real work after 600 ms of silence
+        self._drill_pending_id = self.after(600, lambda: self._do_start_drill(mutation_dir))
+
+    def _do_start_drill(self, mutation_dir):
+        """Actually launches the background I/O thread after the debounce settles."""
+        import threading
+        self._drill_pending_id = None
+        my_gen = self._drill_gen  # snapshot: thread uses this to detect stale runs
+
+        # ── Main-thread: rebuild loading state ──────────────────────────────
         for trio in getattr(self, "_drill_rows", []):
             for w in trio:
                 try: w.destroy()
                 except Exception: pass
         self._drill_rows = []
-        # Destroy any leftover loading label
         try:
             self._drill_loading_lbl.destroy()
         except Exception:
             pass
-        # Create fresh loading placeholder
         loading_lbl = ctk.CTkLabel(
             self._drill_grid, text="Reading files, please wait...",
             font=(FONT_FAMILY, 11, "bold"), text_color=MUTED,
@@ -1157,15 +1181,11 @@ class App(ctk.CTk):
         )
         loading_lbl.grid(row=2, column=0, columnspan=3, padx=8, pady=4, sticky="w")
         self._drill_loading_lbl = loading_lbl
-        # Force a repaint NOW so the loading label is visible before the
-        # compute thread starts (without this, the event loop never gets a cycle
-        # to paint and the label is instantly replaced by the result).
         self.update_idletasks()
 
         def _compute():
-            """Pure data computation — no Tkinter calls allowed here."""
-            rows_data = self._compute_drill_rows(mutation_dir)
-            # Schedule render on main thread, but only if our gen is still current
+            """Background: abort early if our gen is no longer current."""
+            rows_data = self._compute_drill_rows(mutation_dir, my_gen)
             self.after(0, lambda: self._render_drill_rows(rows_data, my_gen))
 
         threading.Thread(target=_compute, daemon=True).start()
@@ -1226,18 +1246,45 @@ class App(ctk.CTk):
             self._drill_status_lbl.configure(text="✓ Up to date", text_color=SUCCESS)
             self.after(3000, lambda: self._drill_status_lbl.configure(text="", text_color=MUTED) if hasattr(self, "_drill_status_lbl") else None)
 
-    def _compute_drill_rows(self, mutation_dir):
-        """Pure data computation — no Tkinter calls, safe for background threads.
-        All reader print output is suppressed to avoid racing with the GUI log widget."""
+    # ── Dashboard drill cache ─────────────────────────────────────────────────
+    def _drill_cache_key(self):
+        """Fast fingerprint of all input/mutation dirs via mtime.
+        If nothing on disk changed, the key is identical → cache hit."""
+        try:
+            from config import BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, MUTATION_DIR
+            parts = []
+            for d in (BCA_EXCEL_DIR, MANDIRI_ZIP_DIR, BRI_ZIP_DIR, MUTATION_DIR):
+                if d.exists():
+                    for f in sorted(d.rglob("*")):
+                        if f.is_file() and not f.name.startswith("."):
+                            parts.append(f"{f.stat().st_mtime:.2f}")
+            return "|".join(parts)
+        except Exception:
+            return None
+
+
+    def _compute_drill_rows(self, mutation_dir, my_gen: int = 0):
+        """Pure data computation - no Tkinter calls, safe for background threads.
+        mtime cache: if files unchanged, returns previous result instantly.
+        parallel reads: BCA/Mandiri/BRI run concurrently - wall-clock = max not sum.
+        stale checks: each parallel worker returns early if superseded.
+        """
+        def _stale():
+            return my_gen != getattr(self, "_drill_gen", my_gen)
+
         import io as _io, contextlib
-        rows_data = []
+        from concurrent.futures import ThreadPoolExecutor
+        rows_data = []                       # always defined — safe fallback if exception
         _sink = _io.StringIO()
-        # Guard: frozen Windows GUI apps (--windowed) set sys.stdout/stderr = None.
-        # redirect_* needs a real stream to swap in/out, so fall back to _sink.
-        _real_stdout = sys.stdout if sys.stdout is not None else _sink
-        _real_stderr = sys.stderr if sys.stderr is not None else _sink
-        with contextlib.redirect_stdout(_real_stdout), contextlib.redirect_stderr(_real_stderr):
+
+        with contextlib.redirect_stdout(_sink), contextlib.redirect_stderr(_sink):
             try:
+                # ── Cache check ───────────────────────────────────────────────
+                cache_key = self._drill_cache_key()
+                cached = getattr(self, "_drill_cache", None)
+                if cache_key and cached and cached.get("key") == cache_key:
+                    return cached["data"]   # instant, zero I/O
+
                 from config import (
                     BCA_EXCEL_DIR, BCA_EXCEL_PATTERN, BCA_EXCEL_PASSWORD,
                     BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN,
@@ -1248,6 +1295,7 @@ class App(ctk.CTk):
                     BANK_ACCOUNTS,
                 )
 
+                # ── Date helpers (shared across all workers) ──────────────────
                 def _parse_dates(dates):
                     from datetime import date as _d, datetime as _dt
                     clean = set()
@@ -1302,90 +1350,117 @@ class App(ctk.CTk):
                     except Exception:
                         return None
 
-
-                # ── BCA ──────────────────────────────────────────────────────
-                bca_stmt_dates = []
-                try:
-                    from readers.bca_reader import _find_bca_excels, _read_one_bca
-                    search_dirs = []
-                    if BCA_EXCEL_DIR.exists():
-                        for item in BCA_EXCEL_DIR.iterdir():
-                            if item.is_dir(): search_dirs.append(item)
-                        if not search_dirs: search_dirs = [BCA_EXCEL_DIR]
-                    for sdir in search_dirs:
-                        try:
-                            for f in _find_bca_excels(sdir, BCA_EXCEL_PATTERN):
-                                for r in _read_one_bca(f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN):
-                                    d = r.get("date") or r.get("txn_date")
-                                    if d: bca_stmt_dates.append(d)
-                        except Exception: pass
-                except Exception: pass
-
-                bca_mut_dir = mutation_dir / "bca"
-                bca_mut_r = _mut_range_alias(bca_mut_dir / "main") if (bca_mut_dir / "main").exists() else None
-                if not bca_mut_r and bca_mut_dir.exists():
-                    for a in bca_mut_dir.iterdir():
-                        if a.is_dir():
-                            bca_mut_r = _mut_range_alias(a)
-                            break
-                rows_data.append(("BCA", _stmt_dates(bca_stmt_dates), bca_mut_r))
-
-                # ── Mandiri ───────────────────────────────────────────────────
-                mandiri_stmt_by_alias = {}
-                try:
-                    import readers.mandiri_reader as mr
-                    for alias_d in sorted(MANDIRI_ZIP_DIR.iterdir()):
-                        if alias_d.is_dir():
+                # ── Per-bank workers (run in parallel) ───────────────────────
+                def _work_bca():
+                    if _stale(): return []
+                    bca_stmt_dates = []
+                    try:
+                        from readers.bca_reader import _find_bca_excels, _read_one_bca
+                        search_dirs = []
+                        if BCA_EXCEL_DIR.exists():
+                            for item in BCA_EXCEL_DIR.iterdir():
+                                if item.is_dir(): search_dirs.append(item)
+                            if not search_dirs: search_dirs = [BCA_EXCEL_DIR]
+                        for sdir in search_dirs:
+                            if _stale(): break
                             try:
-                                rows2, _ = mr.read_mandiri(alias_d, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
-                                dates = [r.get("txn_date") or r.get("date") for r in rows2]
-                                mandiri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
+                                for f in _find_bca_excels(sdir, BCA_EXCEL_PATTERN):
+                                    if _stale(): break
+                                    for r in _read_one_bca(f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN):
+                                        d = r.get("date") or r.get("txn_date")
+                                        if d: bca_stmt_dates.append(d)
                             except Exception: pass
-                    if not mandiri_stmt_by_alias:
-                        rows2, _ = mr.read_mandiri(MANDIRI_ZIP_DIR, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
-                        dates = [r.get("txn_date") or r.get("date") for r in rows2]
-                        mandiri_stmt_by_alias["main"] = [d for d in dates if d]
-                except Exception: pass
+                    except Exception: pass
+                    if _stale(): return []
+                    bca_mut_dir = mutation_dir / "bca"
+                    bca_mut_r = _mut_range_alias(bca_mut_dir / "main") if (bca_mut_dir / "main").exists() else None
+                    if not bca_mut_r and bca_mut_dir.exists():
+                        for a in bca_mut_dir.iterdir():
+                            if a.is_dir():
+                                bca_mut_r = _mut_range_alias(a)
+                                break
+                    return [("BCA", _stmt_dates(bca_stmt_dates), bca_mut_r)]
 
-                mandiri_mut_dir = mutation_dir / "mandiri"
-                seen_man = set()
-                for alias, dates in sorted(mandiri_stmt_by_alias.items()):
-                    seen_man.add(alias)
-                    label = "MANDIRI" if alias == "main" else f"MANDIRI / {alias}"
-                    rows_data.append((label, _stmt_dates(dates), _mut_range_alias(mandiri_mut_dir / alias)))
-                if mandiri_mut_dir.exists():
-                    for a in sorted(mandiri_mut_dir.iterdir()):
-                        if a.is_dir() and a.name not in seen_man:
-                            label = "MANDIRI" if a.name == "main" else f"MANDIRI / {a.name}"
-                            rows_data.append((label, None, _mut_range_alias(a)))
+                def _work_mandiri():
+                    if _stale(): return []
+                    mandiri_stmt_by_alias = {}
+                    try:
+                        import readers.mandiri_reader as mr
+                        for alias_d in sorted(MANDIRI_ZIP_DIR.iterdir()):
+                            if _stale(): break
+                            if alias_d.is_dir():
+                                try:
+                                    rows2, _ = mr.read_mandiri(alias_d, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
+                                    dates = [r.get("txn_date") or r.get("date") for r in rows2]
+                                    mandiri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
+                                except Exception: pass
+                        if not mandiri_stmt_by_alias:
+                            rows2, _ = mr.read_mandiri(MANDIRI_ZIP_DIR, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
+                            dates = [r.get("txn_date") or r.get("date") for r in rows2]
+                            mandiri_stmt_by_alias["main"] = [d for d in dates if d]
+                    except Exception: pass
+                    if _stale(): return []
+                    result = []
+                    mandiri_mut_dir = mutation_dir / "mandiri"
+                    seen_man = set()
+                    for alias, dates in sorted(mandiri_stmt_by_alias.items()):
+                        seen_man.add(alias)
+                        label = "MANDIRI" if alias == "main" else f"MANDIRI / {alias}"
+                        result.append((label, _stmt_dates(dates), _mut_range_alias(mandiri_mut_dir / alias)))
+                    if mandiri_mut_dir.exists():
+                        for a in sorted(mandiri_mut_dir.iterdir()):
+                            if a.is_dir() and a.name not in seen_man:
+                                label = "MANDIRI" if a.name == "main" else f"MANDIRI / {a.name}"
+                                result.append((label, None, _mut_range_alias(a)))
+                    return result
 
-                # ── BRI ───────────────────────────────────────────────────────
-                bri_stmt_by_alias = {}
-                try:
-                    import readers.bri_reader as br
-                    for alias_d in sorted(BRI_ZIP_DIR.iterdir()):
-                        if alias_d.is_dir():
-                            try:
-                                rows2, _ = br.read_bri(alias_d, "", BRI_PDF_PATTERN, BRI_AMOUNT_COLUMN, BRI_NUMBER_COLUMN)
-                                dates = [r.get("txn_date") or r.get("date") for r in rows2]
-                                bri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
-                            except Exception: pass
-                except Exception: pass
+                def _work_bri():
+                    if _stale(): return []
+                    bri_stmt_by_alias = {}
+                    try:
+                        import readers.bri_reader as br
+                        for alias_d in sorted(BRI_ZIP_DIR.iterdir()):
+                            if _stale(): break
+                            if alias_d.is_dir():
+                                try:
+                                    rows2, _ = br.read_bri(alias_d, "", BRI_PDF_PATTERN, BRI_AMOUNT_COLUMN, BRI_NUMBER_COLUMN)
+                                    dates = [r.get("txn_date") or r.get("date") for r in rows2]
+                                    bri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
+                                except Exception: pass
+                    except Exception: pass
+                    if _stale(): return []
+                    result = []
+                    bri_mut_dir = mutation_dir / "bri"
+                    seen_bri = set()
+                    for alias, dates in sorted(bri_stmt_by_alias.items()):
+                        seen_bri.add(alias)
+                        label = "BRI" if alias == "main" else f"BRI / {alias}"
+                        result.append((label, _stmt_dates(dates), _mut_range_alias(bri_mut_dir / alias)))
+                    if bri_mut_dir.exists():
+                        for a in sorted(bri_mut_dir.iterdir()):
+                            if a.is_dir() and a.name not in seen_bri:
+                                label = "BRI" if a.name == "main" else f"BRI / {a.name}"
+                                result.append((label, None, _mut_range_alias(a)))
+                    return result
 
-                bri_mut_dir = mutation_dir / "bri"
-                seen_bri = set()
-                for alias, dates in sorted(bri_stmt_by_alias.items()):
-                    seen_bri.add(alias)
-                    label = "BRI" if alias == "main" else f"BRI / {alias}"
-                    rows_data.append((label, _stmt_dates(dates), _mut_range_alias(bri_mut_dir / alias)))
-                if bri_mut_dir.exists():
-                    for a in sorted(bri_mut_dir.iterdir()):
-                        if a.is_dir() and a.name not in seen_bri:
-                            label = "BRI" if a.name == "main" else f"BRI / {a.name}"
-                            rows_data.append((label, None, _mut_range_alias(a)))
+                # ── Run all three banks concurrently ─────────────────────────
+                with ThreadPoolExecutor(max_workers=3, thread_name_prefix="drill") as pool:
+                    f_bca     = pool.submit(_work_bca)
+                    f_mandiri = pool.submit(_work_mandiri)
+                    f_bri     = pool.submit(_work_bri)
+                    bca_rows     = f_bca.result()
+                    mandiri_rows = f_mandiri.result()
+                    bri_rows     = f_bri.result()
+
+                if not _stale():
+                    rows_data = bca_rows + mandiri_rows + bri_rows
+                    # Save to cache so next scan (if files unchanged) is instant
+                    if cache_key:
+                        self._drill_cache = {"key": cache_key, "data": rows_data}
 
             except Exception:
                 pass
+
         return rows_data
 
 

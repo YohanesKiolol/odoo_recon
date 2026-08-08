@@ -327,11 +327,37 @@ def read_bca(
     print(f"  Found {len(excel_files)} BCA file(s): {[p.name for p in excel_files]}")
 
     all_txns: list[dict] = []
-    for path in excel_files:
-        all_txns.extend(
-            _read_one_bca(path, password, amount_col, date_col, number_col,
-                          filter_dates=filter_dates)
-        )
+    if len(excel_files) <= 1:
+        # Single file — no parallelism overhead worth paying
+        for path in excel_files:
+            all_txns.extend(
+                _read_one_bca(path, password, amount_col, date_col, number_col,
+                              filter_dates=filter_dates)
+            )
+    else:
+        # Multiple files — decrypt + parse in parallel (I/O-bound, threads bypass GIL for disk reads)
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        futures_map = {}
+        with ThreadPoolExecutor(max_workers=min(len(excel_files), 4),
+                                thread_name_prefix="bca_read") as pool:
+            for path in excel_files:
+                fut = pool.submit(
+                    _read_one_bca, path, password, amount_col, date_col,
+                    number_col, filter_dates
+                )
+                futures_map[fut] = path
+            results_by_path = {}
+            for fut in as_completed(futures_map):
+                path = futures_map[fut]
+                try:
+                    results_by_path[path] = fut.result()
+                except Exception as e:
+                    print(f"  [WARN] BCA: failed reading {path.name}: {e}")
+                    results_by_path[path] = []
+        # Re-apply original file order so output is deterministic
+        for path in excel_files:
+            all_txns.extend(results_by_path.get(path, []))
+
 
     # ── Exclude Voided/Reversed Transactions ──────────────────────────────────
     # If a trace number is marked as Void/Reversal, we must drop both the void
