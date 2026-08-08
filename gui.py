@@ -2414,7 +2414,19 @@ class App(ctk.CTk):
                 wb = openpyxl.load_workbook(latest_file)
                 GREEN_FILL = PatternFill("solid", fgColor="E2EFDA")
 
-                for pair_idx, pair in enumerate(active_matched, 1):
+                # Find highest existing match sequence number so reopening the modal doesn't restart at M01
+                next_pair_idx = 1
+                if "Differences" in wb.sheetnames:
+                    import re as _re
+                    ws_scan = wb["Differences"]
+                    for r_scan in range(4, ws_scan.max_row + 1):
+                        v = ws_scan.cell(r_scan, 12).value
+                        if v:
+                            m = _re.search(r"M(\d+)", str(v))
+                            if m:
+                                next_pair_idx = max(next_pair_idx, int(m.group(1)) + 1)
+
+                for pair_idx, pair in enumerate(active_matched, next_pair_idx):
                     pair_tag = f"Match (M{pair_idx:02d})"
                     b_item = pair["bank"]
                     o_item = pair["odoo"]
@@ -2949,7 +2961,7 @@ class App(ctk.CTk):
                 
                 # AR Section Preview
                 from config import ODOO_ACCOUNT_BANK_DIFF_INCOME, ODOO_ACCOUNT_BANK_DIFF_LOSS
-                if item.get("mutation_matched", False) or abs(sel) > 0.01:
+                if item.get("mutation_matched", False) or (item.get("mutation_found", False) and abs(sel) > 0.01):
                     m_date = item['payment_date']
                     m_group = item['group']
                     m_raw = [m for m in getattr(self, "_mutation_raw", []) if m["payment_date"] == m_date and m["group"] == m_group]

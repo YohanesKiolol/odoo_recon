@@ -28,38 +28,113 @@ def get_latest_excel_file() -> Path:
 
 
 def safe_save_workbook(wb, file_path: Path):
-    """Save openpyxl workbook safely. If locked by Excel (PermissionError), close Excel and retry."""
+    """Save workbook safely across platforms.
+
+    Strategy: write to a sibling .tmp file first (never locked by Excel),
+    then atomically replace the original.  This avoids writing to the
+    locked file directly on Windows.
+
+    - If os.replace() raises PermissionError (original locked by Excel):
+        • Mac  — close just that workbook via AppleScript, then replace + reopen
+        • Windows — try to close the workbook window, then replace + reopen.
+          Only kills all Excel as a last resort if the replace still fails.
+    - Mac first-save succeeds but Excel holds a stale in-memory copy:
+        automatically closed & reopened so the user sees fresh data.
+    """
+    import subprocess
+    import time
+    import tempfile
+
+    tmp_path = file_path.with_suffix(".tmp.xlsx")
+
+    def _close_in_excel():
+        """Ask Excel to close the specific workbook without saving."""
+        fname = file_path.name
+        if sys.platform == "darwin":
+            subprocess.run(
+                ["osascript", "-e",
+                 f'tell application "Microsoft Excel"\n'
+                 f'  set wb_list to every workbook whose name is "{fname}"\n'
+                 f'  repeat with wb_item in wb_list\n'
+                 f'    close wb_item saving no\n'
+                 f'  end repeat\n'
+                 f'end tell'],
+                capture_output=True, timeout=5
+            )
+        elif os.name == "nt":
+            # Try to close just the window with this filename in the title bar
+            subprocess.run(
+                ["taskkill", "/FI", f"WINDOWTITLE eq {fname}*", "/F"],
+                capture_output=True
+            )
+            time.sleep(0.8)
+
+    def _reopen():
+        """Reopen the saved file so the user sees fresh data."""
+        if sys.platform == "darwin":
+            subprocess.run(["open", str(file_path)], capture_output=True)
+        elif os.name == "nt":
+            os.startfile(str(file_path))
+
+    # ── Step 1: write to temp (always succeeds — Excel doesn't lock .tmp) ──
     try:
-        wb.save(file_path)
-        print(f"✅ Successfully saved '{file_path.name}'.")
-        return True
-    except PermissionError:
-        print(f"⚠️ '{file_path.name}' is open in Microsoft Excel. Closing Excel to apply updates...")
-        import subprocess
-        if os.name == 'nt':
-            try:
-                subprocess.run(["taskkill", "/FI", f"WINDOWTITLE eq {file_path.name}*", "/F"], capture_output=True)
-                subprocess.run(["taskkill", "/IM", "EXCEL.EXE", "/F"], capture_output=True)
-            except Exception:
-                pass
-        elif sys.platform == "darwin":
-            try:
-                subprocess.run(["osascript", "-e", f'tell application "Microsoft Excel" to close (every workbook whose name is "{file_path.name}") saving no'], capture_output=True)
-            except Exception:
-                pass
-        try:
-            wb.save(file_path)
-            print(f"✅ Successfully updated and saved '{file_path.name}'.")
-            if os.name == 'nt':
-                os.startfile(str(file_path))
-            elif sys.platform == "darwin":
-                subprocess.run(["open", str(file_path)])
-            return True
-        except Exception as e:
-            print(f"❌ Failed to save '{file_path.name}' while locked: {e}")
-            return False
+        wb.save(tmp_path)
     except Exception as e:
-        print(f"❌ Save error: {e}")
+        print(f"❌ Could not write temp file: {e}")
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        return False
+
+    # ── Step 2: atomic replace ──────────────────────────────────────────────
+    try:
+        os.replace(tmp_path, file_path)
+        print(f"✅ Successfully saved '{file_path.name}'.")
+        # Mac: Excel silently holds stale copy — close & reopen
+        if sys.platform == "darwin":
+            _close_in_excel()
+            _reopen()
+        return True
+
+    except PermissionError:
+        # File is locked — close it in Excel and retry replace
+        print(f"⚠️ '{file_path.name}' is open in Excel. Closing to apply updates...")
+        _close_in_excel()
+        time.sleep(0.5)
+
+        try:
+            os.replace(tmp_path, file_path)
+            print(f"✅ Successfully updated and saved '{file_path.name}'.")
+            _reopen()
+            return True
+        except PermissionError:
+            # Nuclear last resort on Windows only
+            if os.name == "nt":
+                print("⚠️ Still locked — force-closing all Excel instances...")
+                subprocess.run(["taskkill", "/IM", "EXCEL.EXE", "/F"], capture_output=True)
+                time.sleep(0.8)
+                try:
+                    os.replace(tmp_path, file_path)
+                    print(f"✅ Saved '{file_path.name}' after closing Excel.")
+                    _reopen()
+                    return True
+                except Exception as e2:
+                    print(f"❌ Failed even after closing Excel: {e2}")
+            else:
+                print(f"❌ Failed to replace '{file_path.name}' — still locked.")
+            try:
+                tmp_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return False
+
+    except Exception as e:
+        print(f"❌ Replace error: {e}")
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except Exception:
+            pass
         return False
 
 
