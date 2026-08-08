@@ -280,13 +280,35 @@ class App(ctk.CTk):
         self.after(50, lambda: _maximize_window(self))
         self._running = False
         self._active_proc = None
-        self._last_output: str | None = None
         self._set_app_icon()
         self._build_ui()
         self._center()
+        self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self.after(200, self._auto_scan_on_startup)
 
+
+    def _on_app_close(self):
+        """Cleanly terminate all background processes and threads before destroying window.
+        Prevents PyInstaller _MEI* cleanup warnings on Windows."""
+        self._running = False
+        
+        proc = getattr(self, "_active_proc", None)
+        if proc:
+            try:
+                proc.terminate()
+                proc.kill()
+            except Exception:
+                pass
+            self._active_proc = None
+
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        sys.exit(0)
+
     def _set_app_icon(self):
+
         """Set high-res native window icon.
         Windows: .ico with 16/24/32/48/64/128/256 px embedded → crisp at all DPI.
         Mac:     PhotoImage from PNG → used by iconphoto()."""
