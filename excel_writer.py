@@ -27,30 +27,36 @@ def _hide_file(path: Path) -> None:
     pass
 
 
+def _write_manual_matches_json(output_dir: Path, data: list[dict]) -> None:
+    """Safely write sidecar JSON with directory creation, Windows attribute un-hiding, and exception protection."""
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        path = output_dir / MANUAL_MATCHES_FILE
+        import sys
+        if sys.platform == "win32" and path.exists():
+            try:
+                import subprocess
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                subprocess.run(["attrib", "-H", str(path)], check=False, capture_output=True, creationflags=flags)
+            except Exception:
+                pass
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception as e:
+        print(f"  [WARN] Sidecar write skipped: {e}")
+
+
 def save_manual_matches(output_dir: Path, matches: list[dict]) -> None:
     """Persist manual-match pairs to a JSON sidecar in output_dir.
     Each entry: {pair_tag, bank_date, bank_journal, bank_amount,
                  odoo_date, odoo_journal, odoo_amount}
     Merges with any pre-existing entries (deduped by pair_tag).
     """
-    import sys
-    path = output_dir / MANUAL_MATCHES_FILE
-    # If file exists on Windows with +H set from earlier versions, unhide it first to prevent PermissionError
-    if sys.platform == "win32" and path.exists():
-        try:
-            import subprocess
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            subprocess.run(["attrib", "-H", str(path)], check=False, capture_output=True, creationflags=flags)
-        except Exception:
-            pass
-
     existing = load_manual_matches(output_dir)
     # index by pair_tag so re-saves don't duplicate
     by_tag: dict[str, dict] = {m["pair_tag"]: m for m in existing}
     for m in matches:
         by_tag[m["pair_tag"]] = m
-    path.write_text(json.dumps(list(by_tag.values()), indent=2, ensure_ascii=False), encoding="utf-8")
-
+    _write_manual_matches_json(output_dir, list(by_tag.values()))
 
 
 def load_manual_matches(output_dir: Path) -> list[dict]:
@@ -145,8 +151,8 @@ def _reapply_manual_matches(wb, output_dir: Path) -> None:
             still_needed.append(m)
 
     # Overwrite sidecar with only the entries still relevant
-    path = output_dir / MANUAL_MATCHES_FILE
-    path.write_text(json.dumps(still_needed, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_manual_matches_json(output_dir, still_needed)
+
 
 def _get_account_info(acc_key: str) -> tuple[str, str]:
     if acc_key == "other":
@@ -685,7 +691,9 @@ def write_report(
     unknown_mutations: list[dict] = None,
     excluded_txns: list[dict] = None,
 ) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
     company_str = ODOO_COMPANY_NAME.replace(" ", "_") if ODOO_COMPANY_NAME else "Company"
+
     
     banks = set()
     for acc_key in all_results.keys():
