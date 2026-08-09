@@ -2714,10 +2714,13 @@ class App(ctk.CTk):
                                 "bank_date":    pair["bank"]["date"],
                                 "bank_journal": pair["bank"]["journal"],
                                 "bank_amount":  pair["bank"]["amount"],
+                                "bank_number":  pair["bank"].get("number_bank", ""),
                                 "odoo_date":    pair["odoo"]["date"],
                                 "odoo_journal": pair["odoo"]["journal"],
                                 "odoo_amount":  pair["odoo"]["amount"],
+                                "odoo_number":  pair["odoo"].get("number_odo", ""),
                             })
+
                         save_manual_matches(output_dir, sidecar_entries)
                         self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
                     except Exception as _se:

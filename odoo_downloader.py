@@ -176,23 +176,24 @@ def run_downloader():
 
         if is_headless:
             print("[+] Mengisi form login Odoo di background...")
-            page.wait_for_selector("#login", state="visible", timeout=30000)
-            page.fill("#login", args.email)
-            page.fill("#password", args.password)
-            page.press("#password", "Enter")
-            print("[+] Login submitted, waiting...")
+            try:
+                page.wait_for_selector("#login", state="visible", timeout=10000)
+                page.fill("#login", args.email)
+                page.fill("#password", args.password)
+                page.press("#password", "Enter")
+                print("[+] Login submitted, waiting...")
+            except Exception:
+                print("[+] Already logged in or login form skipped.")
         else:
             print("\n[+] Waiting for manual login...")
-        
-        # Strip protocol so it matches exactly
-        dashboard_path = odoo_dash_https.split("://")[-1]
-        
-        page.wait_for_function(
-            "path => window.location.href.includes(path)",
-            arg=dashboard_path,
-            timeout=0 if not is_headless else 30000
-        )
+
+        print("[+] Detecting Odoo dashboard...")
+        try:
+            page.wait_for_selector(".o_main_navbar, .o_web_client, .o_action_manager", state="visible", timeout=45000)
+        except Exception:
+            pass
         print("[+] Dashboard terdeteksi!")
+
 
         # -------------------------------------------------------------
         # ── Define XPaths ──
@@ -491,14 +492,9 @@ def run_downloader():
             page.goto(odoo_journal_https)
             
             # Tunggu redirect dan load table
-            journal_path = odoo_journal_https.split("://")[-1]
-            page.wait_for_function(
-                "path => window.location.href.includes(path)",
-                arg=journal_path,
-                timeout=15000
-            )
-            page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=30000)
+            page.wait_for_selector(".o_list_table, .o_kanban_view, .o_content", state="visible", timeout=45000)
             page.wait_for_timeout(2000)
+
             
             print("[+] Membersihkan filter default (misal: Posted)...")
             try:

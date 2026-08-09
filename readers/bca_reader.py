@@ -261,6 +261,10 @@ def _read_one_bca(
             if ref_idx is not None and ref_idx < len(row):
                 ref_num = str(row[ref_idx]).strip() if row[ref_idx] is not None else ""
 
+            if not number and ref_num:
+                number = ref_num
+
+
             is_void = False
             if void_idx is not None and void_idx < len(row):
                 is_void = (str(row[void_idx]).strip().upper() == "Y")
