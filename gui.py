@@ -262,6 +262,22 @@ def _maximize_window(win):
             win.geometry(f"{sw}x{sh}+0+0")
 
 
+def _size_and_center_modal(win, default_w=1320, default_h=780):
+    """Size and center modal dialogs responsively so bottom action bars remain fully visible above taskbars."""
+    win.update_idletasks()
+    sw = win.winfo_screenwidth()
+    sh = win.winfo_screenheight()
+
+    # Leave comfortable margins for OS taskbars and window title bars (max 90% W, 85% H)
+    w = min(default_w, max(1000, int(sw * 0.90)))
+    h = min(default_h, max(640, int(sh * 0.85)))
+
+    x = max(0, (sw - w) // 2)
+    y = max(0, (sh - h - 35) // 2)
+
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
+
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -2201,7 +2217,7 @@ class App(ctk.CTk):
         top.withdraw()
         top.title("Manual Match — Reconcile Differences")
 
-        top.minsize(1200, 750)
+        top.minsize(1050, 640)
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
@@ -2212,7 +2228,7 @@ class App(ctk.CTk):
         CANDIDATES_PER_PAGE = 10
 
         hdr = ctk.CTkFrame(top, fg_color=PANEL, height=76, corner_radius=0, border_color=BORDER, border_width=1)
-        hdr.pack(fill="x")
+        hdr.pack(fill="x", side="top")
         hdr.pack_propagate(False)
 
         hdr_in = ctk.CTkFrame(hdr, fg_color="transparent")
@@ -2226,6 +2242,10 @@ class App(ctk.CTk):
             hdr_in, text=f"Review candidate pairs or manually match Bank vs Odoo discrepancies. Loaded {len(bank_items)} Bank & {len(odo_items)} Odoo items.",
             font=(FONT_FAMILY, 10, "bold"), text_color=MUTED
         ).pack(anchor="w", pady=(2, 0))
+
+        # Modal Footer Toolbar (packed at bottom before body expansion so it never gets clipped)
+        footer = ctk.CTkFrame(top, fg_color=SIDEBAR_BG, height=60, corner_radius=0, border_color=BORDER, border_width=1)
+        footer.pack(fill="x", side="bottom")
 
         body_frame = ctk.CTkFrame(top, fg_color=BG, corner_radius=0)
         body_frame.pack(fill="both", expand=True, padx=20, pady=12)
@@ -2616,10 +2636,6 @@ class App(ctk.CTk):
 
             _rebuild_lists()
 
-
-        footer = ctk.CTkFrame(top, fg_color=SIDEBAR_BG, height=60, corner_radius=0, border_color=BORDER, border_width=1)
-        footer.pack(fill="x", side="bottom")
-
         f_in = ctk.CTkFrame(footer, fg_color="transparent")
         f_in.pack(fill="both", expand=True, padx=24, pady=12)
 
@@ -2789,7 +2805,7 @@ class App(ctk.CTk):
 
         top.protocol("WM_DELETE_WINDOW", _on_close_modal)
         top.title("Confirm Journal Creation")
-        top.minsize(1200, 750)
+        top.minsize(1050, 640)
         top.resizable(True, True)
         top.configure(fg_color=BG)
         top.transient(self)
@@ -3008,7 +3024,7 @@ class App(ctk.CTk):
         
         # Modal Header Bar
         header_frame = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=80, border_color=BORDER, border_width=1)
-        header_frame.pack(fill="x")
+        header_frame.pack(fill="x", side="top")
         header_frame.pack_propagate(False)
         
         left_header = ctk.CTkFrame(header_frame, fg_color="transparent")
@@ -3043,6 +3059,11 @@ class App(ctk.CTk):
             corner_radius=6, command=_refresh_modal
         ).pack(side="right", padx=(0, 24))
         
+        # Modal Footer Toolbar (packed at bottom before body expansion so action buttons never clip)
+        footer_frame = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=70, border_color=BORDER, border_width=1)
+        footer_frame.pack(fill="x", side="bottom")
+        footer_frame.pack_propagate(False)
+
         # Main Scrollable Body
         body_frame = ctk.CTkFrame(top, fg_color=BG, corner_radius=0)
         body_frame.pack(fill="both", expand=True, padx=24, pady=16)
@@ -3070,11 +3091,6 @@ class App(ctk.CTk):
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y", padx=(0, 4), pady=4)
-        
-        # Modal Footer Toolbar
-        footer_frame = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=70, border_color=BORDER, border_width=1)
-        footer_frame.pack(fill="x", side="bottom")
-        footer_frame.pack_propagate(False)
         
         footer_inner = ctk.CTkFrame(footer_frame, fg_color="transparent")
         footer_inner.pack(fill="both", expand=True, padx=24, pady=14)
