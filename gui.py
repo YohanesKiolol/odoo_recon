@@ -282,41 +282,29 @@ def _maximize_window(win):
             win.geometry(f"{sw}x{max(500, sh - 80)}+0+0")
 
 
-def _center_almost_fullscreen(win):
-    """Size and center modal dialogs to almost full screen (~92% W x 86% H)
-    centered within the OS work area so it floats cleanly above taskbars."""
-    import sys
+def _center_modal_on_parent(win, parent):
+    """Size and center modal dialog relative to main GUI application window (self)
+    so it sits perfectly centered over the parent UI."""
     win.update_idletasks()
-    system = sys.platform
+    parent.update_idletasks()
 
-    work_x, work_y = 0, 0
-    work_w = win.winfo_screenwidth()
-    work_h = win.winfo_screenheight()
+    pw = parent.winfo_width()
+    ph = parent.winfo_height()
+    px = parent.winfo_rootx()
+    py = parent.winfo_rooty()
 
-    if system == "win32":
-        try:
-            import ctypes
-            from ctypes import wintypes
-            rect = wintypes.RECT()
-            # SPI_GETWORKAREA = 48
-            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
-                work_x = rect.left
-                work_y = rect.top
-                work_w = rect.right - rect.left
-                work_h = rect.bottom - rect.top
-        except Exception:
-            pass
-    elif system == "darwin":
-        work_y = 25
-        work_h = max(500, work_h - 95)
-    else:
-        work_h = max(500, work_h - 70)
+    # Fallback to screen if parent coordinates or dimensions are invalid
+    if pw < 400 or ph < 300:
+        pw = win.winfo_screenwidth()
+        ph = win.winfo_screenheight()
+        px = 0
+        py = 0
 
-    target_w = max(1000, int(work_w * 0.92))
-    target_h = max(620, int(work_h * 0.86))
+    target_w = max(1000, int(pw * 0.95))
+    target_h = max(620, int(ph * 0.92))
 
-    x = work_x + max(0, (work_w - target_w) // 2)
-    y = work_y + max(0, (work_h - target_h - 15) // 2)
+    x = px + max(0, (pw - target_w) // 2)
+    y = py + max(0, (ph - target_h) // 2)
 
     win.geometry(f"{target_w}x{target_h}+{x}+{y}")
 
@@ -2264,7 +2252,7 @@ class App(ctk.CTk):
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
-        top.after(50, lambda: _center_almost_fullscreen(top))
+        top.after(50, lambda: _center_modal_on_parent(top, self))
 
         active_matched = []
         auto_page = [0]
@@ -2853,7 +2841,7 @@ class App(ctk.CTk):
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
-        top.after(50, lambda: _center_almost_fullscreen(top))
+        top.after(50, lambda: _center_modal_on_parent(top, self))
 
 
         items = []
