@@ -177,6 +177,38 @@ def _read_csv_from_bytes(
     return txns
 
 
+def _find_mandiri_zips(zip_dir: Path, zip_pattern: str, password: str = "") -> list[Path]:
+    """
+    Find ALL Mandiri ZIP files in zip_dir.
+
+    Primary:  filename matching zip_pattern (fast, zero I/O).
+    Fallback: if no filename matches, return all .zip files in zip_dir —
+              probing content via AES password if available. Handles renamed files.
+    """
+    candidates = sorted(p for p in zip_dir.glob(zip_pattern) if p.is_file() and not p.name.startswith("."))
+    if candidates:
+        return candidates
+
+    # Fallback: check all .zip files in zip_dir
+    all_zips = sorted(
+        p for p in zip_dir.iterdir()
+        if p.is_file() and p.suffix.lower() == ".zip" and not p.name.startswith(".")
+    )
+    if not all_zips:
+        return []
+
+    if password:
+        try:
+            from readers.file_detector import _probe_mandiri_zip
+            probed = [z for z in all_zips if _probe_mandiri_zip(z, password)]
+            if probed:
+                return probed
+        except Exception:
+            pass
+
+    return all_zips
+
+
 def read_mandiri(
     zip_dir: Path,
     password: str,
@@ -195,10 +227,10 @@ def read_mandiri(
             f"Check MANDIRI_ZIP_DIR in your .env file."
         )
 
-    zip_files = sorted(zip_dir.glob(zip_pattern))
+    zip_files = _find_mandiri_zips(zip_dir, zip_pattern, password)
     if not zip_files:
         raise FileNotFoundError(
-            f"No Mandiri ZIP files matching '{zip_pattern}' found in: {zip_dir}\n"
+            f"No Mandiri ZIP files matching '{zip_pattern}' or fallback found in: {zip_dir}\n"
             f"Check MANDIRI_ZIP_PATTERN in your .env file."
         )
 
