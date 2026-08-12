@@ -240,26 +240,46 @@ class CTkDateInput(ctk.CTkFrame):
 
 
 def _maximize_window(win):
-    """Maximize a Tk/CTk window cross-platform."""
+    """Maximize a Tk/CTk window cross-platform without taskbar clipping."""
     import sys
+    win.update_idletasks()
     system = sys.platform
+
     if system == "win32":
-        win.state("zoomed")
-    elif system == "darwin":
-        # Mac: no -zoomed attr; set geometry to fill screen
-        win.update_idletasks()
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            # SPI_GETWORKAREA = 48 (returns work area excluding taskbar)
+            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
+                work_x = rect.left
+                work_y = rect.top
+                work_w = rect.right - rect.left
+                work_h = rect.bottom - rect.top
+                # Subtract titlebar & window border height (~45px) so client height
+                # doesn't push the window bottom underneath the taskbar
+                client_h = max(500, work_h - 45)
+                win.geometry(f"{work_w}x{client_h}+{work_x}+{work_y}")
+                return
+        except Exception:
+            pass
+        # Fallback for Windows if SPI fails: subtract 80px from screen height
         sw = win.winfo_screenwidth()
         sh = win.winfo_screenheight()
-        win.geometry(f"{sw}x{sh}+0+0")
+        win.geometry(f"{sw}x{max(500, sh - 80)}+0+0")
+    elif system == "darwin":
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        # Mac: menu bar ~25px, dock ~70px
+        win.geometry(f"{sw}x{max(500, sh - 95)}+0+25")
     else:
-        # Linux / other X11
+        # Linux / X11
         try:
             win.attributes("-zoomed", True)
         except Exception:
-            win.update_idletasks()
             sw = win.winfo_screenwidth()
             sh = win.winfo_screenheight()
-            win.geometry(f"{sw}x{sh}+0+0")
+            win.geometry(f"{sw}x{max(500, sh - 80)}+0+0")
 
 
 def _size_and_center_modal(win, default_w=1320, default_h=780):
