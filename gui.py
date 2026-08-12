@@ -282,20 +282,43 @@ def _maximize_window(win):
             win.geometry(f"{sw}x{max(500, sh - 80)}+0+0")
 
 
-def _size_and_center_modal(win, default_w=1320, default_h=780):
-    """Size and center modal dialogs responsively so bottom action bars remain fully visible above taskbars."""
+def _center_almost_fullscreen(win):
+    """Size and center modal dialogs to almost full screen (~92% W x 86% H)
+    centered within the OS work area so it floats cleanly above taskbars."""
+    import sys
     win.update_idletasks()
-    sw = win.winfo_screenwidth()
-    sh = win.winfo_screenheight()
+    system = sys.platform
 
-    # Leave comfortable margins for OS taskbars and window title bars (max 90% W, 85% H)
-    w = min(default_w, max(1000, int(sw * 0.90)))
-    h = min(default_h, max(640, int(sh * 0.85)))
+    work_x, work_y = 0, 0
+    work_w = win.winfo_screenwidth()
+    work_h = win.winfo_screenheight()
 
-    x = max(0, (sw - w) // 2)
-    y = max(0, (sh - h - 35) // 2)
+    if system == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            # SPI_GETWORKAREA = 48
+            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
+                work_x = rect.left
+                work_y = rect.top
+                work_w = rect.right - rect.left
+                work_h = rect.bottom - rect.top
+        except Exception:
+            pass
+    elif system == "darwin":
+        work_y = 25
+        work_h = max(500, work_h - 95)
+    else:
+        work_h = max(500, work_h - 70)
 
-    win.geometry(f"{w}x{h}+{x}+{y}")
+    target_w = max(1000, int(work_w * 0.92))
+    target_h = max(620, int(work_h * 0.86))
+
+    x = work_x + max(0, (work_w - target_w) // 2)
+    y = work_y + max(0, (work_h - target_h - 15) // 2)
+
+    win.geometry(f"{target_w}x{target_h}+{x}+{y}")
 
 
 class App(ctk.CTk):
@@ -2241,7 +2264,7 @@ class App(ctk.CTk):
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
-        top.after(50, lambda: _maximize_window(top))
+        top.after(50, lambda: _center_almost_fullscreen(top))
 
         active_matched = []
         auto_page = [0]
@@ -2830,7 +2853,7 @@ class App(ctk.CTk):
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
-        top.after(50, lambda: _maximize_window(top))
+        top.after(50, lambda: _center_almost_fullscreen(top))
 
 
         items = []
