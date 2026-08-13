@@ -283,8 +283,9 @@ def _maximize_window(win):
 
 
 def _center_modal_on_parent(win, parent):
-    """Size and center modal dialog relative to main GUI application window (self)
-    so it sits perfectly centered over the parent UI."""
+    """Size and center modal dialog relative to the main app window.
+    Falls back to screen work area if parent coords are unreliable (Windows maximized)."""
+    import sys
     win.update_idletasks()
     parent.update_idletasks()
 
@@ -293,15 +294,32 @@ def _center_modal_on_parent(win, parent):
     px = parent.winfo_rootx()
     py = parent.winfo_rooty()
 
-    # Fallback to screen if parent coordinates or dimensions are invalid
+    # On Windows zoomed state, rootx/y can be negative (shadow border) or 0 — detect and fix
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            rect = wintypes.RECT()
+            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
+                wa_x = rect.left
+                wa_y = rect.top
+                wa_w = rect.right - rect.left
+                wa_h = rect.bottom - rect.top
+                # If parent appears to be maximized (fills work area), use work area coords
+                if pw < 400 or abs(px) > 20 or abs(py) > 20:
+                    px, py, pw, ph = wa_x, wa_y, wa_w, wa_h
+        except Exception:
+            pass
+
+    # Generic fallback
     if pw < 400 or ph < 300:
         pw = win.winfo_screenwidth()
         ph = win.winfo_screenheight()
         px = 0
         py = 0
 
-    target_w = max(1000, int(pw * 0.95))
-    target_h = max(620, int(ph * 0.92))
+    target_w = max(1000, int(pw * 0.88))
+    target_h = max(600, int(ph * 0.82))
 
     x = px + max(0, (pw - target_w) // 2)
     y = py + max(0, (ph - target_h) // 2)
@@ -2252,7 +2270,7 @@ class App(ctk.CTk):
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
-        top.after(50, lambda: _center_modal_on_parent(top, self))
+        top.after(200, lambda: _center_modal_on_parent(top, self))
 
         active_matched = []
         auto_page = [0]
@@ -2841,7 +2859,7 @@ class App(ctk.CTk):
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
-        top.after(50, lambda: _center_modal_on_parent(top, self))
+        top.after(200, lambda: _center_modal_on_parent(top, self))
 
 
         items = []
