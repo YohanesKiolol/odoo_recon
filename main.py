@@ -298,22 +298,22 @@ def main():
         b_txns = bank_txns.get(acc_key, [])
         o_txns = odo_bank_txns.get(acc_key, [])
         
-        if acc_key == "other":
-            # Don't filter by valid bank dates since we don't have bank files for "other"
-            o_txns_filtered = o_txns
-        else:
-            # Filter Odoo transactions: only keep dates that actually exist in the uploaded Bank files
+        if acc_key != "other":
+            # Warn about bank dates that have no Odoo data at all (still useful diagnostic)
             valid_bank_dates = {str(t.get("date")) for t in b_txns if t.get("date")}
             valid_odoo_dates = {str(t.get("date")) for t in o_txns if t.get("date")}
-            
             missing_in_odoo = valid_bank_dates - valid_odoo_dates
             if missing_in_odoo:
                 missing_str = ", ".join(sorted(missing_in_odoo))
                 print(f"  [!] WARNING: {acc_key} has Bank data for {missing_str} but No Odoo data exists!")
 
-            o_txns_filtered = [t for t in o_txns if str(t.get("date")) in valid_bank_dates]
+            # NOTE: All Odoo rows pass to reconcile() regardless of date.
+            # Previously we filtered to valid_bank_dates only, which caused Odoo entries
+            # for dates not covered by the bank file to be silently dropped — making
+            # Total Odoo in Daily Summary lower than the actual Odoo payment file total.
+            # Unmatched Odoo rows now correctly become "Only in Odoo" entries.
 
-        results = reconcile(b_txns, o_txns_filtered)
+        results = reconcile(b_txns, o_txns)
         stats   = summary(results)
         all_results[acc_key] = results
 

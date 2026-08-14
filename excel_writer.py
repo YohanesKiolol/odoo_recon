@@ -70,6 +70,76 @@ def load_manual_matches(output_dir: Path) -> list[dict]:
         return []
 
 
+def apply_manual_matches_to_results(
+    all_results: dict[str, list[dict]],
+    matches: list[dict],
+) -> tuple[dict[str, list[dict]], list[dict], list[dict]]:
+    """Apply sidecar manual matches to all_results IN-MEMORY before report generation.
+
+    For each sidecar entry:
+    - Bank found (Only in Bank) + Odoo found (Only in Odoo):
+        Merge → Bank row becomes STATUS_DONE with manual_match_tag; Odoo row removed.
+    - Bank found but Odoo NOT found (Odoo payment deleted from website):
+        Stale entry — leave Bank as Only in Bank; add to returned stale list.
+    - Neither found (engine already matched them):
+        Entry no longer needed; silently dropped from sidecar.
+
+    Returns: (modified all_results, stale_entries, still_needed_for_sidecar)
+    """
+    AMT_TOL = 0.01
+    still_needed: list[dict] = []
+    stale_entries: list[dict] = []
+
+    for m in matches:
+        pair_tag = m["pair_tag"]
+        b_date   = str(m.get("bank_date", "")).strip()
+        b_j      = str(m.get("bank_journal", "")).strip().lower()
+        b_amt    = float(m.get("bank_amount", 0))
+        o_date   = str(m.get("odoo_date", "")).strip()
+        o_amt    = float(m.get("odoo_amount", 0))
+        diff     = float(m.get("diff", b_amt - o_amt))
+
+        bank_row: dict | None = None
+        odoo_row: dict | None = None
+        bank_acc_key: str | None = None
+
+        for acc_key, rows in all_results.items():
+            if acc_key == "other":
+                continue
+            _, acc_name = _get_account_info(acc_key)
+            if b_j not in acc_name.strip().lower() and acc_name.strip().lower() not in b_j:
+                continue
+            for r in rows:
+                st = r.get("status", "")
+                r_date = str(r.get("date", "")).strip()
+                r_amt  = float(r.get("amount", 0))
+                if st == STATUS_BANK_ONLY and r_date == b_date and abs(r_amt - b_amt) < AMT_TOL:
+                    bank_row = r
+                    bank_acc_key = acc_key
+                elif st == STATUS_ODO_ONLY and r_date == o_date and abs(r_amt - o_amt) < AMT_TOL:
+                    odoo_row = r
+
+        if bank_row is None and odoo_row is None:
+            # Engine already matched both — no longer needed in sidecar
+            continue
+
+        if bank_row is not None and odoo_row is not None:
+            # Merge: upgrade Bank row to Match, remove Odoo row
+            bank_row["status"] = STATUS_DONE
+            bank_row["manual_match_tag"] = pair_tag
+            bank_row["odoo_amount"] = o_amt
+            bank_row["manual_diff"] = diff
+            # Remove the Odoo row from its acc_key results list
+            all_results[bank_acc_key] = [r for r in all_results[bank_acc_key] if r is not odoo_row]
+            still_needed.append(m)
+        else:
+            # Stale: Bank row exists but Odoo payment is gone from Odoo data
+            stale_entries.append(m)
+            still_needed.append(m)  # keep so user can resolve manually
+
+    return all_results, stale_entries, still_needed
+
+
 def _reapply_manual_matches(wb, output_dir: Path) -> None:
     """After a fresh write_report, re-stamp Match(Mxx) tags from the sidecar.
     Matches on (date, journal, amount, source) in Differences + bank sheets.
@@ -120,11 +190,17 @@ def _reapply_manual_matches(wb, output_dir: Path) -> None:
 
                 if src == "Bank" and d_v == b_date and j_v == b_j and abs(a_v - b_amt) < AMT_TOL and b_num_match:
                     ws_d.cell(rn, 12).value = pair_tag
-                    for c in range(1, 13): ws_d.cell(rn, c).fill = GREEN_FILL
+                    diff_val = b_amt - o_amt
+                    ws_d.cell(rn, 13).value = diff_val
+                    ws_d.cell(rn, 13).number_format = '#,##0.00'
+                    for c in range(1, 14): ws_d.cell(rn, c).fill = GREEN_FILL
                     stamped_diff = True
                 elif src == "Odoo" and d_v == o_date and j_v == o_j and abs(a_v - o_amt) < AMT_TOL and o_num_match:
                     ws_d.cell(rn, 12).value = pair_tag
-                    for c in range(1, 13): ws_d.cell(rn, c).fill = GREEN_FILL
+                    diff_val = b_amt - o_amt
+                    ws_d.cell(rn, 13).value = diff_val
+                    ws_d.cell(rn, 13).number_format = '#,##0.00'
+                    for c in range(1, 14): ws_d.cell(rn, c).fill = GREEN_FILL
                     stamped_diff = True
 
         # 2. Individual bank sheets (col 11 = Status)
@@ -146,13 +222,17 @@ def _reapply_manual_matches(wb, output_dir: Path) -> None:
                     continue
                 if src == "Bank" and d_v == b_date and abs(a_v - b_amt) < AMT_TOL:
                     ws_b.cell(rn, 11).value = pair_tag
-                    for c in range(1, 12): ws_b.cell(rn, c).fill = GREEN_FILL
+                    diff_val = b_amt - o_amt
+                    ws_b.cell(rn, 12).value = diff_val
+                    ws_b.cell(rn, 12).number_format = '#,##0.00'
+                    for c in range(1, 13): ws_b.cell(rn, c).fill = GREEN_FILL
                     stamped_bank_b = True
                 elif src == "Odoo" and d_v == o_date and abs(a_v - o_amt) < AMT_TOL:
                     ws_b.cell(rn, 11).value = pair_tag
-                    for c in range(1, 12): ws_b.cell(rn, c).fill = GREEN_FILL
-                    stamped_bank_o = True
-
+                    diff_val = b_amt - o_amt
+                    ws_b.cell(rn, 12).value = diff_val
+                    ws_b.cell(rn, 12).number_format = '#,##0.00'
+                    for c in range(1, 13): ws_b.cell(rn, c).fill = GREEN_FILL
                     stamped_bank_o = True
 
         # Keep in sidecar only if it still needs to be re-applied next time
@@ -302,7 +382,7 @@ def _fmt_amount_str(val) -> str:
 def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     ws.title = bank_name[:31]
     
-    COL_HEADERS = ["No", "Date", "Payment Date", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status"]
+    COL_HEADERS = ["No", "Date", "Payment Date", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status", "Difference"]
     ncols = len(COL_HEADERS)
 
     done_count  = sum(1 for r in rows if r["status"] == STATUS_DONE)
@@ -345,11 +425,19 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
         _cell(ws.cell(rn, 9), r.get("source", ""),              st, "center")
         _cell(ws.cell(rn, 10), r.get("is_reconciled", ""),      st, "center")
         sc = ws.cell(rn, 11)
-        _cell(sc, st, st, "center")
+        # manual_match_tag present → show "Match (M01)" etc; st stays STATUS_DONE for fill color
+        display_status = r.get("manual_match_tag", st)
+        _cell(sc, display_status, st, "center")
         sc.font = Font(bold=True, size=10)
+        # col 12 — Difference: manual matches carry actual diff; normal Match = 0
+        diff_val = r.get("manual_diff", 0) if st == STATUS_DONE else ""
+        c_diff = ws.cell(rn, 12)
+        _cell(c_diff, diff_val, st, "right")
+        if st == STATUS_DONE:
+            c_diff.number_format = '#,##0.00'
         ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 15, 18, 20, 20, 30, 20, 15, 15, 15], start=1):
+    for col, width in enumerate([6, 15, 15, 18, 20, 20, 30, 20, 15, 15, 15, 18], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{len(rows) + 3}"
@@ -405,7 +493,7 @@ def _write_other_sheet(ws, rows: list[dict], odo_date=None):
 
 def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=None):
     ws.title = "Differences"
-    COL_HEADERS = ["No", "Date", "Bank", "Journal", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status"]
+    COL_HEADERS = ["No", "Date", "Bank", "Journal", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status", "Difference"]
     ncols = len(COL_HEADERS)
     
     date_str   = odo_date.strftime("%d %B %Y") if odo_date else "-"
@@ -462,9 +550,12 @@ def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=No
             sc = ws.cell(rn, 12)
             _cell(sc, st, st, "center")
             sc.font = Font(bold=True, size=10)
+            # col 13 — Difference: empty for individual discrepancy rows;
+            # manual-match merged rows will have this written by _update_recon_file
+            _cell(ws.cell(rn, 13), "", st, "right")
             ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 10, 18, 20, 20, 20, 40, 20, 15, 15, 15], start=1):
+    for col, width in enumerate([6, 15, 10, 18, 20, 20, 20, 40, 20, 15, 15, 15, 18], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{total_disc + 3}"
     ws.freeze_panes = "A4"
@@ -754,7 +845,22 @@ def write_report(
     out_path = output_dir / f"{prefix}{banks_str}__{date_range_str}.xlsx"
 
     wb = openpyxl.Workbook()
-    
+
+    # ── Apply manual matches to all_results BEFORE writing any sheet ──────────
+    # This ensures Daily Summary, Differences, and bank sheets are all consistent.
+    # Previously _reapply_manual_matches() ran AFTER Daily Summary was written,
+    # causing Total Odoo to be stale whenever a manual match existed.
+    matches = load_manual_matches(output_dir)
+    if matches:
+        all_results, stale_entries, still_needed = apply_manual_matches_to_results(all_results, matches)
+        _write_manual_matches_json(output_dir, still_needed)
+        for s in stale_entries:
+            print(
+                f"  [WARN] Stale manual match {s['pair_tag']}: "
+                f"Odoo payment {s.get('odoo_amount', '?')} on {s.get('odoo_date', '?')} "
+                f"no longer found in current Odoo data. Bank entry left as 'Only in Bank'."
+            )
+
     # 1. Create Daily Summary as the first sheet
     ws_daily = wb.active
     ws_daily.title = "Daily Summary"
@@ -803,10 +909,14 @@ def write_report(
 
     _auto_adjust_headers(wb)
     _auto_adjust_col_widths(wb)
-    # Re-apply any persisted manual matches before saving
-    _reapply_manual_matches(wb, output_dir)
+    # Stamp green fill + Match(Mxx) tag text for manually matched rows.
+    # Status changes were already applied in-memory above; this only handles
+    # the Excel visual layer (fill colour + tag string in Status cell).
+    if matches:
+        _reapply_manual_matches(wb, output_dir)
     wb.save(out_path)
     return out_path
+
 
 
 def _build_date_lookup(all_results):

@@ -346,6 +346,7 @@ class App(ctk.CTk):
         self.after(50, lambda: _maximize_window(self))
         self._running = False
         self._active_proc = None
+        self._last_output = None
         self._set_app_icon()
         self._build_ui()
         self._center()
@@ -2293,6 +2294,16 @@ class App(ctk.CTk):
             font=(FONT_FAMILY, 10, "bold"), text_color=MUTED
         ).pack(anchor="w", pady=(2, 0))
 
+        lbl_modal_msg = ctk.CTkLabel(
+            hdr_in, text="",
+            font=(FONT_FAMILY, 10, "bold"), text_color=ERROR
+        )
+        lbl_modal_msg.pack(anchor="w", pady=(2, 0))
+
+        def show_modal_msg(msg: str, is_err=True):
+            lbl_modal_msg.configure(text=msg, text_color=ERROR if is_err else SUCCESS)
+            top.after(5000, lambda: lbl_modal_msg.configure(text=""))
+
         # Modal Footer Toolbar (packed at bottom before body expansion so it never gets clipped)
         footer = ctk.CTkFrame(top, fg_color=SIDEBAR_BG, height=60, corner_radius=0, border_color=BORDER, border_width=1)
         footer.pack(fill="x", side="bottom")
@@ -2390,12 +2401,20 @@ class App(ctk.CTk):
             tab_manual_frame.pack_forget()
             tab_auto_frame.pack(fill="both", expand=True)
 
+        def switch_to_auto():
+            active_tab["mode"] = "auto"
+            btn_tab_auto.configure(fg_color=WHITE, border_color=ACCENT, border_width=2, text_color=ACCENT)
+            btn_tab_manual.configure(fg_color=PANEL, border_color=BORDER_DARK, border_width=1, text_color=TEXT)
+            tab_manual_frame.pack_forget()
+            tab_auto_frame.pack(fill="both", expand=True)
+
         def switch_to_manual():
             active_tab["mode"] = "manual"
             btn_tab_auto.configure(fg_color=PANEL, border_color=BORDER_DARK, border_width=1, text_color=TEXT)
             btn_tab_manual.configure(fg_color=WHITE, border_color=ACCENT, border_width=2, text_color=ACCENT)
             tab_auto_frame.pack_forget()
             tab_manual_frame.pack(fill="both", expand=True)
+            render_manual_tab()
 
         btn_tab_auto.configure(command=switch_to_auto)
         btn_tab_manual.configure(command=switch_to_manual)
@@ -2447,44 +2466,76 @@ class App(ctk.CTk):
             c_scroll = ctk.CTkScrollableFrame(tab_auto_frame, fg_color="transparent")
             c_scroll.pack(fill="both", expand=True, padx=12, pady=(0, 8))
 
+            def _reset_scroll(scroll_frame):
+                def _apply():
+                    try:
+                        scroll_frame._parent_canvas.yview_moveto(0.0)
+                    except Exception:
+                        pass
+                _apply()
+                top.after(10, _apply)
+                top.after(50, _apply)
+
+            _reset_scroll(c_scroll)
+
             page_items = avail_candidates[auto_page[0]*CANDIDATES_PER_PAGE : (auto_page[0]+1)*CANDIDATES_PER_PAGE]
 
             for c in page_items:
                 b, o, diff = c["bank"], c["odoo"], c["diff"]
                 
-                card = ctk.CTkFrame(c_scroll, fg_color=PREVIEW_BG, corner_radius=6, border_color=BORDER, border_width=1)
-                card.pack(fill="x", pady=2, padx=4)
+                card = tk.Frame(c_scroll, bg=WHITE, highlightbackground=BORDER_DARK, highlightcolor=BORDER_DARK, highlightthickness=1)
+                card.pack(fill="x", pady=3, padx=4)
 
-                c_inner = ctk.CTkFrame(card, fg_color="transparent")
-                c_inner.pack(fill="x", padx=10, pady=4)
+                c_inner = tk.Frame(card, bg=WHITE)
+                c_inner.pack(fill="x", padx=12, pady=6)
 
-                info_left = ctk.CTkFrame(c_inner, fg_color="transparent")
+                info_left = tk.Frame(c_inner, bg=WHITE)
                 info_left.pack(side="left", fill="both", expand=True)
 
                 txt_hdr = f"📅 {b['date']}  |  🏦 {b['journal']}"
                 txt_dtl = f"Bank: Rp {b['amount']:,.0f} (Ref: {b['number_bank'] or 'N/A'})   •   Odoo: Rp {o['amount']:,.0f} (Doc: {o['number_odo'] or 'N/A'})"
                 
-                ctk.CTkLabel(info_left, text=txt_hdr, font=(FONT_FAMILY, 9.5, "bold"), text_color=ACCENT).pack(anchor="w")
-                ctk.CTkLabel(info_left, text=txt_dtl, font=(FONT_FAMILY, 10, "bold"), text_color=TEXT).pack(anchor="w", pady=(1, 0))
+                lbl_h = tk.Label(info_left, text=txt_hdr, font=(_EMOJI_FONT, 10, "bold"), fg=ACCENT, bg=WHITE, anchor="w")
+                lbl_h.pack(fill="x", pady=(0, 2))
 
-                info_right = ctk.CTkFrame(c_inner, fg_color="transparent")
+                lbl_d = tk.Label(info_left, text=txt_dtl, font=(FONT_FAMILY, 11, "bold"), fg=TEXT, bg=WHITE, anchor="w")
+                lbl_d.pack(fill="x", pady=(0, 0))
+
+                info_right = tk.Frame(c_inner, bg=WHITE)
                 info_right.pack(side="right", anchor="e")
 
                 var_color = SUCCESS if diff == 0 else WARN
                 var_text = f"Variance: Rp {diff:,.0f}" if diff != 0 else "Exact Match"
-                ctk.CTkLabel(info_right, text=var_text, font=(FONT_FAMILY, 9.5, "bold"), text_color=var_color).pack(anchor="e", padx=(0, 10), side="left")
+                lbl_v = tk.Label(info_right, text=var_text, font=(FONT_FAMILY, 10, "bold"), fg=var_color, bg=WHITE, anchor="e")
+                lbl_v.pack(side="left", padx=(0, 14))
 
                 def _pair_auto(cand=c):
+                    o_r = cand["odoo"]
+                    o_recon = str(o_r.get("reconciled", "")).strip().lower()
+                    if o_recon in ("no", "false"):
+                        show_modal_msg(
+                            f"⚠️ Cannot match: Odoo payment ({o_r.get('number_odo') or o_r.get('amount')}) is not reconciled with invoice in Odoo (Reconciled: No)."
+                        )
+                        return
                     active_matched.append(cand)
+                    show_modal_msg("✅ Matched pair added to queue.", is_err=False)
                     render_queue()
                     render_auto_tab()
 
                 ctk.CTkButton(
-                    info_right, text="🔗 Match Pair", height=24, width=95,
+                    info_right, text="🔗 Match Pair", height=28, width=105,
                     fg_color=ACCENT, hover_color=ACCENT_DARK, text_color=WHITE,
-                    font=(FONT_FAMILY, 9, "bold"), corner_radius=5,
+                    font=(FONT_FAMILY, 10, "bold"), corner_radius=5,
                     command=_pair_auto
                 ).pack(side="left")
+
+                for w in (card, c_inner, info_left, lbl_h, lbl_d, info_right, lbl_v):
+                    w.bind("<Enter>", lambda e, c=card, ci=c_inner, il=info_left, lh=lbl_h, ld=lbl_d, ir=info_right, lv=lbl_v: [
+                        c.config(bg=PREVIEW_BG), ci.config(bg=PREVIEW_BG), il.config(bg=PREVIEW_BG), lh.config(bg=PREVIEW_BG), ld.config(bg=PREVIEW_BG), ir.config(bg=PREVIEW_BG), lv.config(bg=PREVIEW_BG)
+                    ])
+                    w.bind("<Leave>", lambda e, c=card, ci=c_inner, il=info_left, lh=lbl_h, ld=lbl_d, ir=info_right, lv=lbl_v: [
+                        c.config(bg=WHITE), ci.config(bg=WHITE), il.config(bg=WHITE), lh.config(bg=WHITE), ld.config(bg=WHITE), ir.config(bg=WHITE), lv.config(bg=WHITE)
+                    ])
 
         def render_manual_tab():
             for w in tab_manual_frame.winfo_children():
@@ -2508,20 +2559,53 @@ class App(ctk.CTk):
 
             sel_b = [None]
             sel_o = [None]
+            ITEMS_PAGE_SIZE = 25
+            page_b = [0]
+            page_o = [0]
 
             box_b = ctk.CTkFrame(split, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
             box_b.grid(row=0, column=0, sticky="nsew", padx=(0, 4))
 
-            lbl_title_b = ctk.CTkLabel(box_b, text=f"Bank Items ({len(avail_b)})", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT)
-            lbl_title_b.pack(anchor="w", padx=10, pady=6)
+            hdr_box_b = ctk.CTkFrame(box_b, fg_color="transparent")
+            hdr_box_b.pack(fill="x", padx=10, pady=(6, 2))
+            lbl_title_b = ctk.CTkLabel(hdr_box_b, text=f"Bank Items ({len(avail_b)})", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT)
+            lbl_title_b.pack(side="left")
+
+            p_bar_b = ctk.CTkFrame(hdr_box_b, fg_color="transparent")
+            p_bar_b.pack(side="right")
+            lbl_page_b = ctk.CTkLabel(p_bar_b, text="Page 1/1", font=(FONT_FAMILY, 9), text_color=MUTED)
+            lbl_page_b.pack(side="left", padx=4)
+            btn_prev_b = ctk.CTkButton(p_bar_b, text="◀", width=26, height=22, font=(FONT_FAMILY, 9, "bold"), fg_color=PANEL, hover_color=PREVIEW_BG, text_color=TEXT, border_width=1, border_color=BORDER_DARK)
+            btn_prev_b.pack(side="left", padx=1)
+            btn_next_b = ctk.CTkButton(p_bar_b, text="▶", width=26, height=22, font=(FONT_FAMILY, 9, "bold"), fg_color=PANEL, hover_color=PREVIEW_BG, text_color=TEXT, border_width=1, border_color=BORDER_DARK)
+            btn_next_b.pack(side="left", padx=1)
+
+            entry_search_b = ctk.CTkEntry(box_b, placeholder_text="🔍 Filter Bank by date/amount/ref...", height=28, font=(FONT_FAMILY, 9.5))
+            entry_search_b.pack(fill="x", padx=8, pady=(0, 4))
+
             s_b = ctk.CTkScrollableFrame(box_b, fg_color="transparent")
             s_b.pack(fill="both", expand=True, padx=4, pady=4)
 
             box_o = ctk.CTkFrame(split, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
             box_o.grid(row=0, column=1, sticky="nsew", padx=(4, 0))
 
-            lbl_title_o = ctk.CTkLabel(box_o, text=f"Odoo Items ({len(avail_o)})", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT)
-            lbl_title_o.pack(anchor="w", padx=10, pady=6)
+            hdr_box_o = ctk.CTkFrame(box_o, fg_color="transparent")
+            hdr_box_o.pack(fill="x", padx=10, pady=(6, 2))
+            lbl_title_o = ctk.CTkLabel(hdr_box_o, text=f"Odoo Items ({len(avail_o)})", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT)
+            lbl_title_o.pack(side="left")
+
+            p_bar_o = ctk.CTkFrame(hdr_box_o, fg_color="transparent")
+            p_bar_o.pack(side="right")
+            lbl_page_o = ctk.CTkLabel(p_bar_o, text="Page 1/1", font=(FONT_FAMILY, 9), text_color=MUTED)
+            lbl_page_o.pack(side="left", padx=4)
+            btn_prev_o = ctk.CTkButton(p_bar_o, text="◀", width=26, height=22, font=(FONT_FAMILY, 9, "bold"), fg_color=PANEL, hover_color=PREVIEW_BG, text_color=TEXT, border_width=1, border_color=BORDER_DARK)
+            btn_prev_o.pack(side="left", padx=1)
+            btn_next_o = ctk.CTkButton(p_bar_o, text="▶", width=26, height=22, font=(FONT_FAMILY, 9, "bold"), fg_color=PANEL, hover_color=PREVIEW_BG, text_color=TEXT, border_width=1, border_color=BORDER_DARK)
+            btn_next_o.pack(side="left", padx=1)
+
+            entry_search_o = ctk.CTkEntry(box_o, placeholder_text="🔍 Filter Odoo by date/amount/doc...", height=28, font=(FONT_FAMILY, 9.5))
+            entry_search_o.pack(fill="x", padx=8, pady=(0, 4))
+
             s_o = ctk.CTkScrollableFrame(box_o, fg_color="transparent")
             s_o.pack(fill="both", expand=True, padx=4, pady=4)
 
@@ -2567,6 +2651,12 @@ class App(ctk.CTk):
             def _confirm_manual_pair():
                 if sel_b[0] and sel_o[0]:
                     b, o = sel_b[0], sel_o[0]
+                    o_recon = str(o.get("reconciled", "")).strip().lower()
+                    if o_recon in ("no", "false"):
+                        show_modal_msg(
+                            f"⚠️ Cannot match: Selected Odoo payment ({o.get('number_odo') or o.get('amount')}) is not reconciled with invoice in Odoo (Reconciled: No)."
+                        )
+                        return
                     diff = b["amount"] - o["amount"]
                     active_matched.append({
                         "bank": b,
@@ -2577,6 +2667,9 @@ class App(ctk.CTk):
                         "date": b["date"],
                         "journal": b["journal"],
                     })
+                    show_modal_msg("✅ Matched pair added to queue.", is_err=False)
+                    sel_b[0] = None
+                    sel_o[0] = None
                     render_queue()
                     render_auto_tab()
                     render_manual_tab()
@@ -2604,85 +2697,128 @@ class App(ctk.CTk):
                 _rebuild_lists()
                 _update_sel_bar()
 
+            def _render_native_card(parent, item, is_sel, is_bank, on_click):
+                bg_col = ACCENT if is_sel else WHITE
+                fg_hdr = WHITE if is_sel else ACCENT
+                fg_txt = WHITE if is_sel else TEXT
+                border_col = ACCENT_DARK if is_sel else BORDER_DARK
+
+                card = tk.Frame(parent, bg=bg_col, highlightbackground=border_col, highlightcolor=border_col, highlightthickness=1, cursor="hand2")
+                card.pack(fill="x", pady=2, padx=2)
+
+                top_txt = f"📅 {item['date']}  |  🏦 {item['journal']}"
+                if is_bank:
+                    bot_txt = f"Rp {item['amount']:,.0f}  (Ref: {item.get('number_bank') or 'N/A'})"
+                else:
+                    recon_st = str(item.get("reconciled") or "Yes")
+                    recon_tag = f"  •  Reconciled: {recon_st}"
+                    bot_txt = f"Rp {item['amount']:,.0f}  (Doc: {item.get('number_odo') or 'N/A'}{recon_tag})"
+
+                l_top = tk.Label(card, text=top_txt, font=(_EMOJI_FONT, 10, "bold"), fg=fg_hdr, bg=bg_col, anchor="w", cursor="hand2")
+                l_top.pack(fill="x", padx=8, pady=(4, 1))
+
+                l_bot = tk.Label(card, text=bot_txt, font=(FONT_FAMILY, 11, "bold"), fg=fg_txt, bg=bg_col, anchor="w", cursor="hand2")
+                l_bot.pack(fill="x", padx=8, pady=(0, 4))
+
+                for w in (card, l_top, l_bot):
+                    w.bind("<Button-1>", lambda e, func=on_click: func())
+                    if not is_sel:
+                        w.bind("<Enter>", lambda e, c=card, t=l_top, b=l_bot: (c.config(bg=PREVIEW_BG), t.config(bg=PREVIEW_BG), b.config(bg=PREVIEW_BG)))
+                        w.bind("<Leave>", lambda e, c=card, t=l_top, b=l_bot: (c.config(bg=WHITE), t.config(bg=WHITE), b.config(bg=WHITE)))
+
             def _rebuild_lists():
+                q_b = entry_search_b.get().strip().lower()
+                q_o = entry_search_o.get().strip().lower()
+
                 # Cross-filter Odoo list based on selected Bank item
                 if sel_b[0]:
                     target_d = sel_b[0]["date"]
                     target_j = sel_b[0]["journal"].strip().lower()
-                    filtered_o = [o for o in avail_o if o["date"] == target_d and o["journal"].strip().lower() == target_j]
+                    base_o = [o for o in avail_o if o["date"] == target_d and o["journal"].strip().lower() == target_j]
                 else:
-                    filtered_o = avail_o
+                    base_o = avail_o
 
                 # Cross-filter Bank list based on selected Odoo item
                 if sel_o[0]:
                     target_d = sel_o[0]["date"]
                     target_j = sel_o[0]["journal"].strip().lower()
-                    filtered_b = [b for b in avail_b if b["date"] == target_d and b["journal"].strip().lower() == target_j]
+                    base_b = [b for b in avail_b if b["date"] == target_d and b["journal"].strip().lower() == target_j]
                 else:
-                    filtered_b = avail_b
+                    base_b = avail_b
 
-                # Update container titles
-                if sel_o[0]:
-                    lbl_title_b.configure(text=f"Bank Items ({len(filtered_b)} matching)")
+                # Apply text search filter
+                if q_b:
+                    filtered_b = [b for b in base_b if q_b in f"{b['date']} {b['journal']} {b['amount']} {b.get('number_bank','')}".lower()]
                 else:
-                    lbl_title_b.configure(text=f"Bank Items ({len(avail_b)})")
+                    filtered_b = base_b
 
-                if sel_b[0]:
-                    lbl_title_o.configure(text=f"Odoo Items ({len(filtered_o)} matching)")
+                if q_o:
+                    filtered_o = [o for o in base_o if q_o in f"{o['date']} {o['journal']} {o['amount']} {o.get('number_odo','')}".lower()]
                 else:
-                    lbl_title_o.configure(text=f"Odoo Items ({len(avail_o)})")
+                    filtered_o = base_o
 
-                # Render Bank Items
+                # Calculate pages
+                tot_p_b = max(1, (len(filtered_b) + ITEMS_PAGE_SIZE - 1) // ITEMS_PAGE_SIZE)
+                if page_b[0] >= tot_p_b: page_b[0] = tot_p_b - 1
+                if page_b[0] < 0: page_b[0] = 0
+
+                tot_p_o = max(1, (len(filtered_o) + ITEMS_PAGE_SIZE - 1) // ITEMS_PAGE_SIZE)
+                if page_o[0] >= tot_p_o: page_o[0] = tot_p_o - 1
+                if page_o[0] < 0: page_o[0] = 0
+
+                # Update container titles & pagination
+                lbl_title_b.configure(text=f"Bank Items ({len(filtered_b)} shown of {len(avail_b)})")
+                lbl_page_b.configure(text=f"P {page_b[0]+1}/{tot_p_b}")
+                btn_prev_b.configure(state="normal" if page_b[0] > 0 else "disabled", command=lambda: [_change_page_b(-1)])
+                btn_next_b.configure(state="normal" if page_b[0] < tot_p_b - 1 else "disabled", command=lambda: [_change_page_b(1)])
+
+                lbl_title_o.configure(text=f"Odoo Items ({len(filtered_o)} shown of {len(avail_o)})")
+                lbl_page_o.configure(text=f"P {page_o[0]+1}/{tot_p_o}")
+                btn_prev_o.configure(state="normal" if page_o[0] > 0 else "disabled", command=lambda: [_change_page_o(-1)])
+                btn_next_o.configure(state="normal" if page_o[0] < tot_p_o - 1 else "disabled", command=lambda: [_change_page_o(1)])
+
+                # Fast Native Render Bank Items (Page slice)
                 for w in s_b.winfo_children(): w.destroy()
-                for b_item in filtered_b:
-                    is_sel = sel_b[0] == b_item
-                    btn_b = ctk.CTkButton(
-                        s_b, text=f"📅 {b_item['date']}  |  🏦 {b_item['journal']}\nRp {b_item['amount']:,.0f}  (Ref: {b_item['number_bank'] or 'N/A'})",
-                        height=36, fg_color=ACCENT if is_sel else WHITE,
-                        hover_color=ACCENT_DARK if is_sel else PREVIEW_BG,
-                        border_color=ACCENT_DARK if is_sel else BORDER_DARK, border_width=2 if is_sel else 1,
-                        text_color=WHITE if is_sel else TEXT, font=(FONT_FAMILY, 9.5, "bold"), anchor="w",
-                        command=lambda bi=b_item: _toggle_b(bi)
-                    )
-                    btn_b.pack(fill="x", pady=1.5)
+                slice_b = filtered_b[page_b[0]*ITEMS_PAGE_SIZE : (page_b[0]+1)*ITEMS_PAGE_SIZE]
+                if not slice_b:
+                    tk.Label(s_b, text="No matching Bank items", bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9)).pack(pady=12)
+                else:
+                    for b_item in slice_b:
+                        is_sel = (sel_b[0] == b_item)
+                        _render_native_card(s_b, b_item, is_sel, True, lambda bi=b_item: _toggle_b(bi))
 
-                # Render Odoo Items
+                # Fast Native Render Odoo Items (Page slice)
                 for w in s_o.winfo_children(): w.destroy()
-                for o_item in filtered_o:
-                    is_sel = sel_o[0] == o_item
-                    btn_o = ctk.CTkButton(
-                        s_o, text=f"📅 {o_item['date']}  |  🏦 {o_item['journal']}\nRp {o_item['amount']:,.0f}  (Doc: {o_item['number_odo'] or 'N/A'})",
-                        height=36, fg_color=ACCENT if is_sel else WHITE,
-                        hover_color=ACCENT_DARK if is_sel else PREVIEW_BG,
-                        border_color=ACCENT_DARK if is_sel else BORDER_DARK, border_width=2 if is_sel else 1,
-                        text_color=WHITE if is_sel else TEXT, font=(FONT_FAMILY, 9.5, "bold"), anchor="w",
-                        command=lambda oi=o_item: _toggle_o(oi)
-                    )
-                    btn_o.pack(fill="x", pady=1.5)
+                slice_o = filtered_o[page_o[0]*ITEMS_PAGE_SIZE : (page_o[0]+1)*ITEMS_PAGE_SIZE]
+                if not slice_o:
+                    tk.Label(s_o, text="No matching Odoo items", bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9)).pack(pady=12)
+                else:
+                    for o_item in slice_o:
+                        is_sel = (sel_o[0] == o_item)
+                        _render_native_card(s_o, o_item, is_sel, False, lambda oi=o_item: _toggle_o(oi))
 
-                # Double-Lock Scroll Fix: Force canvas scrollregion recalculation via bbox and lock scroll position
-                def _fix_scroll(scroll_frame, items_list, selected_item):
-                    def _apply():
-                        try:
-                            canvas = scroll_frame._parent_canvas
-                            top.update_idletasks()
-                            bbox = canvas.bbox("all")
-                            if bbox:
-                                canvas.configure(scrollregion=bbox)
-                            if len(items_list) <= 4 or not selected_item or selected_item not in items_list:
-                                canvas.yview_moveto(0.0)
-                            else:
-                                idx = items_list.index(selected_item)
-                                frac = max(0.0, (idx - 1) / float(len(items_list)))
-                                canvas.yview_moveto(frac)
-                        except Exception:
-                            pass
+            def _reset_scroll_frame(scroll_frame):
+                def _apply():
+                    try:
+                        scroll_frame._parent_canvas.yview_moveto(0.0)
+                    except Exception:
+                        pass
+                _apply()
+                top.after(10, _apply)
+                top.after(50, _apply)
 
-                    _apply()
-                    top.after(20, _apply)
+            def _change_page_b(delta):
+                page_b[0] += delta
+                _rebuild_lists()
+                _reset_scroll_frame(s_b)
 
-                _fix_scroll(s_b, filtered_b, sel_b[0])
-                _fix_scroll(s_o, filtered_o, sel_o[0])
+            def _change_page_o(delta):
+                page_o[0] += delta
+                _rebuild_lists()
+                _reset_scroll_frame(s_o)
+
+            entry_search_b.bind("<KeyRelease>", lambda e: [setattr(page_b, '__setitem__', (0, 0)) if hasattr(page_b, '__setitem__') else None, _rebuild_lists(), _reset_scroll_frame(s_b)])
+            entry_search_o.bind("<KeyRelease>", lambda e: [setattr(page_o, '__setitem__', (0, 0)) if hasattr(page_o, '__setitem__') else None, _rebuild_lists(), _reset_scroll_frame(s_o)])
 
             _rebuild_lists()
 
@@ -2715,7 +2851,7 @@ class App(ctk.CTk):
                 return
             try:
                 import openpyxl
-                from openpyxl.styles import PatternFill
+                from openpyxl.styles import PatternFill, Font as XLFont
 
                 wb = openpyxl.load_workbook(latest_file)
                 GREEN_FILL = PatternFill("solid", fgColor="E2EFDA")
@@ -2732,51 +2868,112 @@ class App(ctk.CTk):
                             if m:
                                 next_pair_idx = max(next_pair_idx, int(m.group(1)) + 1)
 
+                SKIP_SHEETS = {"Daily Summary", "Differences", "Mutation Summary",
+                               "Admin Fee", "Excluded Payment", "Other Payment",
+                               "Other Mutation", "Legend"}
+
+                def _ensure_diff_header(ws, col_no, label="Difference"):
+                    """Add 'Difference' header to col_no row 3 if not already present."""
+                    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+                    from openpyxl.utils import get_column_letter as _gcl
+                    hdr_cell = ws.cell(3, col_no)
+                    if not hdr_cell.value:
+                        hdr_cell.value = label
+                        hdr_cell.font = Font(bold=True, color="FFFFFF", size=10)
+                        hdr_cell.fill = PatternFill("solid", fgColor="1F4E79")
+                        hdr_cell.alignment = Alignment(horizontal="center", vertical="center")
+                        _thin = Side(style="thin", color="CCCCCC")
+                        hdr_cell.border = Border(left=_thin, right=_thin, top=_thin, bottom=_thin)
+                        ws.column_dimensions[_gcl(col_no)].width = 18
+
+                # rows to delete in Differences sheet (collect, then delete bottom-up to preserve indices)
+                diff_rows_to_delete = []
+
                 for pair_idx, pair in enumerate(active_matched, next_pair_idx):
                     pair_tag = f"Match (M{pair_idx:02d})"
                     b_item = pair["bank"]
                     o_item = pair["odoo"]
+                    diff   = pair["diff"]  # Bank - Odoo
 
-                    # 1. Update Differences Sheet (Col 12 Status ONLY — DO NOT TOUCH Col 11 Reconciled)
+                    # ── 1. Differences Sheet ──────────────────────────────────────
                     if "Differences" in wb.sheetnames:
                         ws_diff = wb["Differences"]
-                        for r_idx in [b_item["row_idx"], o_item["row_idx"]]:
-                            if 4 <= r_idx <= ws_diff.max_row:
-                                ws_diff.cell(r_idx, 12).value = pair_tag
-                                for c in range(1, 13):
-                                    ws_diff.cell(r_idx, c).fill = GREEN_FILL
+                        _ensure_diff_header(ws_diff, 13)
+                        b_row_d = None
+                        o_row_d = None
+                        for r_idx in range(4, ws_diff.max_row + 1):
+                            src_v = str(ws_diff.cell(r_idx, 10).value or "").strip()
+                            d_v   = str(ws_diff.cell(r_idx, 2).value or "").strip()
+                            a_v   = float(ws_diff.cell(r_idx, 9).value or 0)
+                            if src_v == "Bank" and d_v == b_item["date"] and abs(a_v - b_item["amount"]) < 0.01:
+                                b_row_d = r_idx
+                            elif src_v == "Odoo" and d_v == o_item["date"] and abs(a_v - o_item["amount"]) < 0.01:
+                                o_row_d = r_idx
 
-                    # 2. Update Individual Bank Sheet (Col 11 Status ONLY — DO NOT TOUCH Col 10 Reconciled)
+                        # Write merged row on the Bank row; mark Odoo row for deletion
+                        if b_row_d:
+                            ws_diff.cell(b_row_d, 12).value = pair_tag
+                            ws_diff.cell(b_row_d, 12).font = XLFont(bold=True, size=10)
+                            c_diff = ws_diff.cell(b_row_d, 13)
+                            c_diff.value = diff
+                            c_diff.number_format = '#,##0.00'
+                            for c in range(1, 14): ws_diff.cell(b_row_d, c).fill = GREEN_FILL
+                        if o_row_d:
+                            diff_rows_to_delete.append(o_row_d)
+
+                    # ── 2. Individual Bank Sheet ──────────────────────────────────
                     target_j = b_item["journal"].strip().lower()
                     for sname in wb.sheetnames:
-                        if sname in ["Daily Summary", "Differences", "Mutation Summary", "Admin Fee", "Excluded Payment", "Other Payment", "Other Mutation", "Legend"]:
+                        if sname in SKIP_SHEETS:
                             continue
-                        if target_j in sname.lower():
-                            ws_b = wb[sname]
-                            for r in range(4, ws_b.max_row + 1):
-                                d_v = str(ws_b.cell(r, 2).value or "").strip()
-                                a_v = float(ws_b.cell(r, 8).value or 0.0)
-                                s_v = str(ws_b.cell(r, 9).value or "").strip()
-                                if s_v == "Bank" and d_v == b_item["date"] and abs(a_v - b_item["amount"]) < 0.01:
-                                    ws_b.cell(r, 11).value = pair_tag
-                                    for c in range(1, 12): ws_b.cell(r, c).fill = GREEN_FILL
-                                elif s_v == "Odoo" and d_v == o_item["date"] and abs(a_v - o_item["amount"]) < 0.01:
-                                    ws_b.cell(r, 11).value = pair_tag
-                                    for c in range(1, 12): ws_b.cell(r, c).fill = GREEN_FILL
+                        if target_j not in sname.lower():
+                            continue
+                        ws_b = wb[sname]
+                        _ensure_diff_header(ws_b, 12)
+                        b_row_b = None
+                        o_row_b = None
+                        bank_rows_to_delete = []
+                        for r in range(4, ws_b.max_row + 1):
+                            d_v = str(ws_b.cell(r, 2).value or "").strip()
+                            a_v = float(ws_b.cell(r, 8).value or 0.0)
+                            s_v = str(ws_b.cell(r, 9).value or "").strip()
+                            if s_v == "Bank" and d_v == b_item["date"] and abs(a_v - b_item["amount"]) < 0.01:
+                                b_row_b = r
+                            elif s_v == "Odoo" and d_v == o_item["date"] and abs(a_v - o_item["amount"]) < 0.01:
+                                o_row_b = r
 
+                        if b_row_b:
+                            ws_b.cell(b_row_b, 11).value = pair_tag
+                            ws_b.cell(b_row_b, 11).font = XLFont(bold=True, size=10)
+                            c_diff = ws_b.cell(b_row_b, 12)
+                            c_diff.value = diff
+                            c_diff.number_format = '#,##0.00'
+                            for c in range(1, 13): ws_b.cell(b_row_b, c).fill = GREEN_FILL
+                        if o_row_b:
+                            bank_rows_to_delete.append(o_row_b)
+
+                        # Delete Odoo rows bottom-up so indices stay valid
+                        for r_del in sorted(bank_rows_to_delete, reverse=True):
+                            ws_b.delete_rows(r_del)
+
+                # Delete Odoo rows in Differences sheet bottom-up
+                for r_del in sorted(diff_rows_to_delete, reverse=True):
+                    ws_diff.delete_rows(r_del)
+
+                from pathlib import Path as _Path
                 from odoo_journal_creator import safe_save_workbook
-                saved_ok = safe_save_workbook(wb, Path(latest_file))
+                saved_ok = safe_save_workbook(wb, _Path(latest_file))
                 if saved_ok:
-                    self._log_write(f"\n✅ Updated reconciliation report ({os.path.basename(latest_file)}) with {len(active_matched)} matched pairs!\n", "ok")
+                    self._log_write(f"\n\u2705 Updated reconciliation report ({os.path.basename(latest_file)}) with {len(active_matched)} matched pairs!\n", "ok")
                     self._set_status(f"Updated recon report with {len(active_matched)} matched pairs", SUCCESS)
                     # Persist matches to sidecar so next rerun re-applies them
                     try:
                         from excel_writer import save_manual_matches
-                        output_dir = Path(latest_file).parent
+                        output_dir = _Path(latest_file).parent
                         sidecar_entries = []
                         for pi, pair in enumerate(active_matched, next_pair_idx):
                             sidecar_entries.append({
-                                "pair_tag": f"Match (M{pi:02d})",
+                                "pair_tag":     f"Match (M{pi:02d})",
                                 "bank_date":    pair["bank"]["date"],
                                 "bank_journal": pair["bank"]["journal"],
                                 "bank_amount":  pair["bank"]["amount"],
@@ -2785,21 +2982,22 @@ class App(ctk.CTk):
                                 "odoo_journal": pair["odoo"]["journal"],
                                 "odoo_amount":  pair["odoo"]["amount"],
                                 "odoo_number":  pair["odoo"].get("number_odo", ""),
+                                "diff":         pair["diff"],
                             })
 
                         save_manual_matches(output_dir, sidecar_entries)
-                        self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
+                        self._log_write(f"\u2705 Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
                     except Exception as _se:
-                        self._log_write(f"⚠️ Could not save .manual_matches.json: {_se}\n", "warn")
+                        self._log_write(f"\u26a0\ufe0f Could not save .manual_matches.json: {_se}\n", "warn")
                 else:
-                    self._log_write(f"\n⚠️ Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel manually.\n", "warn")
+                    self._log_write(f"\n\u26a0\ufe0f Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel manually.\n", "warn")
                 top.destroy()
 
                 if open_journal_modal:
                     self._on_journal()
 
             except Exception as e:
-                self._log_write(f"\n❌ Error updating recon file: {e}\n", "err")
+                self._log_write(f"\n\u274c Error updating recon file: {e}\n", "err")
                 self._set_status(f"Error updating recon file: {e}", ERROR)
 
         btn_update_recon = ctk.CTkButton(
@@ -2818,7 +3016,6 @@ class App(ctk.CTk):
 
         render_queue()
         render_auto_tab()
-        render_manual_tab()
         switch_to_auto()
         top.deiconify()
 
@@ -3891,7 +4088,7 @@ class App(ctk.CTk):
         ).pack(side="left")
 
     def _open_output(self):
-        path = self._last_output
+        path = getattr(self, "_last_output", None)
         if path and Path(path).exists():
             _open_path(path)
         elif OUTPUT_DIR.exists():
