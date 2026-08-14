@@ -283,48 +283,49 @@ def _maximize_window(win):
 
 
 def _center_modal_on_parent(win, parent):
-    """Size and center modal dialog relative to the main app window.
-    Falls back to screen work area if parent coords are unreliable (Windows maximized)."""
+    """Size and center modal dialog.
+    Windows: always centers inside SPI_GETWORKAREA (maximized parent coords are unreliable
+             due to invisible shadow/resize borders that skew winfo_rootx/y).
+    Mac/Linux: centers relative to parent window coords."""
     import sys
     win.update_idletasks()
     parent.update_idletasks()
 
-    pw = parent.winfo_width()
-    ph = parent.winfo_height()
-    px = parent.winfo_rootx()
-    py = parent.winfo_rooty()
-
-    # On Windows zoomed state, rootx/y can be negative (shadow border) or 0 — detect and fix
     if sys.platform == "win32":
+        # Use the desktop work area (excludes taskbar) as the reference box
         try:
             import ctypes
             from ctypes import wintypes
             rect = wintypes.RECT()
             if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
-                wa_x = rect.left
-                wa_y = rect.top
-                wa_w = rect.right - rect.left
-                wa_h = rect.bottom - rect.top
-                # If parent appears to be maximized (fills work area), use work area coords
-                if pw < 400 or abs(px) > 20 or abs(py) > 20:
-                    px, py, pw, ph = wa_x, wa_y, wa_w, wa_h
+                ref_x, ref_y = rect.left, rect.top
+                ref_w = rect.right - rect.left
+                ref_h = rect.bottom - rect.top
+            else:
+                raise RuntimeError("SPI failed")
         except Exception:
-            pass
+            ref_x, ref_y = 0, 0
+            ref_w = win.winfo_screenwidth()
+            ref_h = win.winfo_screenheight()
+    else:
+        ref_x = parent.winfo_rootx()
+        ref_y = parent.winfo_rooty()
+        ref_w = parent.winfo_width()
+        ref_h = parent.winfo_height()
+        if ref_w < 400 or ref_h < 300:
+            ref_x, ref_y = 0, 0
+            ref_w = win.winfo_screenwidth()
+            ref_h = win.winfo_screenheight()
 
-    # Generic fallback
-    if pw < 400 or ph < 300:
-        pw = win.winfo_screenwidth()
-        ph = win.winfo_screenheight()
-        px = 0
-        py = 0
+    target_w = max(1000, int(ref_w * 0.88))
+    target_h = max(600, int(ref_h * 0.82))
 
-    target_w = max(1000, int(pw * 0.88))
-    target_h = max(600, int(ph * 0.82))
+    x = ref_x + (ref_w - target_w) // 2
+    y = ref_y + (ref_h - target_h) // 2
 
-    x = px + max(0, (pw - target_w) // 2)
-    y = py + max(0, (ph - target_h) // 2)
+    win.geometry(f"{target_w}x{target_h}+{max(0, x)}+{max(0, y)}")
 
-    win.geometry(f"{target_w}x{target_h}+{x}+{y}")
+
 
 
 class App(ctk.CTk):
