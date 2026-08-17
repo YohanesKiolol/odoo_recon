@@ -2169,20 +2169,19 @@ class App(ctk.CTk):
             
             hdr = ctk.CTkFrame(content, fg_color="transparent")
             hdr.pack(fill="x", padx=16, pady=(16, 8))
-            ctk.CTkLabel(hdr, text="🗑️  Confirm Workspace Data Cleanup", font=(FONT_FAMILY, 13, "bold"), text_color=ERROR).pack(anchor="w")
-            ctk.CTkLabel(hdr, text=f"This will relocate {len(files_to_move)} file(s) out of active input, mutation & output folders.", font=(FONT_BODY, 11, "bold"), text_color=MUTED).pack(anchor="w", pady=(2, 0))
-            
+            ctk.CTkLabel(hdr, text=f"This will relocate {len(files_to_move)} file(s) out of active input, mutation & output folders.", font=(FONT_FAMILY, 10, "bold"), text_color=MUTED).pack(anchor="w", pady=(2, 0))
+
             info_box = ctk.CTkFrame(content, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
             info_box.pack(fill="x", padx=16, pady=12)
-            
+
             ctk.CTkLabel(info_box, text="🗄️ Archive Destination Folder:", font=(FONT_FAMILY, 10, "bold"), text_color=TEXT).pack(anchor="w", padx=12, pady=(10, 2))
             ctk.CTkLabel(info_box, text=str(target_recap), font=(FONT_MONO, 10, "bold"), text_color=ACCENT, wraplength=460, justify="left").pack(anchor="w", padx=12, pady=(0, 10))
-            
-            ctk.CTkLabel(content, text="Cleaned files will be stored safely in Recap storage and can be accessed via Quick Access.", font=(FONT_BODY, 10, "bold"), text_color=MUTED, wraplength=460, justify="left").pack(anchor="w", padx=16)
-            
+
+            ctk.CTkLabel(content, text="Cleaned files will be stored safely in Recap storage and can be accessed via Quick Access.", font=(FONT_FAMILY, 10, "bold"), text_color=MUTED, wraplength=460, justify="left").pack(anchor="w", padx=16)
+
             btn_frame = ctk.CTkFrame(content, fg_color="transparent")
             btn_frame.pack(fill="x", side="bottom", padx=16, pady=(12, 16))
-            
+
             def _do_clean():
                 dlg.destroy()
                 try:
@@ -2197,20 +2196,19 @@ class App(ctk.CTk):
                         target_file.parent.mkdir(parents=True, exist_ok=True)
                         shutil.move(str(f), str(target_file))
                         moved_count += 1
-                        
+
                     self._log_write(f"✅ {moved_count} file(s) archived to: recap/{timestamp}/\n", "ok")
                     self._refresh_folder_status()
                     self._set_status(f"Cleaned {moved_count} files", SUCCESS)
                 except Exception as ex:
                     self._log_write(f"\n❌ Error during Data Cleanup: {ex}\n", "err")
 
-                    
             ctk.CTkButton(
                 btn_frame, text="Cancel", height=36, width=100,
                 fg_color=WHITE, hover_color=PREVIEW_BG, border_color=BORDER_DARK, border_width=1,
                 text_color=TEXT, font=(FONT_FAMILY, 11, "bold"), command=dlg.destroy
             ).pack(side="right", padx=(8, 0))
-            
+
             ctk.CTkButton(
                 btn_frame, text="Confirm Clean", height=36, width=130,
                 fg_color=ERROR, hover_color="#B91C1C", text_color=WHITE,
@@ -2220,12 +2218,21 @@ class App(ctk.CTk):
         except Exception as e:
             self._log_write(f"\n❌ Error preparing Data Cleanup: {e}\n", "err")
 
-    # ── Run / Scan ────────────────────────────────────────────────────────────
+    def _get_selected_banks(self) -> list[str]:
+        """Return clean list of active bank keys ('bca', 'mandiri', 'bri')."""
+        if hasattr(self, "_bank_vars"):
+            if self._bank_vars.get("All") and self._bank_vars["All"].get():
+                return ["bca", "mandiri", "bri"]
+            sel = [b.lower() for b in ["BCA", "Mandiri", "BRI"] if self._bank_vars.get(b) and self._bank_vars[b].get()]
+            if sel:
+                return sel
+        return ["bca", "mandiri", "bri"]
+
     def _on_scan(self):
         if self._running:
             return
         self._running = True
-        selected_banks = [b.lower() for b, var in self._bank_vars.items() if var.get()]
+        selected_banks = self._get_selected_banks()
         if not selected_banks:
             self._set_status("Select at least 1 bank!", ERROR)
             self._running = False
@@ -2240,12 +2247,8 @@ class App(ctk.CTk):
         self._log.delete("1.0", "end")
         self._log.config(state="disabled")
         self._set_status("Scanning data...", WARN)
-        # Force the UI to repaint (show disabled buttons + status) BEFORE
-        # any blocking work. _refresh_folder_status reads the filesystem
-        # synchronously, which would freeze the main thread otherwise.
         self.update_idletasks()
-        # Defer scan: give the event loop one full cycle to render the loading
-        # state, then start the background thread.
+
         def _deferred_scan():
             self._refresh_folder_status()
             threading.Thread(target=self._run_script, args=(selected_banks, True), daemon=True).start()
@@ -2256,7 +2259,7 @@ class App(ctk.CTk):
         if hasattr(self, "_stop_btn"):
             self._stop_btn.pack(fill="x", pady=(6, 0))
 
-        selected_banks = [b.lower() for b, var in self._bank_vars.items() if var.get()]
+        selected_banks = self._get_selected_banks()
         if not selected_banks:
             self._set_status("Select at least 1 bank!", ERROR)
             self._running = False
@@ -2299,7 +2302,7 @@ class App(ctk.CTk):
 
         def run_all():
             try:
-                self.after(0, self._log_write, f"\n\u2500\u2500 Starting Single Browser Auto-Recon \u2500\u2500\n", "head")
+                self.after(0, self._log_write, f"\n── Starting Single Browser Auto-Recon ──\n", "head")
 
                 if getattr(sys, "frozen", False):
                     cmd = [sys.executable, "--run-downloader", "--mode", "auto_recon"]
