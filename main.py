@@ -17,6 +17,7 @@ Usage:
 
 import sys
 import argparse
+from pathlib import Path
 
 # ── Dependency check ──────────────────────────────────────────────────────────
 def _check_deps():
@@ -84,18 +85,156 @@ def _banner(text: str):
     print(f"{'─' * 60}")
 
 
-def main():
-    # Force UTF-8 output — Windows console defaults to cp1252 which
-    # can't encode ↔, ✅, ❌ etc. and raises UnicodeEncodeError.
-    import io as _io
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    elif hasattr(sys.stdout, "buffer"):
-        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer,
-                                       encoding="utf-8", errors="replace")
+def scan_bank_date_range(banks=None, log_fn=None) -> tuple[str, str] | None:
+    """Scan bank files in parallel and return the (min_date, max_date) ISO range."""
+    import re, zipfile
+    from collections import Counter
+    from concurrent.futures import ThreadPoolExecutor
+    from config import BANK_ACCOUNTS
+    
+    if not banks or any(b.lower() == "all" for b in banks):
+        banks_to_scan = ALL_BANKS
+    else:
+        banks_to_scan = [b.lower() for b in banks]
 
-    args    = parse_args()
-    banks   = [b.lower() for b in args.bank] if args.bank else ALL_BANKS
+    all_dates = []
+    bank_details = {}
+
+    def _log(msg):
+        if log_fn:
+            log_fn(msg)
+        else:
+            print(msg, end="")
+
+    def _do_bca():
+        bca_dates = []
+        try:
+            from readers.bca_reader import _find_bca_excels, _read_one_bca
+            search_dirs = []
+            for alias, acc_info in BANK_ACCOUNTS.get("bca", {}).items():
+                target_dir = BCA_EXCEL_DIR / alias
+                if alias == "main" and not target_dir.exists():
+                    target_dir = BCA_EXCEL_DIR
+                if target_dir.exists() and target_dir not in search_dirs:
+                    search_dirs.append(target_dir)
+
+            all_excels = []
+            for sdir in search_dirs:
+                all_excels.extend(_find_bca_excels(sdir, BCA_EXCEL_PATTERN))
+
+            with ThreadPoolExecutor(max_workers=min(4, len(all_excels) or 1)) as bca_pool:
+                bca_futs = [bca_pool.submit(_read_one_bca, f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN) for f in all_excels]
+                for fut in bca_futs:
+                    for r in fut.result():
+                        d_str = str(r.get("date") or r.get("txn_date") or "").strip()
+                        if len(d_str) >= 10 and d_str[0:4].isdigit():
+                            all_dates.append(d_str[:10])
+                            bca_dates.append(d_str[:10])
+        except Exception:
+            pass
+        bank_details["bca"] = Counter(bca_dates)
+
+    def _do_mandiri():
+        man_dates = []
+        try:
+            import pyzipper
+            search_dirs = []
+            for alias, acc_info in BANK_ACCOUNTS.get("mandiri", {}).items():
+                target_dir = MANDIRI_ZIP_DIR / alias
+                if alias == "main" and not target_dir.exists():
+                    target_dir = MANDIRI_ZIP_DIR
+                if target_dir.exists() and target_dir not in search_dirs:
+                    search_dirs.append(target_dir)
+
+            for sdir in search_dirs:
+                for z_path in sdir.glob("*.zip"):
+                    try:
+                        with pyzipper.AESZipFile(z_path, 'r', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+                            zf.setpassword(MANDIRI_ZIP_PASSWORD.encode())
+                            for name in zf.namelist():
+                                m = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
+                                for ds in m:
+                                    iso_d = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
+                                    all_dates.append(iso_d)
+                                    man_dates.append(iso_d)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        bank_details["mandiri"] = Counter(man_dates)
+
+    def _do_bri():
+        bri_dates = []
+        try:
+            search_dirs = []
+            for alias, acc_info in BANK_ACCOUNTS.get("bri", {}).items():
+                target_dir = BRI_ZIP_DIR / alias
+                if alias == "main" and not target_dir.exists():
+                    target_dir = BRI_ZIP_DIR
+                if target_dir.exists() and target_dir not in search_dirs:
+                    search_dirs.append(target_dir)
+
+            for sdir in search_dirs:
+                for z_path in sdir.glob("*.zip"):
+                    try:
+                        with zipfile.ZipFile(z_path, "r") as zf:
+                            for name in zf.namelist():
+                                m = re.search(r'(\d{4}-\d{2}-\d{2})', name)
+                                if m:
+                                    iso_d = m.group(1)
+                                    all_dates.append(iso_d)
+                                    bri_dates.append(iso_d)
+                                else:
+                                    m2 = re.search(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
+                                    if m2:
+                                        ds = m2.group(1)
+                                        iso_d = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
+                                        all_dates.append(iso_d)
+                                        bri_dates.append(iso_d)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        bank_details["bri"] = Counter(bri_dates)
+
+    futs = []
+    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="scan") as pool:
+        if "bca" in banks_to_scan: futs.append(pool.submit(_do_bca))
+        if "mandiri" in banks_to_scan: futs.append(pool.submit(_do_mandiri))
+        if "bri" in banks_to_scan: futs.append(pool.submit(_do_bri))
+        for f in futs:
+            try:
+                f.result()
+            except Exception:
+                pass
+
+    _log("  [ BANK FILES ]\n")
+    for b_key in sorted(bank_details.keys()):
+        cnt = bank_details[b_key]
+        _log(f"    {b_key.upper()}:\n")
+        if not cnt:
+            _log("      (No transactions found)\n")
+        else:
+            for d, c in sorted(cnt.items()):
+                _log(f"      {d} : {c} trxs\n")
+    _log(f"\n{'─' * 60}\n\n")
+
+    if all_dates:
+        min_d, max_d = min(all_dates), max(all_dates)
+        _log(f"[DATE_RANGE]|{min_d}|{max_d}\n")
+        return (min_d, max_d)
+    return None
+
+
+def run_reconciliation(banks=None, process_all=False, open_file=False) -> Path:
+    """Execute the full multi-bank reconciliation pipeline in-process and return output Path."""
+    from concurrent.futures import ThreadPoolExecutor
+    from config import BANK_ACCOUNTS
+
+    if not banks or any(b.lower() == "all" for b in banks):
+        banks = ALL_BANKS
+    else:
+        banks = [b.lower() for b in banks]
 
     print()
     print("=" * 60)
@@ -109,7 +248,6 @@ def main():
     # ── Step 1: Read ODO ───────────────────────────────────────────────────────
     _banner("Reading Odoo transactions...")
 
-    from config import BANK_ACCOUNTS
     group_map = {}
     for bank_key in banks:
         for alias, acc_info in BANK_ACCOUNTS.get(bank_key, {}).items():
@@ -123,16 +261,11 @@ def main():
             amount_col  = ODO_AMOUNT_COLUMN,
             number_col  = ODO_NUMBER_COLUMN,
             group_map   = group_map,
-            include_others = args.all,
+            include_others = process_all,
         )
     except (FileNotFoundError, ValueError) as e:
-        if args.scan:
-            print(f"  [i] ODO file not found, continuing scan for bank files...")
-            odo_date = None
-            odo_bank_txns = {}
-        else:
-            print(f"\n[!] ERROR (ODO): {e}\n")
-            sys.exit(1)
+        print(f"\n[!] ERROR (ODO): {e}\n")
+        raise
 
     if odo_date:
         print(f"  [+] ODO date: {odo_date}")
@@ -140,10 +273,6 @@ def main():
         print(f"     {bank_key:10} → {len(txns)} transactions")
 
     # ── Step 2: Read each bank (parallel) ─────────────────────────────────────
-    # BCA / Mandiri / BRI are fully independent — run them concurrently.
-    # Mutations (Step 4) are also independent — overlap with bank reads.
-    from concurrent.futures import ThreadPoolExecutor
-
     bank_txns: dict[str, list[dict]] = {}
     all_excluded_txns: list[dict] = []
 
@@ -221,13 +350,11 @@ def main():
                 raise
         return frag, exc
 
-    # Submit only the banks the user asked for, plus always read mutations
     workers = {}
     with ThreadPoolExecutor(max_workers=4, thread_name_prefix="recon") as pool:
         if "bca" in banks:     workers["bca"]       = pool.submit(_do_bca)
         if "mandiri" in banks: workers["mandiri"]   = pool.submit(_do_mandiri)
         if "bri" in banks:     workers["bri"]       = pool.submit(_do_bri)
-        # Mutations are independent — overlap with bank reads
         workers["mutations"] = pool.submit(read_all_mutations)
 
         for key, fut in workers.items():
@@ -237,49 +364,9 @@ def main():
                 frag, exc = fut.result()
                 bank_txns.update(frag)
                 all_excluded_txns.extend(exc)
-            except SystemExit:
-                raise
             except Exception as e:
                 print(f"\n[!] ERROR ({key}): {e}\n")
-                sys.exit(1)
-
-
-
-    # ── Handle Scan Mode ───────────────────────────────────────────────────────
-    if args.scan:
-        from collections import Counter
-        _banner("SCAN SUMMARY")
-        
-        print("  [ ODO FILE ]")
-        for bank_key, txns in odo_bank_txns.items():
-            print(f"    {bank_key}:")
-            dates = Counter(t.get("date", "Unknown") for t in txns)
-            if not dates:
-                print("      (No transactions)")
-            for d, c in sorted(dates.items()):
-                print(f"      {d} : {c} trxs")
-        
-        print("\n  [ BANK FILES ]")
-        all_dates = []
-        for acc_key, txns in bank_txns.items():
-            print(f"    {acc_key}:")
-            dates = Counter(t.get("date", "Unknown") for t in txns)
-            if not dates:
-                print("      (No transactions)")
-            for d, c in sorted(dates.items()):
-                print(f"      {d} : {c} trxs")
-                d_str = str(d).strip()
-                if d_str and d_str != "Unknown":
-                    # basic check for YYYY-MM-DD
-                    if len(d_str) >= 10 and d_str[0:4].isdigit():
-                        all_dates.append(d_str[:10])
-        
-        print(f"\n{'─' * 60}\n")
-        
-        if all_dates:
-            print(f"[DATE_RANGE]|{min(all_dates)}|{max(all_dates)}")
-            
-        sys.exit(0)
+                raise
 
     # ── Step 3: Reconcile per bank ─────────────────────────────────────────────
     _banner("Comparing transactions...")
@@ -289,7 +376,6 @@ def main():
     print(f"\n  {'Bank':<10} {'Done':>6} {'Bank Only':>10} {'ODO Only':>9} {'Total':>7}")
     print(f"  {'─'*10} {'─'*6} {'─'*10} {'─'*9} {'─'*7}")
 
-    # Make sure we process "other" if it exists in Odoo txns
     keys_to_process = list(bank_txns.keys())
     if "other" in odo_bank_txns and "other" not in keys_to_process:
         keys_to_process.append("other")
@@ -299,7 +385,6 @@ def main():
         o_txns = odo_bank_txns.get(acc_key, [])
         
         if acc_key != "other":
-            # Warn about bank dates that have no Odoo data at all (still useful diagnostic)
             valid_bank_dates = {str(t.get("date")) for t in b_txns if t.get("date")}
             valid_odoo_dates = {str(t.get("date")) for t in o_txns if t.get("date")}
             missing_in_odoo = valid_bank_dates - valid_odoo_dates
@@ -307,19 +392,13 @@ def main():
                 missing_str = ", ".join(sorted(missing_in_odoo))
                 print(f"  [!] WARNING: {acc_key} has Bank data for {missing_str} but No Odoo data exists!")
 
-            # NOTE: All Odoo rows pass to reconcile() regardless of date.
-            # Previously we filtered to valid_bank_dates only, which caused Odoo entries
-            # for dates not covered by the bank file to be silently dropped — making
-            # Total Odoo in Daily Summary lower than the actual Odoo payment file total.
-            # Unmatched Odoo rows now correctly become "Only in Odoo" entries.
-
         results = reconcile(b_txns, o_txns)
         stats   = summary(results)
         all_results[acc_key] = results
 
         print(f"  {acc_key:<10} {stats['done']:>6} {stats['bank_only']:>10} {stats['odo_only']:>9} {stats['total']:>7}")
 
-    # ── Step 4: Parse Mutations (result from background future) ───────────────
+    # ── Step 4: Parse Mutations ───────────────────────────────────────────────
     _banner("Reading Mutations...")
     try:
         mutations, unknown_mutations = workers["mutations"].result()
@@ -334,20 +413,16 @@ def main():
     # ── Step 5: Write report ───────────────────────────────────────────────────
     _banner("Writing Excel report...")
 
-    try:
-        out_path = write_report(
-            all_results,
-            odo_date,
-            OUTPUT_DIR,
-            bank_txns=bank_txns,
-            odo_bank_txns=odo_bank_txns,
-            mutations=mutations,
-            unknown_mutations=unknown_mutations,
-            excluded_txns=all_excluded_txns,
-        )
-    except Exception as e:
-        print(f"\n[!] ERROR writing report: {e}\n")
-        sys.exit(1)
+    out_path = write_report(
+        all_results,
+        odo_date,
+        OUTPUT_DIR,
+        bank_txns=bank_txns,
+        odo_bank_txns=odo_bank_txns,
+        mutations=mutations,
+        unknown_mutations=unknown_mutations,
+        excluded_txns=all_excluded_txns,
+    )
 
     print(f"\n[+] Report saved to:\n   {out_path.resolve()}")
 
@@ -357,18 +432,45 @@ def main():
         for s in [summary(r)]
     )
     if total_disc > 0:
-        print(f"\n[!] {total_disc} discrepancies found — check 'Selisih (Semua)' sheet.")
+        print(f"\n[!] {total_disc} discrepancies found — check 'Differences' sheet.")
     else:
         print("\n[+] All transactions matched across all banks!")
 
-    if not args.no_open:
+    if open_file:
         print()
-        import subprocess
         import os
         if os.name == 'nt':
             os.startfile(out_path)
         else:
+            import subprocess
             subprocess.run(["open", str(out_path)])
+
+    return out_path
+
+
+def main():
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer,
+                                       encoding="utf-8", errors="replace")
+
+    args    = parse_args()
+    banks   = [b.lower() for b in args.bank] if args.bank else ALL_BANKS
+
+    if args.scan:
+        _banner("SCAN SUMMARY")
+        dates_range = scan_bank_date_range(banks)
+        if dates_range:
+            print(f"[DATE_RANGE]|{dates_range[0]}|{dates_range[1]}")
+        sys.exit(0)
+
+    try:
+        run_reconciliation(banks=banks, process_all=args.all, open_file=not args.no_open)
+    except Exception as e:
+        print(f"\n[!] Reconciliation failed: {e}\n")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

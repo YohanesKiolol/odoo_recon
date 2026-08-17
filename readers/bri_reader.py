@@ -272,15 +272,24 @@ def read_bri(
     zip_paths = _find_bri_zips(zip_dir, zip_pattern)
     print(f"  Found {len(zip_paths)} BRI ZIP(s): {[p.name for p in zip_paths]}")
 
-    all_txns: list[dict] = []
-    for zip_path in zip_paths:
+    def _process_one_bri_zip(zip_path):
         print(f"  BRI ZIP: {zip_path.name}")
         pdf_bytes = _extract_detail_pdf(zip_path, pdf_pattern)
         print(f"  PDF extracted ({len(pdf_bytes):,} bytes), parsing table...")
-        txns = _parse_pdf_table(pdf_bytes, amount_col, number_col,
+        return _parse_pdf_table(pdf_bytes, amount_col, number_col,
                                 filter_dates=filter_dates,
                                 source_file=zip_path.name)
-        all_txns.extend(txns)
+
+    all_txns: list[dict] = []
+    if len(zip_paths) <= 1:
+        for zip_path in zip_paths:
+            all_txns.extend(_process_one_bri_zip(zip_path))
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=min(len(zip_paths), 4), thread_name_prefix="bri_zip") as pool:
+            futs = [pool.submit(_process_one_bri_zip, zp) for zp in zip_paths]
+            for fut in futs:
+                all_txns.extend(fut.result())
 
     # ── Exclude Voided/Reversed Transactions ──────────────────────────────────
     voided_keys = set()

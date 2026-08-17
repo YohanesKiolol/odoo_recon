@@ -122,6 +122,19 @@ CTK_ACCENT  = ACCENT
 CTK_SUCCESS = SUCCESS
 CTK_ERROR   = ERROR
 
+BANK_BADGE_COLS = {
+    "BCA":     ("#1E40AF", "#DBEAFE"),
+    "MANDIRI": ("#92400E", "#FEF3C7"),
+    "BRI":     ("#047857", "#D1FAE5"),
+    "OTHER":   ("#4B5563", "#F3F4F6"),
+}
+
+TYPE_BADGE_INFO = {
+    "bank_only":         ("🏦 Bank Only", "#4338CA", "#EEF2FF"),
+    "odoo_only":         ("📦 Odoo Only", "#B45309", "#FEF3C7"),
+    "unreconciled_odoo": ("⚠️ Unreconciled", "#BE123C", "#FFE4E6"),
+}
+
 # ── Font System & Custom TTF Font Loading ──────────────────────────────────────
 fonts_dir = (
     Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "assets" / "fonts"
@@ -351,7 +364,7 @@ class App(ctk.CTk):
         self._build_ui()
         self._center()
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
-        self.after(200, self._auto_scan_on_startup)
+        self._auto_scan_after_id = self.after(200, self._auto_scan_on_startup)
 
 
     def _on_app_close(self):
@@ -531,12 +544,92 @@ class App(ctk.CTk):
             text_color=MUTED, fg_color="transparent"
         ).pack(anchor="w", padx=10, pady=(8, 4))
 
+        from config import PREDEFINED_ACCOUNTS
+        self._predefined_accounts = PREDEFINED_ACCOUNTS
+
+        self._email_var = tk.StringVar()
+        self._password_var = tk.StringVar()
+
+        if self._predefined_accounts:
+            ctk.CTkLabel(
+                sec_cred, text="Saved Account", font=(FONT_FAMILY, 10, "bold"),
+                text_color=TEXT, fg_color="transparent"
+            ).pack(anchor="w", padx=10, pady=(2, 0))
+
+            preset_names = list(self._predefined_accounts.keys())
+            first_key = preset_names[0]
+
+            # Custom styled dropdown button matching CTk rounded inputs
+            btn_preset = ctk.CTkButton(
+                sec_cred,
+                text=f"👤  {first_key}",
+                anchor="w",
+                height=34,
+                corner_radius=6,
+                border_width=1,
+                border_color=BORDER_DARK,
+                fg_color=WHITE,
+                hover_color=PREVIEW_BG,
+                text_color=TEXT,
+                font=(FONT_FAMILY, 10, "bold"),
+            )
+            btn_preset.pack(fill="x", padx=10, pady=(2, 8))
+
+            lbl_chevron = ctk.CTkLabel(
+                btn_preset, text="▾", text_color=MUTED,
+                font=(FONT_FAMILY, 11, "bold"), fg_color="transparent"
+            )
+            lbl_chevron.place(relx=1.0, rely=0.5, anchor="e", x=-10)
+
+            menu_preset = tk.Menu(
+                btn_preset, tearoff=0, bg=WHITE, fg=TEXT,
+                activebackground=PREVIEW_BG, activeforeground=ACCENT,
+                font=(FONT_FAMILY, 10, "bold"), bd=1, relief="solid"
+            )
+
+            def _select_account(name):
+                if name in self._predefined_accounts:
+                    acc = self._predefined_accounts[name]
+                    self._email_var.set(acc["username"])
+                    self._password_var.set(acc["password"])
+                    btn_preset.configure(text=f"👤  {name}")
+                elif name == "Custom":
+                    self._email_var.set("")
+                    self._password_var.set("")
+                    btn_preset.configure(text="✏️  Custom (Manual)")
+
+            for name in preset_names:
+                menu_preset.add_command(
+                    label=f"  👤  {name}  ",
+                    command=lambda n=name: _select_account(n)
+                )
+            menu_preset.add_separator()
+            menu_preset.add_command(
+                label="  ✏️  Custom (Manual)  ",
+                command=lambda: _select_account("Custom")
+            )
+
+            def _open_menu(event=None):
+                try:
+                    x = btn_preset.winfo_rootx()
+                    y = btn_preset.winfo_rooty() + btn_preset.winfo_height() + 2
+                    menu_preset.tk_popup(x, y)
+                finally:
+                    menu_preset.grab_release()
+
+            btn_preset.configure(command=_open_menu)
+            lbl_chevron.bind("<Button-1>", _open_menu)
+
+            # Pre-fill first account
+            first_acc = self._predefined_accounts[first_key]
+            self._email_var.set(first_acc["username"])
+            self._password_var.set(first_acc["password"])
+
         ctk.CTkLabel(
             sec_cred, text="Username", font=(FONT_FAMILY, 10, "bold"),
             text_color=TEXT, fg_color="transparent"
         ).pack(anchor="w", padx=10)
         
-        self._email_var = tk.StringVar()
         ctk.CTkEntry(
             sec_cred, textvariable=self._email_var,
             placeholder_text="odoo@example.com",
@@ -548,8 +641,6 @@ class App(ctk.CTk):
             sec_cred, text="Password", font=(FONT_FAMILY, 10, "bold"),
             text_color=TEXT, fg_color="transparent"
         ).pack(anchor="w", padx=10)
-        
-        self._password_var = tk.StringVar()
         
         pass_frame = ctk.CTkFrame(sec_cred, fg_color=WHITE, border_color=BORDER_DARK, border_width=1, corner_radius=6, height=34)
         pass_frame.pack(fill="x", padx=10, pady=(2, 10))
@@ -796,10 +887,14 @@ class App(ctk.CTk):
             btn.pack(side="left", fill="both", expand=True)
             return btn
 
-        _link_btn(sec_links, "📂", "Open Merchant", self._open_input)
-        _link_btn(sec_links, "📁", "Open Mutation", self._open_mutation)
-        self._open_btn_sidebar = _link_btn(sec_links, "📊", "Open Result", self._open_output)
-        _link_btn(sec_links, "🗄", "Open Recap", self._open_recap)
+        self._qa_result_btn   = _link_btn(sec_links, "📊", "Open Result", self._open_output)
+        self._qa_pdf_btn      = _link_btn(sec_links, "📄", "Summary PDF", self._on_export_summary_pdf)
+        self._qa_merchant_btn = _link_btn(sec_links, "📂", "Open Merchant", self._open_input)
+        self._qa_mutation_btn = _link_btn(sec_links, "📁", "Open Mutation", self._open_mutation)
+        self._qa_payment_btn  = _link_btn(sec_links, "💳", "Open Payment", self._open_odoo_file)
+        self._qa_journal_btn  = _link_btn(sec_links, "📑", "Open Journal Entries", self._open_journal_file)
+        self._qa_recap_btn    = _link_btn(sec_links, "🗄", "Open Recap", self._open_recap)
+        self._open_btn_sidebar = self._qa_result_btn
 
         # ── Primary CTA Action Stack — Pinned Bottom ─────────────────────────
         ctk.CTkFrame(sidebar_outer, height=1, fg_color=BORDER).pack(fill="x")
@@ -832,6 +927,15 @@ class App(ctk.CTk):
             corner_radius=8, command=self._on_manual_match
         )
         self._match_btn.pack(fill="x", pady=(0, 6))
+
+        self._sync_cloud_btn = ctk.CTkButton(
+            _cta, text="☁️  Sync Sales Portal",
+            height=40, fg_color=WHITE, hover_color="#F8FAFC",
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 11, "bold"),
+            corner_radius=8, command=self._on_sync_cloud
+        )
+        self._sync_cloud_btn.pack(fill="x", pady=(0, 6))
 
         self._journal_btn = ctk.CTkButton(
             _cta, text="📋  Generate Journal",
@@ -891,6 +995,8 @@ class App(ctk.CTk):
         self._download_btn.pack(side="left", padx=(0, 6))
         self._scan_btn     = _sec_btn(action_bar, "🔍 Scan", self._on_scan)
         self._scan_btn.pack(side="left", padx=(0, 6))
+        self._pdf_btn      = _sec_btn(action_bar, "📑 Summary PDF", self._on_export_summary_pdf)
+        self._pdf_btn.pack(side="left", padx=(0, 6))
         self._cleanse_btn  = _sec_btn(action_bar, "🗑 Clean", self._on_cleanse, color=ERROR, hover=ERROR_LIGHT)
         self._cleanse_btn.pack(side="left")
 
@@ -917,39 +1023,99 @@ class App(ctk.CTk):
         ctk.CTkFrame(dash_card, height=1, fg_color=BORDER).pack(fill="x", padx=16)
 
         kpi_grid = ctk.CTkFrame(dash_card, fg_color="transparent")
-        kpi_grid.pack(fill="x", padx=12, pady=10)
-        for c in range(5):
-            kpi_grid.columnconfigure(c, weight=1)
+        kpi_grid.pack(fill="x", padx=12, pady=(8, 8))
+        kpi_grid.rowconfigure(0, weight=1)
+        for c in range(4):
+            kpi_grid.columnconfigure(c, weight=1, uniform="kpi_col")
 
-        def _make_kpi_card(parent, col, icon, title, val_attr, sub_attr):
-            card = ctk.CTkFrame(parent, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
-            card.grid(row=0, column=col, padx=3, pady=2, sticky="ew")
+        def _make_kpi_card(parent, col, icon, title, val_attr, sub_attr, click_cmd=None):
+            card = ctk.CTkFrame(parent, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1, height=96)
+            card.grid(row=0, column=col, padx=4, pady=2, sticky="nsew")
+            card.pack_propagate(False)
             
             top_f = ctk.CTkFrame(card, fg_color="transparent")
-            top_f.pack(fill="x", padx=8, pady=(8, 2))
+            top_f.pack(fill="x", padx=10, pady=(8, 2))
             
             ico_font = ("Segoe UI Emoji", 13) if IS_WINDOWS else (FONT_FAMILY, 13)
             ico_lbl = tk.Label(top_f, text=icon, font=ico_font, bg=PREVIEW_BG, fg=ACCENT)
             ico_lbl.pack(side="left")
 
             t_lbl = ctk.CTkLabel(top_f, text=title, font=(FONT_FAMILY, 10, "bold"), text_color=MUTED)
-            t_lbl.pack(side="left", padx=(3, 0))
+            t_lbl.pack(side="left", padx=(4, 0))
 
             val_lbl = tk.Label(card, text="0 Files", font=(FONT_FAMILY, 13, "bold"), fg=TEXT, bg=PREVIEW_BG, anchor="w")
-            val_lbl.pack(fill="x", padx=8, pady=(2, 0))
+            val_lbl.pack(fill="x", padx=10, pady=(2, 1))
             setattr(self, val_attr, val_lbl)
 
             sub_lbl = tk.Label(card, text="—", font=(FONT_FAMILY, 10, "bold"), fg=MUTED, bg=PREVIEW_BG, anchor="w")
-            sub_lbl.pack(fill="x", padx=8, pady=(0, 6))
-
+            sub_lbl.pack(fill="x", padx=10, pady=(1, 6))
             setattr(self, sub_attr, sub_lbl)
 
+            if click_cmd:
+                for widget in (card, top_f, ico_lbl, t_lbl, val_lbl, sub_lbl):
+                    try:
+                        widget.bind("<Button-1>", lambda e, cmd=click_cmd: cmd())
+                        widget.configure(cursor="hand2")
+                    except Exception:
+                        pass
 
-        _make_kpi_card(kpi_grid, 0, "🏦", "MERCHANT REPORT", "_kpi_bank_val", "_kpi_bank_sub")
-        _make_kpi_card(kpi_grid, 1, "💳", "ODOO PAYMENTS",   "_kpi_odoo_val", "_kpi_odoo_sub")
-        _make_kpi_card(kpi_grid, 2, "📊", "MUTATIONS & FEES", "_kpi_mut_val", "_kpi_mut_sub")
-        _make_kpi_card(kpi_grid, 3, "📋", "RECON REPORT",    "_kpi_rep_val",  "_kpi_rep_sub")
-        _make_kpi_card(kpi_grid, 4, "⚡", "ENGINE STATUS",   "_kpi_eng_val",  "_kpi_eng_sub")
+        _make_kpi_card(kpi_grid, 0, "🏦", "MERCHANT REPORT", "_kpi_bank_val", "_kpi_bank_sub", click_cmd=self._open_input)
+        _make_kpi_card(kpi_grid, 1, "💳", "ODOO PAYMENTS",   "_kpi_odoo_val", "_kpi_odoo_sub", click_cmd=self._open_odoo_file)
+        _make_kpi_card(kpi_grid, 2, "📊", "MUTATIONS & FEES", "_kpi_mut_val", "_kpi_mut_sub", click_cmd=self._open_mutation)
+        _make_kpi_card(kpi_grid, 3, "⚡", "ENGINE STATUS",   "_kpi_eng_val",  "_kpi_eng_sub",  click_cmd=self._open_output)
+
+        # ── Executive Reconciliation & Settlement Insights ───────────────────
+        ctk.CTkFrame(dash_card, height=1, fg_color=BORDER).pack(fill="x", padx=16, pady=(4, 6))
+        
+        ins_hdr = ctk.CTkFrame(dash_card, fg_color="transparent")
+        ins_hdr.pack(fill="x", padx=16, pady=(0, 4))
+        ctk.CTkLabel(
+            ins_hdr, text="🎯 Reconciliation & Accounting Insights",
+            font=(FONT_FAMILY, 12, "bold"), text_color=TEXT,
+            fg_color="transparent"
+        ).pack(side="left")
+
+        ins_grid = ctk.CTkFrame(dash_card, fg_color="transparent")
+        ins_grid.pack(fill="x", padx=12, pady=(0, 10))
+        ins_grid.rowconfigure(0, weight=1)
+        for c in range(4):
+            ins_grid.columnconfigure(c, weight=1, uniform="kpi_col")
+
+        def _make_insight_card(parent, col, icon, title, val_attr, sub_attr, click_cmd=None):
+            card = ctk.CTkFrame(parent, fg_color="#F8FAFC", corner_radius=8, border_color=BORDER, border_width=1, height=96)
+            card.grid(row=0, column=col, padx=4, pady=2, sticky="nsew")
+            card.pack_propagate(False)
+
+            top_f = ctk.CTkFrame(card, fg_color="transparent")
+            top_f.pack(fill="x", padx=10, pady=(8, 2))
+
+            ico_font = ("Segoe UI Emoji", 13) if IS_WINDOWS else (FONT_FAMILY, 13)
+            ico_lbl = tk.Label(top_f, text=icon, font=ico_font, bg="#F8FAFC", fg=ACCENT)
+            ico_lbl.pack(side="left")
+
+            t_lbl = ctk.CTkLabel(top_f, text=title, font=(FONT_FAMILY, 10, "bold"), text_color=MUTED)
+            t_lbl.pack(side="left", padx=(4, 0))
+
+            val_lbl = tk.Label(card, text="Checking...", font=(FONT_FAMILY, 13, "bold"), fg=TEXT, bg="#F8FAFC", anchor="w")
+            val_lbl.pack(fill="x", padx=10, pady=(2, 1))
+            setattr(self, val_attr, val_lbl)
+
+            sub_lbl = tk.Label(card, text="—", font=(FONT_FAMILY, 10, "bold"), fg=MUTED, bg="#F8FAFC", anchor="w")
+            sub_lbl.pack(fill="x", padx=10, pady=(1, 6))
+            setattr(self, sub_attr, sub_lbl)
+
+            if click_cmd:
+                for widget in (card, top_f, ico_lbl, t_lbl, val_lbl, sub_lbl):
+                    try:
+                        widget.bind("<Button-1>", lambda e, cmd=click_cmd: cmd())
+                        widget.configure(cursor="hand2")
+                    except Exception:
+                        pass
+
+        _make_insight_card(ins_grid, 0, "🎯", "RECON MATCH HEALTH", "_ins_health_val", "_ins_health_sub", click_cmd=self._open_output)
+        _make_insight_card(ins_grid, 1, "📑", "SETTLEMENT JOURNALS", "_ins_jrn_val", "_ins_jrn_sub", click_cmd=self._on_journal)
+        _make_insight_card(ins_grid, 2, "🏪", "SALES PORTAL TICKETS", "_ins_sales_val", "_ins_sales_sub", click_cmd=self._on_sync_cloud)
+        _make_insight_card(ins_grid, 3, "📋", "REPORT COVERAGE",    "_ins_cov_val",    "_ins_cov_sub",    click_cmd=self._open_output)
 
         # ── Per-Account Drill-Down Panel ─────────────────────────────────────
         drill_card = ctk.CTkFrame(card_wrap, fg_color=PANEL, corner_radius=10, border_color=BORDER, border_width=1)
@@ -973,22 +1139,23 @@ class App(ctk.CTk):
 
         ctk.CTkFrame(drill_card, height=1, fg_color=BORDER).pack(fill="x", padx=16)
 
-        # Grid header row
+        # Grid header row with compact close column spacing
         drill_grid = ctk.CTkFrame(drill_card, fg_color="transparent")
-        drill_grid.pack(fill="x", padx=12, pady=(6, 8))
-        for c, w in enumerate([2, 3, 3, 3]):
-            drill_grid.columnconfigure(c, weight=w)
+        drill_grid.pack(fill="x", padx=16, pady=(6, 8))
+        drill_grid.columnconfigure(0, weight=0, minsize=140)
+        drill_grid.columnconfigure(1, weight=0, minsize=240)
+        drill_grid.columnconfigure(2, weight=0, minsize=240)
+        drill_grid.columnconfigure(3, weight=1)
 
-        hdr_cols = ["ACCOUNT / ALIAS", "MERCHANT REPORT", "MUTATION FILE"]
         for ci, h in enumerate(["ACCOUNT / ALIAS", "MERCHANT REPORT", "MUTATION FILE"]):
             ctk.CTkLabel(
                 drill_grid, text=h,
                 font=(FONT_FAMILY, 10, "bold"), text_color=MUTED,
                 fg_color="transparent", anchor="w"
-            ).grid(row=0, column=ci, padx=(8, 4), pady=(2, 4), sticky="w")
+            ).grid(row=0, column=ci, padx=(0, 20), pady=(2, 4), sticky="w")
 
         ctk.CTkFrame(drill_grid, height=1, fg_color=BORDER).grid(
-            row=1, column=0, columnspan=3, sticky="ew", padx=4, pady=(0, 4)
+            row=1, column=0, columnspan=4, sticky="ew", padx=(0, 0), pady=(2, 6)
         )
 
         # Placeholder rows (will be populated by _update_drill_rows)
@@ -1162,27 +1329,100 @@ class App(ctk.CTk):
 
             # 4. Recon Report Details
             import glob, openpyxl
-            output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
-            if hasattr(self, "_kpi_rep_val"):
+            # 4. Engine Status
+            if hasattr(self, "_kpi_eng_val"):
+                if getattr(self, "_running", False):
+                    _set_lbl(self._kpi_eng_val, "Running...", ACCENT)
+                    _set_lbl(self._kpi_eng_sub, "Reconciling data...", MUTED)
+                else:
+                    _set_lbl(self._kpi_eng_val, "Ready", SUCCESS)
+                    output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
+                    if output_files:
+                        latest = max(output_files, key=os.path.getmtime)
+                        mtime = datetime.fromtimestamp(os.path.getmtime(latest)).strftime("%d/%m %H:%M")
+                        _set_lbl(self._kpi_eng_sub, f"Last: {mtime}", MUTED)
+                    else:
+                        _set_lbl(self._kpi_eng_sub, "Engine idle", MUTED)
+
+            if hasattr(self, "_dash_last_update"):
+                _set_lbl(self._dash_last_update, f"Updated: {datetime.now().strftime('%H:%M:%S')}", MUTED)
+
+            # ── Async Insights Extractor ──────────────────────────────────────
+            def _fetch_insights():
+                health_text = "No report yet"
+                health_sub = "Run reconciliation to view match health"
+                health_color = MUTED
+
+                jrn_text = "No journal data"
+                jrn_sub = "Download settlement journals from Odoo"
+                jrn_color = MUTED
+
+                cov_text = "No report"
+                cov_sub = "Reconciliation output missing"
+                cov_color = MUTED
+
+                import glob, openpyxl
+                output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
                 if output_files:
                     latest = max(output_files, key=os.path.getmtime)
-                    report_name = Path(latest).name
                     try:
                         wb = openpyxl.load_workbook(latest, read_only=True, data_only=True)
+                        
+                        complete_keys = set()
+                        incomplete_count = 0
+                        settlement_total = 0
+                        settlement_resolved = 0
                         b_set = set()
                         d_list = []
+
                         if "Daily Summary" in wb.sheetnames:
-                            ws = wb["Daily Summary"]
-                            for r in ws.iter_rows(min_row=4, values_only=True):
-                                if r and len(r) >= 5:
-                                    p_d, b_n = r[2], r[3]
-                                    if b_n: b_set.add(str(b_n).strip())
-                                    if p_d: d_list.append(str(p_d).strip())
+                            ws_ds = wb["Daily Summary"]
+                            for row in ws_ds.iter_rows(min_row=4, values_only=True):
+                                if not row or not row[0]: continue
+                                d_str = str(row[1] or "").strip()
+                                p_d = str(row[2] or "").strip()
+                                b_n = str(row[3] or "").strip()
+                                j_n = str(row[4] or b_n).strip()
+                                status = str(row[9] or "").strip()
+
+                                if b_n: b_set.add(b_n)
+                                if d_str: d_list.append(d_str)
+
+                                if "incomplete" in status.lower():
+                                    incomplete_count += 1
+                                else:
+                                    complete_keys.add((d_str, j_n))
+
+                                if len(row) > 10:
+                                    j_info = str(row[10] or "").strip()
+                                    if j_info and j_info != "-":
+                                        settlement_total += 1
+                                        if "EDC" in j_info or "AR" in j_info or "SETTLEMENT" in j_info.upper():
+                                            settlement_resolved += 1
+
+                        actionable_diff_count = 0
+                        manual_match_count = 0
+
+                        if "Differences" in wb.sheetnames:
+                            ws_diff = wb["Differences"]
+                            for row in ws_diff.iter_rows(min_row=4, values_only=True):
+                                if not row or not row[0]: continue
+                                d_str = str(row[1] or "").strip()
+                                b_name = str(row[2] or "").strip()
+                                j_name = str(row[3] or "").strip()
+                                raw_status = str(row[12] or "").strip()
+                                key = (d_str, j_name)
+
+                                is_manual_match = "Match" in raw_status or "M0" in raw_status or "M1" in raw_status
+
+                                if is_manual_match:
+                                    manual_match_count += 1
+                                elif key in complete_keys:
+                                    actionable_diff_count += 1
+
                         wb.close()
-                        
+
                         b_str = ", ".join(sorted(list(b_set))) if b_set else "Summary"
-                        # Parse to real dates first — string min/max on dd/mm/yyyy is lexicographic
-                        # which reverses the order: "01/08" < "29/07" alphabetically → wrong range
                         from datetime import datetime as _dt
                         parsed_dates = []
                         for ds in d_list:
@@ -1194,35 +1434,117 @@ class App(ctk.CTk):
                                     continue
                         if parsed_dates:
                             mn_d, mx_d = min(parsed_dates), max(parsed_dates)
-                            d_str = f" ({mn_d.strftime('%d/%m')}–{mx_d.strftime('%d/%m')})" if mn_d != mx_d else f" ({mn_d.strftime('%d/%m')})"
+                            cov_text = f"{mn_d.strftime('%d/%m')} – {mx_d.strftime('%d/%m')}"
+                            cov_sub = f"{b_str} ({len(b_set)} Banks)" if b_set else "Recon report range"
+                            cov_color = SUCCESS
                         else:
-                            d_str = ""
-                        
-                        _set_lbl(self._kpi_rep_val, "Report Ready", SUCCESS)
-                        _set_lbl(self._kpi_rep_sub, f"{b_str}{d_str}", MUTED)
+                            cov_text = "Report Ready"
+                            cov_sub = Path(latest).name
+                            cov_color = SUCCESS
+
+                        if actionable_diff_count == 0:
+                            health_text = "100% Matched"
+                            health_sub = f"0 Differences • {len(complete_keys)} Batches Audited"
+                            health_color = SUCCESS
+                        else:
+                            health_text = f"{actionable_diff_count} Discrepancies"
+                            health_sub = f"Audited dates ({len(complete_keys)} Batches) • Click"
+                            health_color = WARN
+
+                        if settlement_total > 0:
+                            pct = int((settlement_resolved / settlement_total) * 100)
+                            jrn_text = f"{pct}% Resolved ({settlement_resolved}/{settlement_total})"
+                            jrn_sub = "EDC & AR settlement journals linked" if pct == 100 else f"{settlement_total - settlement_resolved} missing journal numbers"
+                            jrn_color = SUCCESS if pct == 100 else WARN
+                        else:
+                            jrn_text = "Ready to Check"
+                            jrn_sub = "Run journal checker or generate entries"
+                            jrn_color = MUTED
                     except Exception:
-                        _set_lbl(self._kpi_rep_val, "Report Ready", SUCCESS)
-                        _set_lbl(self._kpi_rep_sub, report_name, MUTED)
-                else:
-                    _set_lbl(self._kpi_rep_val, "Not Found", MUTED)
-                    _set_lbl(self._kpi_rep_sub, "No report in output folder", MUTED)
+                        pass
 
-            # 5. Engine Status
-            if hasattr(self, "_kpi_eng_val"):
-                if getattr(self, "_running", False):
-                    _set_lbl(self._kpi_eng_val, "Running...", ACCENT)
-                    _set_lbl(self._kpi_eng_sub, "Reconciling data...", MUTED)
-                else:
-                    _set_lbl(self._kpi_eng_val, "Ready", SUCCESS)
-                    if output_files:
-                        latest = max(output_files, key=os.path.getmtime)
-                        mtime = datetime.fromtimestamp(os.path.getmtime(latest)).strftime("%d/%m %H:%M")
-                        _set_lbl(self._kpi_eng_sub, f"Last report: {mtime}", MUTED)
-                    else:
-                        _set_lbl(self._kpi_eng_sub, "No report generated yet", MUTED)
+                sales_text = "Cloud not configured"
+                sales_sub = "Set Supabase credentials to sync"
+                sales_color = MUTED
 
-            if hasattr(self, "_dash_last_update"):
-                _set_lbl(self._dash_last_update, f"Updated: {datetime.now().strftime('%H:%M:%S')}", MUTED)
+                try:
+                    from cloud_sync import fetch_discrepancies, is_cloud_configured
+                    if is_cloud_configured():
+                        items = fetch_discrepancies(limit=200)
+                        if items:
+                            resolved = sum(1 for i in items if i.get("status") == "resolved")
+                            pending = len(items) - resolved
+                            sales_text = f"{len(items)} Tickets ({resolved} Done)"
+                            sales_sub = f"{pending} pending store review • Click" if pending > 0 else "All tickets resolved • Click"
+                            sales_color = SUCCESS if pending == 0 else WARN
+                        else:
+                            sales_text = "0 Active Tickets"
+                            sales_sub = "All store discrepancies clear"
+                            sales_color = SUCCESS
+                except Exception:
+                    pass
+
+                self.after(0, lambda: _set_lbl(self._ins_health_val, health_text, health_color) if hasattr(self, "_ins_health_val") else None)
+                self.after(0, lambda: _set_lbl(self._ins_health_sub, health_sub, MUTED) if hasattr(self, "_ins_health_sub") else None)
+                self.after(0, lambda: _set_lbl(self._ins_jrn_val, jrn_text, jrn_color) if hasattr(self, "_ins_jrn_val") else None)
+                self.after(0, lambda: _set_lbl(self._ins_jrn_sub, jrn_sub, MUTED) if hasattr(self, "_ins_jrn_sub") else None)
+                self.after(0, lambda: _set_lbl(self._ins_sales_val, sales_text, sales_color) if hasattr(self, "_ins_sales_val") else None)
+                self.after(0, lambda: _set_lbl(self._ins_sales_sub, sales_sub, MUTED) if hasattr(self, "_ins_sales_sub") else None)
+                self.after(0, lambda: _set_lbl(self._ins_cov_val, cov_text, cov_color) if hasattr(self, "_ins_cov_val") else None)
+                self.after(0, lambda: _set_lbl(self._ins_cov_sub, cov_sub, MUTED) if hasattr(self, "_ins_cov_sub") else None)
+
+                # Update states of recon-dependent CTA buttons
+                has_recon = bool(output_files)
+                is_running = getattr(self, "_running", False)
+                recon_state = "normal" if (has_recon and not is_running) else "disabled"
+
+                def _apply_btn_state(btn_attr, normal_fg, normal_txt, dis_fg="#F1F5F9", dis_txt=MUTED):
+                    if hasattr(self, btn_attr):
+                        b = getattr(self, btn_attr)
+                        try:
+                            b.configure(
+                                state=recon_state,
+                                fg_color=normal_fg if recon_state == "normal" else dis_fg,
+                                text_color=normal_txt if recon_state == "normal" else dis_txt
+                            )
+                        except Exception:
+                            pass
+
+                self.after(0, lambda: _apply_btn_state("_match_btn", WHITE, ACCENT))
+                self.after(0, lambda: _apply_btn_state("_sync_cloud_btn", WHITE, TEXT))
+                self.after(0, lambda: _apply_btn_state("_journal_btn", ACCENT, WHITE, dis_fg="#E2E8F0"))
+                self.after(0, lambda: _apply_btn_state("_pdf_btn", PANEL, TEXT))
+
+                # Update states of Quick Access links (all transparent background)
+                from config import ODO_EXCEL_PATH, ODO_JOURNAL_EXCEL_PATH
+                has_merchant = tot_bank > 0
+                has_mutation = tot_mut > 0
+                has_payment = ODO_EXCEL_PATH.exists()
+                has_journal_entry = ODO_JOURNAL_EXCEL_PATH.exists()
+                recap_dir = BASE_DIR / "recap"
+                has_recap = recap_dir.exists() and bool(list(recap_dir.glob("*.xlsx")))
+
+                def _set_qa_link(attr, exists):
+                    if hasattr(self, attr):
+                        b = getattr(self, attr)
+                        try:
+                            b.configure(
+                                state="normal" if exists else "disabled",
+                                fg_color="transparent",
+                                text_color=ACCENT if exists else MUTED
+                            )
+                        except Exception:
+                            pass
+
+                self.after(0, lambda: _set_qa_link("_qa_result_btn", has_recon))
+                self.after(0, lambda: _set_qa_link("_qa_pdf_btn", has_recon))
+                self.after(0, lambda: _set_qa_link("_qa_merchant_btn", has_merchant))
+                self.after(0, lambda: _set_qa_link("_qa_mutation_btn", has_mutation))
+                self.after(0, lambda: _set_qa_link("_qa_payment_btn", has_payment))
+                self.after(0, lambda: _set_qa_link("_qa_journal_btn", has_journal_entry))
+                self.after(0, lambda: _set_qa_link("_qa_recap_btn", has_recap))
+
+            threading.Thread(target=_fetch_insights, daemon=True).start()
 
         except Exception:
             pass
@@ -1244,8 +1566,8 @@ class App(ctk.CTk):
         # Show "Scanning" hint right away (cheap, main-thread)
         if hasattr(self, "_drill_status_lbl"):
             self._drill_status_lbl.configure(text="⏳ Scanning...", text_color=WARN)
-        # Debounce: launch the real work after 600 ms of silence
-        self._drill_pending_id = self.after(600, lambda: self._do_start_drill(mutation_dir))
+        # Debounce: launch the real work after 50 ms of silence
+        self._drill_pending_id = self.after(50, lambda: self._do_start_drill(mutation_dir))
 
     def _do_start_drill(self, mutation_dir):
         """Actually launches the background I/O thread after the debounce settles."""
@@ -1313,21 +1635,21 @@ class App(ctk.CTk):
                 font=(FONT_FAMILY, 11, "bold"), text_color=bcolor,
                 fg_color="transparent", anchor="w"
             )
-            acc_lbl.grid(row=row_num, column=0, padx=(8, 4), pady=2, sticky="w")
+            acc_lbl.grid(row=row_num, column=0, padx=(0, 20), pady=3, sticky="w")
 
             stmt_lbl = ctk.CTkLabel(
                 self._drill_grid, text=stmt_r or "No files",
                 font=(FONT_FAMILY, 11, "bold"), text_color=SUCCESS if stmt_r else MUTED,
                 fg_color="transparent", anchor="w"
             )
-            stmt_lbl.grid(row=row_num, column=1, padx=(4, 4), pady=2, sticky="w")
+            stmt_lbl.grid(row=row_num, column=1, padx=(0, 20), pady=3, sticky="w")
 
             mut_lbl = ctk.CTkLabel(
                 self._drill_grid, text=mut_r or "No mutation CSV",
                 font=(FONT_FAMILY, 11, "bold"), text_color=SUCCESS if mut_r else WARN,
                 fg_color="transparent", anchor="w"
             )
-            mut_lbl.grid(row=row_num, column=2, padx=(4, 8), pady=2, sticky="w")
+            mut_lbl.grid(row=row_num, column=2, padx=(0, 20), pady=3, sticky="w")
 
             self._drill_rows.append((acc_lbl, stmt_lbl, mut_lbl))
 
@@ -1361,7 +1683,7 @@ class App(ctk.CTk):
         def _stale():
             return my_gen != getattr(self, "_drill_gen", my_gen)
 
-        import io as _io, contextlib
+        import io as _io, contextlib, re, zipfile
         from concurrent.futures import ThreadPoolExecutor
         rows_data = []                       # always defined — safe fallback if exception
         _sink = _io.StringIO()
@@ -1394,7 +1716,9 @@ class App(ctk.CTk):
                             d = d.date()
                         if isinstance(d, str):
                             try: d = _dt.strptime(d[:10], "%Y-%m-%d").date()
-                            except Exception: continue
+                            except Exception:
+                                try: d = _dt.strptime(d[:10], "%d/%m/%Y").date()
+                                except Exception: continue
                         if hasattr(d, "strftime"): clean.add(d)
                     return sorted(clean)
 
@@ -1453,11 +1777,14 @@ class App(ctk.CTk):
                         for sdir in search_dirs:
                             if _stale(): break
                             try:
-                                for f in _find_bca_excels(sdir, BCA_EXCEL_PATTERN):
-                                    if _stale(): break
-                                    for r in _read_one_bca(f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN):
-                                        d = r.get("date") or r.get("txn_date")
-                                        if d: bca_stmt_dates.append(d)
+                                bca_files = _find_bca_excels(sdir, BCA_EXCEL_PATTERN)
+                                with ThreadPoolExecutor(max_workers=min(4, len(bca_files) or 1)) as bca_pool:
+                                    bca_futs = [bca_pool.submit(_read_one_bca, f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN) for f in bca_files]
+                                    for fut in bca_futs:
+                                        if _stale(): break
+                                        for r in fut.result():
+                                            d = r.get("date") or r.get("txn_date")
+                                            if d: bca_stmt_dates.append(d)
                             except Exception: pass
                     except Exception: pass
                     if _stale(): return []
@@ -1474,19 +1801,35 @@ class App(ctk.CTk):
                     if _stale(): return []
                     mandiri_stmt_by_alias = {}
                     try:
-                        import readers.mandiri_reader as mr
+                        import pyzipper
                         for alias_d in sorted(MANDIRI_ZIP_DIR.iterdir()):
                             if _stale(): break
                             if alias_d.is_dir():
+                                alias_dates = []
+                                for z_path in alias_d.glob("*.zip"):
+                                    try:
+                                        with pyzipper.AESZipFile(z_path, 'r', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+                                            zf.setpassword(MANDIRI_ZIP_PASSWORD.encode())
+                                            for name in zf.namelist():
+                                                m = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
+                                                for ds in m:
+                                                    alias_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
+                                    except Exception: pass
+                                if alias_dates:
+                                    mandiri_stmt_by_alias[alias_d.name] = alias_dates
+                        if not mandiri_stmt_by_alias and MANDIRI_ZIP_DIR.exists():
+                            alias_dates = []
+                            for z_path in MANDIRI_ZIP_DIR.glob("*.zip"):
                                 try:
-                                    rows2, _ = mr.read_mandiri(alias_d, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
-                                    dates = [r.get("txn_date") or r.get("date") for r in rows2]
-                                    mandiri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
+                                    with pyzipper.AESZipFile(z_path, 'r', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+                                        zf.setpassword(MANDIRI_ZIP_PASSWORD.encode())
+                                        for name in zf.namelist():
+                                            m = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
+                                            for ds in m:
+                                                alias_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
                                 except Exception: pass
-                        if not mandiri_stmt_by_alias:
-                            rows2, _ = mr.read_mandiri(MANDIRI_ZIP_DIR, MANDIRI_ZIP_PASSWORD, MANDIRI_AMOUNT_COLUMN, MANDIRI_NUMBER_COLUMN)
-                            dates = [r.get("txn_date") or r.get("date") for r in rows2]
-                            mandiri_stmt_by_alias["main"] = [d for d in dates if d]
+                            if alias_dates:
+                                mandiri_stmt_by_alias["main"] = alias_dates
                     except Exception: pass
                     if _stale(): return []
                     result = []
@@ -1507,15 +1850,42 @@ class App(ctk.CTk):
                     if _stale(): return []
                     bri_stmt_by_alias = {}
                     try:
-                        import readers.bri_reader as br
                         for alias_d in sorted(BRI_ZIP_DIR.iterdir()):
                             if _stale(): break
                             if alias_d.is_dir():
+                                alias_dates = []
+                                for z_path in alias_d.glob("*.zip"):
+                                    try:
+                                        with zipfile.ZipFile(z_path, "r") as zf:
+                                            for name in zf.namelist():
+                                                m = re.search(r'(\d{4}-\d{2}-\d{2})', name)
+                                                if m:
+                                                    alias_dates.append(m.group(1))
+                                                else:
+                                                    m2 = re.search(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
+                                                    if m2:
+                                                        ds = m2.group(1)
+                                                        alias_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
+                                    except Exception: pass
+                                if alias_dates:
+                                    bri_stmt_by_alias[alias_d.name] = alias_dates
+                        if not bri_stmt_by_alias and BRI_ZIP_DIR.exists():
+                            alias_dates = []
+                            for z_path in BRI_ZIP_DIR.glob("*.zip"):
                                 try:
-                                    rows2, _ = br.read_bri(alias_d, "", BRI_PDF_PATTERN, BRI_AMOUNT_COLUMN, BRI_NUMBER_COLUMN)
-                                    dates = [r.get("txn_date") or r.get("date") for r in rows2]
-                                    bri_stmt_by_alias[alias_d.name] = [d for d in dates if d]
+                                    with zipfile.ZipFile(z_path, "r") as zf:
+                                        for name in zf.namelist():
+                                            m = re.search(r'(\d{4}-\d{2}-\d{2})', name)
+                                            if m:
+                                                alias_dates.append(m.group(1))
+                                            else:
+                                                m2 = re.search(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
+                                                if m2:
+                                                    ds = m2.group(1)
+                                                    alias_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
                                 except Exception: pass
+                            if alias_dates:
+                                bri_stmt_by_alias["main"] = alias_dates
                     except Exception: pass
                     if _stale(): return []
                     result = []
@@ -1730,38 +2100,15 @@ class App(ctk.CTk):
                 )
                 self._active_proc = process
 
-                
                 for line in process.stdout:
-                    self._log_write(line)
-                    
+                    self.after(0, self._log_write, line)
+
                 process.wait()
                 if process.returncode == 0:
-                    self._log_write("\n✅ Odoo Download Finished!\n", "ok")
-                else:
-                    self._log_write(f"\n❌ Odoo Download failed with code {process.returncode}\n", "err")
-                    
-                self._active_proc = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    encoding="utf-8",
-                    errors="replace",
-                    creationflags=flags,
-                    env=env
-                )
-
-                
-                for line in self._active_proc.stdout:
-                    self.after(0, self._log_write, line)
-                    
-                self._active_proc.wait()
-                if self._active_proc.returncode == 0:
                     self.after(0, self._log_write, "\n✅ Odoo Download Finished!\n", "ok")
                 else:
-                    self.after(0, self._log_write, f"\n❌ Odoo Download failed with code {self._active_proc.returncode}\n", "err")
-                    
+                    self.after(0, self._log_write, f"\n❌ Odoo Download failed with code {process.returncode}\n", "err")
+
             except Exception as e:
                 self.after(0, self._log_write, f"\n❌ Error: {e}\n", "err")
             finally:
@@ -1771,7 +2118,7 @@ class App(ctk.CTk):
                 if hasattr(self, "_stop_btn"):
                     self.after(0, self._stop_btn.pack_forget)
                 self.after(0, self._set_status, "Ready", SUCCESS)
-                
+
         threading.Thread(target=run, daemon=True).start()
 
     def _on_cleanse(self):
@@ -1917,8 +2264,30 @@ class App(ctk.CTk):
                 self._stop_btn.pack_forget()
             return
 
+        # Check if merchant files exist for selected banks
+        has_merchant_files = False
+        for b in selected_banks:
+            b_dir = INPUT_DIR / b
+            if b_dir.exists():
+                files = [f for f in b_dir.rglob("*") if f.is_file() and not f.name.startswith(".") and not f.name.startswith("~$")]
+                if files:
+                    has_merchant_files = True
+                    break
+
+        if not has_merchant_files:
+            self._set_status("No merchant report files found in input folder!", ERROR)
+            self._log_write("\n❌ Cannot run reconciliation: No merchant report files found in 'input/' for selected banks.\nPlease upload bank statement / merchant report files first.\n", "err")
+            self._running = False
+            if hasattr(self, "_stop_btn"):
+                self._stop_btn.pack_forget()
+            return
+
         self._scan_btn.configure(state="disabled")
         self._run_btn.configure(state="disabled", text="⏳ Processing...")
+        if hasattr(self, "_match_btn"): self._match_btn.configure(state="disabled", fg_color="#F1F5F9", text_color=MUTED)
+        if hasattr(self, "_sync_cloud_btn"): self._sync_cloud_btn.configure(state="disabled", fg_color="#F1F5F9", text_color=MUTED)
+        if hasattr(self, "_journal_btn"): self._journal_btn.configure(state="disabled", fg_color="#E2E8F0", text_color=MUTED)
+        if hasattr(self, "_pdf_btn"): self._pdf_btn.configure(state="disabled", fg_color="#F1F5F9", text_color=MUTED)
         self._open_btn.configure(state="disabled")
         self._upload_btn.configure(state="disabled")
         self._download_btn.configure(state="disabled")
@@ -1993,6 +2362,28 @@ class App(ctk.CTk):
         self.after(50, _deferred_run)
 
     def _run_script(self, selected_banks, is_scan=False):
+        if is_scan:
+            self._running = True
+            def _log(msg, tag=None):
+                self.after(0, self._log_write, msg, tag or self._tag(msg))
+
+            try:
+                from main import scan_bank_date_range
+                self.after(0, self._log_write, "\n────────────────────────────────────────────────────────────\n  SCAN SUMMARY\n────────────────────────────────────────────────────────────\n\n", "head")
+                dates_range = scan_bank_date_range(selected_banks, log_fn=_log)
+                if dates_range:
+                    min_d, max_d = dates_range
+                    self.after(0, self._set_dates, min_d, max_d)
+                    self.after(0, self._log_write, f"  [+] Detected Date Range: {min_d} to {max_d}\n\n", "ok")
+                else:
+                    self.after(0, self._log_write, "  [-] No valid bank dates detected in input folders.\n\n", "warn")
+                self.after(0, self._on_done, 0, None)
+                return
+            except Exception as e:
+                self.after(0, self._log_write, f"\n❌ Scan Error: {e}\n", "err")
+                self.after(0, self._on_done, 1, None)
+                return
+
         if getattr(sys, "frozen", False):
             cmd = [sys.executable, "--worker"]
         elif _venv_python_path.exists():
@@ -2006,9 +2397,6 @@ class App(ctk.CTk):
             
         if selected_banks:
             cmd.extend(["--bank"] + selected_banks)
-        
-        if is_scan:
-            cmd.append("--scan")
 
         self._running = True
         if hasattr(self, "_stop_btn"):
@@ -2141,7 +2529,6 @@ class App(ctk.CTk):
         self._download_btn.configure(state="normal")
         self._update_dashboard_summary(skip_drill=True)
 
-            
     def _set_dates(self, min_d: str, max_d: str):
         try:
             from datetime import datetime
@@ -2156,6 +2543,872 @@ class App(ctk.CTk):
             self._log_write(f"\n📅 [Auto-Detect] Dates updated: {d_from} - {d_to}\n", "ok")
         except Exception as e:
             self._log_write(f"\n⚠️ Failed to update dates: {e}\n", "warn")
+
+    # ── Cloud Sync Sales Portal ──────────────────────────────────────────
+    def _on_sync_cloud(self):
+        import glob
+        import os
+        from openpyxl import load_workbook
+        from cloud_sync import is_cloud_configured, push_bank_discrepancies, fetch_discrepancies
+
+        if not is_cloud_configured():
+            self._log_write("\n⚠️ Supabase is not configured in .env. Please set SUPABASE_URL and SUPABASE_KEY first.\n", "warn")
+            self._set_status("Cloud sync not configured", WARN)
+            return
+
+        self._sync_cloud_btn.configure(text="⏳ Loading...", state="disabled")
+        self.update_idletasks()
+
+        try:
+            output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
+            if not output_files:
+                self._set_status("No reconciliation file found. Run recon first!", ERROR)
+                return
+            latest_file = max(output_files, key=os.path.getctime)
+
+            try:
+                wb = load_workbook(latest_file, read_only=True, data_only=True)
+                if "Differences" not in wb.sheetnames:
+                    self._set_status("No 'Differences' sheet found", ERROR)
+                    wb.close()
+                    return
+
+                # Build active recon days where BOTH sources exist (>0 bank AND >0 odoo)
+                valid_recon_days = set()
+                if "Daily Summary" in wb.sheetnames:
+                    ws_sum = wb["Daily Summary"]
+                    for r_sum in ws_sum.iter_rows(values_only=True):
+                        if not r_sum or len(r_sum) < 7:
+                            continue
+                        d_s = str(r_sum[1] or "").strip()
+                        b_s = str(r_sum[3] or "").strip().upper()
+                        j_s = str(r_sum[4] or "").strip()
+                        try:
+                            tot_b = float(r_sum[5] or 0.0)
+                            tot_o = float(r_sum[6] or 0.0)
+                        except (ValueError, TypeError):
+                            continue
+                        if tot_b > 0 and tot_o > 0:
+                            valid_recon_days.add((d_s, b_s, j_s))
+                            valid_recon_days.add((d_s, j_s))
+
+                ws = wb["Differences"]
+                rows = list(ws.iter_rows(values_only=True))
+                wb.close()
+            except Exception as e:
+                self._set_status(f"Error loading recon file: {e}", ERROR)
+                return
+
+            hdr_row = [str(cell or "").strip().lower() for cell in (rows[2] if len(rows) > 2 else [])]
+            def _find_c(name, fallback):
+                for i, h in enumerate(hdr_row):
+                    if name in h: return i
+                return fallback
+
+            c_date     = _find_c("date", 1)
+            c_bank     = _find_c("bank", 2)
+            c_journal  = _find_c("journal", 3)
+            c_odo_num  = _find_c("odoo number", 4)
+            c_inv_ref  = _find_c("reference", 5)
+            c_bank_num = _find_c("bank number", 6)
+            c_file     = _find_c("filename", 7)
+            c_bank_amt = _find_c("bank amount", 8)
+            c_odo_amt  = _find_c("odoo amount", 9)
+            c_src      = _find_c("source", 10)
+            c_recon    = _find_c("reconciled", 11)
+            c_status   = _find_c("status", 12)
+
+            discrepancy_items = []
+            for r_idx, r in enumerate(rows[3:], 4):
+                if not r or len(r) <= c_status:
+                    continue
+
+                r_date = str(r[c_date] or "").strip()
+                r_bank = str(r[c_bank] or "").strip().upper()
+                r_journal = str(r[c_journal] or "").strip()
+
+                # ONLY include if BOTH bank file and Odoo payments existed for this date/journal!
+                if valid_recon_days and (r_date, r_bank, r_journal) not in valid_recon_days and (r_date, r_journal) not in valid_recon_days:
+                    continue
+
+                st = str(r[c_status] or "").strip()
+                src = str(r[c_src] or "").strip()
+                recon = str(r[c_recon] or "").strip().lower() if len(r) > c_recon else ""
+                b_amt = float(r[c_bank_amt] or 0.0) if len(r) > c_bank_amt and r[c_bank_amt] else 0.0
+                o_amt = float(r[c_odo_amt] or 0.0) if len(r) > c_odo_amt and r[c_odo_amt] else 0.0
+
+                # 1. Bank Only: Exists in bank, missing in Odoo
+                if st == "Only in Bank" or src == "Bank":
+                    disc_type = "bank_only"
+                    amt = b_amt or o_amt
+                # 3. Unreconciled in Odoo: Exists in Odoo where Reconciled is 'No'
+                elif recon in ("no", "false") and st != "Only in Bank" and src != "Bank":
+                    disc_type = "unreconciled_odoo"
+                    amt = o_amt or b_amt
+                # 2. Odoo Only: Exists in Odoo, missing in Bank
+                elif st == "Only in Odoo" or src == "Odoo":
+                    disc_type = "odoo_only"
+                    amt = o_amt or b_amt
+                else:
+                    continue
+
+                if amt <= 0.0:
+                    continue
+
+                odo_num = str(r[c_odo_num] or "").strip() if len(r) > c_odo_num else ""
+                inv_ref = str(r[c_inv_ref] or "").strip() if len(r) > c_inv_ref else ""
+                bank_num = str(r[c_bank_num] or "").strip() if len(r) > c_bank_num else ""
+
+                discrepancy_items.append({
+                    "row_idx": r_idx,
+                    "date": str(r[c_date] or "").strip(),
+                    "bank": str(r[c_bank] or "").strip(),
+                    "journal": str(r[c_journal] or "").strip(),
+                    "number_bank": bank_num,
+                    "number_odo": odo_num,
+                    "invoice_no": inv_ref,
+                    "is_reconciled": str(r[c_recon] or "Yes").strip() if len(r) > c_recon else "Yes",
+                    "discrepancy_type": disc_type,
+                    "filename": str(r[c_file] or "").strip() if len(r) > c_file else "",
+                    "amount": amt,
+                })
+
+            def _disc_sort_key(it):
+                b = str(it.get("bank", "")).strip().upper()
+                d_raw = str(it.get("date", "")).strip()
+                if "/" in d_raw:
+                    pts = d_raw.split("/")
+                    if len(pts) == 3:
+                        d_norm = f"{pts[2]}{pts[1].zfill(2)}{pts[0].zfill(2)}"
+                    else:
+                        d_norm = d_raw
+                else:
+                    d_norm = d_raw.replace("-", "")
+                return (b, d_norm)
+
+            discrepancy_items.sort(key=_disc_sort_key)
+
+            # Initialize each item
+            for item in discrepancy_items:
+                item["is_synced"] = False
+
+            # ── Open Modal Window ──
+            top = ctk.CTkToplevel(self)
+            top.title("Share Discrepancies to Sales Portal")
+            top.minsize(1050, 640)
+            top.resizable(True, True)
+            top.configure(fg_color=BG)
+            top.transient(self)
+
+            def _safe_grab():
+                try:
+                    if top.winfo_exists():
+                        top.grab_set()
+                except Exception:
+                    pass
+            top.after(100, _safe_grab)
+            top.after(200, lambda: _center_modal_on_parent(top, self))
+
+            # Header
+            hdr_frame = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=76, border_color=BORDER, border_width=1)
+            hdr_frame.pack(fill="x")
+            hdr_frame.pack_propagate(False)
+
+            hi = ctk.CTkFrame(hdr_frame, fg_color="transparent")
+            hi.pack(fill="both", expand=True, padx=24, pady=12)
+
+            ctk.CTkLabel(hi, text="Share Discrepancies to Sales Portal", font=(FONT_FAMILY, 16, "bold"), text_color=ACCENT).pack(anchor="w")
+            ctk.CTkLabel(hi, text="Review Bank Only, Odoo Only, and Unreconciled discrepancies to upload to the Sales Portal.", font=(FONT_FAMILY, 11, "bold"), text_color=MUTED).pack(anchor="w")
+
+            # Filter & Search Bar
+            filt_frame = ctk.CTkFrame(top, fg_color=SIDEBAR_BG, corner_radius=0, height=62, border_color=BORDER, border_width=1)
+            filt_frame.pack(fill="x")
+            filt_frame.pack_propagate(False)
+
+            fi = ctk.CTkFrame(filt_frame, fg_color="transparent")
+            fi.pack(fill="both", expand=True, padx=16, pady=10)
+
+            # Left controls: Type tabs + Bank pills
+            f_left = ctk.CTkFrame(fi, fg_color="transparent")
+            f_left.pack(side="left", fill="y")
+
+            cur_type = ["ALL"]       # 'ALL', 'bank_only', 'odoo_only', 'unreconciled_odoo'
+            cur_bank = ["ALL"]       # 'ALL', 'BCA', 'MANDIRI', 'BRI'
+            cur_status = ["ALL"]     # 'ALL', 'READY', 'SYNCED' - default to ALL so all data is always visible immediately
+            search_q = [""]
+
+            type_btn_map = {}
+            for t_key, t_lbl in [
+                ("ALL", "All Types"),
+                ("bank_only", "🏦 Bank Only"),
+                ("odoo_only", "📦 Odoo Only"),
+                ("unreconciled_odoo", "⚠️ Unreconciled"),
+            ]:
+                tb = ctk.CTkButton(
+                    f_left, text=t_lbl, height=36, width=135 if t_key == "unreconciled_odoo" else (125 if t_key == "bank_only" else (120 if t_key == "odoo_only" else 95)),
+                    fg_color=ACCENT if t_key == "ALL" else WHITE,
+                    text_color=WHITE if t_key == "ALL" else TEXT,
+                    border_color=ACCENT if t_key == "ALL" else BORDER_DARK,
+                    border_width=1,
+                    hover_color=ACCENT_DARK if t_key == "ALL" else PREVIEW_BG,
+                    font=(FONT_FAMILY, 11, "bold"), corner_radius=6
+                )
+                tb.pack(side="left", padx=(0, 6))
+                type_btn_map[t_key] = tb
+
+            # Separator
+            sep_m = tk.Frame(f_left, bg=BORDER_DARK, width=1, height=24)
+            sep_m.pack(side="left", padx=8, pady=4)
+
+            # Bank Selector Pills
+            bank_btn_map = {}
+            for bname in ["ALL", "BCA", "MANDIRI", "BRI"]:
+                bb = ctk.CTkButton(
+                    f_left, text=bname, height=36, width=55 if bname != "MANDIRI" else 80,
+                    fg_color=ACCENT if bname == "ALL" else WHITE,
+                    text_color=WHITE if bname == "ALL" else TEXT,
+                    border_color=ACCENT if bname == "ALL" else BORDER_DARK,
+                    border_width=1, hover_color=ACCENT_DARK if bname == "ALL" else PREVIEW_BG,
+                    font=(FONT_FAMILY, 11, "bold"), corner_radius=6
+                )
+                bb.pack(side="left", padx=(0, 4))
+                bank_btn_map[bname] = bb
+
+            # Right controls: Status tabs + Search box
+            f_right = ctk.CTkFrame(fi, fg_color="transparent")
+            f_right.pack(side="right", fill="y")
+
+            # Search Box
+            search_v = tk.StringVar()
+            search_ent = ctk.CTkEntry(
+                f_right, textvariable=search_v, placeholder_text="🔍 Search...",
+                height=36, width=180, corner_radius=6, border_color=BORDER_DARK, fg_color=WHITE, text_color=TEXT,
+                font=(FONT_FAMILY, 11, "bold")
+            )
+            search_ent.pack(side="right", padx=(8, 0))
+
+            # Status Tabs on right
+            btn_st_all = ctk.CTkButton(
+                f_right, text="All", height=36, width=65,
+                fg_color=ACCENT, text_color=WHITE, border_color=ACCENT, border_width=1,
+                hover_color=ACCENT_DARK, font=(FONT_FAMILY, 11, "bold"), corner_radius=6
+            )
+            btn_st_all.pack(side="left", padx=(0, 4))
+            btn_st_ready = ctk.CTkButton(
+                f_right, text="Ready to Send", height=36, width=120,
+                fg_color=WHITE, text_color=TEXT, border_color=BORDER_DARK, border_width=1,
+                hover_color=PREVIEW_BG, font=(FONT_FAMILY, 11, "bold"), corner_radius=6
+            )
+            btn_st_ready.pack(side="left", padx=(0, 4))
+            btn_st_synced = ctk.CTkButton(
+                f_right, text="Synced", height=36, width=85,
+                fg_color=WHITE, text_color=TEXT, border_color=BORDER_DARK, border_width=1,
+                hover_color=PREVIEW_BG, font=(FONT_FAMILY, 11, "bold"), corner_radius=6
+            )
+            btn_st_synced.pack(side="left", padx=(0, 4))
+
+            # Scrollable Cards Area
+            scroll_cards = ctk.CTkScrollableFrame(top, fg_color="transparent", scrollbar_button_color=BORDER, scrollbar_button_hover_color=MUTED)
+            scroll_cards.pack(fill="both", expand=True, padx=20, pady=8)
+
+            # Footer Action Bar
+            footer = ctk.CTkFrame(top, fg_color=PANEL, corner_radius=0, height=64, border_color=BORDER, border_width=1)
+            footer.pack(fill="x", side="bottom")
+            footer.pack_propagate(False)
+
+            foot_inner = ctk.CTkFrame(footer, fg_color="transparent")
+            foot_inner.pack(fill="both", expand=True, padx=20, pady=10)
+
+            btn_select_all = ctk.CTkButton(foot_inner, text="Select All Available", height=38, width=175, fg_color=WHITE, hover_color=PREVIEW_BG, border_color=BORDER_DARK, border_width=1, text_color=TEXT, font=(FONT_FAMILY, 11, "bold"), corner_radius=6)
+            btn_select_all.pack(side="left")
+
+            lbl_summary = ctk.CTkLabel(foot_inner, text="Selected 0 items", font=(FONT_FAMILY, 12, "bold"), text_color=TEXT)
+            lbl_summary.pack(side="left", padx=(16, 0))
+
+            def _close_modal():
+                try:
+                    top.grab_release()
+                except Exception:
+                    pass
+                try:
+                    top.destroy()
+                except Exception:
+                    pass
+
+            top.protocol("WM_DELETE_WINDOW", _close_modal)
+            btn_close = ctk.CTkButton(foot_inner, text="Close", height=38, width=90, fg_color=WHITE, hover_color=PREVIEW_BG, border_color=BORDER_DARK, border_width=1, text_color=TEXT, font=(FONT_FAMILY, 11, "bold"), corner_radius=6, command=_close_modal)
+            btn_close.pack(side="right")
+
+            btn_submit = ctk.CTkButton(foot_inner, text="Send Selected to Sales Portal (0)", height=38, fg_color=BORDER_DARK, hover_color=ACCENT_DARK, text_color=WHITE, font=(FONT_FAMILY, 12, "bold"), corner_radius=6, state="disabled")
+            btn_submit.pack(side="right", padx=(0, 12))
+
+            # Checkbox variables per item (default all deselected on initial load)
+            item_checks = {}
+            for idx, item in enumerate(discrepancy_items):
+                item_checks[idx] = tk.BooleanVar(value=False)
+
+            BANK_BADGE_COLS = {
+                "BCA":     ("#1E40AF", "#DBEAFE"),
+                "MANDIRI": ("#92400E", "#FEF3C7"),
+                "BRI":     ("#047857", "#D1FAE5"),
+                "OTHER":   ("#4B5563", "#F3F4F6"),
+            }
+
+            TYPE_BADGE_INFO = {
+                "bank_only":         ("🏦 Bank Only", "#4338CA", "#EEF2FF"),
+                "odoo_only":         ("📦 Odoo Only", "#B45309", "#FEF3C7"),
+                "unreconciled_odoo": ("⚠️ Unreconciled", "#BE123C", "#FFE4E6"),
+            }
+
+            def _update_counts():
+                selected_count = 0
+                selected_sum = 0.0
+                available_count = 0
+                for idx, item in enumerate(discrepancy_items):
+                    if not item["is_synced"]:
+                        available_count += 1
+                        if item_checks[idx].get():
+                            selected_count += 1
+                            selected_sum += item["amount"]
+                lbl_summary.configure(text=f"Selected {selected_count} item(s) • Total: Rp {selected_sum:,.2f}")
+                btn_submit.configure(text=f"Send Selected to Sales Portal ({selected_count})")
+                if selected_count == 0:
+                    btn_submit.configure(state="disabled", fg_color=BORDER_DARK)
+                else:
+                    btn_submit.configure(state="normal", fg_color=ACCENT)
+
+                if available_count > 0 and selected_count == available_count:
+                    btn_select_all.configure(text="Deselect All")
+                else:
+                    btn_select_all.configure(text="Select All Available")
+
+            def _toggle_select_all():
+                available = [i for i, item in enumerate(discrepancy_items) if not item["is_synced"]]
+                all_on = all(item_checks[i].get() for i in available) if available else False
+                new_val = not all_on
+                for i in available:
+                    item_checks[i].set(new_val)
+                _update_counts()
+
+            btn_select_all.configure(command=_toggle_select_all)
+
+            display_limit = [100]
+
+            def _render_modal_cards():
+                for w in scroll_cards.winfo_children():
+                    w.destroy()
+
+                # Filter items
+                visible = []
+                for idx, item in enumerate(discrepancy_items):
+                    # Discrepancy Type filter
+                    if cur_type[0] != "ALL" and item["discrepancy_type"] != cur_type[0]:
+                        continue
+
+                    # Status filter
+                    if cur_status[0] == "READY" and item["is_synced"]:
+                        continue
+                    if cur_status[0] == "SYNCED" and not item["is_synced"]:
+                        continue
+
+                    # Bank filter
+                    bname = item["bank"].upper()
+                    if cur_bank[0] != "ALL" and bname != cur_bank[0]:
+                        continue
+
+                    # Search filter
+                    if search_q[0]:
+                        s_str = f"{item['bank']} {item['journal']} {item['number_bank']} {item['number_odo']} {item['invoice_no']} {item['discrepancy_type']} {item['amount']}".lower()
+                        if search_q[0] not in s_str:
+                            continue
+
+                    visible.append((idx, item))
+
+                # Update count badges
+                ready_cnt = sum(1 for it in discrepancy_items if not it["is_synced"])
+                synced_cnt = sum(1 for it in discrepancy_items if it["is_synced"])
+                btn_st_ready.configure(text=f"Ready ({ready_cnt})")
+                btn_st_synced.configure(text=f"Synced ({synced_cnt})")
+                btn_st_all.configure(text=f"All ({len(discrepancy_items)})")
+
+                if not visible:
+                    emp = tk.Frame(scroll_cards, bg=PANEL, highlightbackground=BORDER, highlightthickness=1)
+                    emp.pack(fill="x", padx=16, pady=20)
+                    tk.Label(emp, text="No items match current filter criteria.", bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 10, "bold")).pack(pady=16)
+                    return
+
+                slice_items = visible[:display_limit[0]]
+
+                for idx, item in slice_items:
+                    card = tk.Frame(scroll_cards, bg=PANEL, highlightbackground=BORDER, highlightthickness=1, bd=0)
+                    card.pack(fill="x", padx=4, pady=3)
+                    
+                    # Rigid column widths for perfect alignment
+                    card.columnconfigure(0, minsize=34)   # Col 0: Checkbox
+                    card.columnconfigure(1, minsize=118)  # Col 1: Live Odoo Button
+                    card.columnconfigure(2, minsize=120)  # Col 2: Discrepancy Type Badge
+                    card.columnconfigure(3, minsize=80)   # Col 3: Bank Badge
+                    card.columnconfigure(4, minsize=95)   # Col 4: Date
+                    card.columnconfigure(5, minsize=140)  # Col 5: Journal
+                    card.columnconfigure(6, weight=1)     # Col 6: Ref / Doc (Expands & absorbs available width)
+                    card.columnconfigure(7, minsize=155)  # Col 7: Amount
+                    card.columnconfigure(8, minsize=120)  # Col 8: Status
+
+                    # Col 0: Checkbox
+                    if not item["is_synced"]:
+                        cb = tk.Checkbutton(
+                            card, variable=item_checks[idx], bg=PANEL, activebackground=PANEL,
+                            highlightthickness=0, bd=0, command=_update_counts
+                        )
+                        cb.grid(row=0, column=0, padx=(10, 4), pady=7, sticky="w")
+                    else:
+                        lbl_lock = tk.Label(card, text="Synced", bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9, "bold"))
+                        lbl_lock.grid(row=0, column=0, padx=(8, 4), pady=7, sticky="w")
+
+                    # Col 1: Live Odoo Inspection Button (Second Column)
+                    btn_chk = ctk.CTkButton(
+                        card, text="🔍 Check Odoo", width=104, height=28,
+                        fg_color=WHITE, hover_color=PREVIEW_BG,
+                        border_color=BORDER_DARK, border_width=1,
+                        text_color=TEXT, font=(FONT_FAMILY, 9, "bold"), corner_radius=6,
+                        command=lambda it=item: self._open_discrepancy_inspection_modal(it, parent_win=top)
+                    )
+                    btn_chk.grid(row=0, column=1, padx=(0, 8), pady=4, sticky="w")
+
+                    # Col 2: Type badge
+                    t_lbl, t_fg, t_bg = TYPE_BADGE_INFO.get(item["discrepancy_type"], ("Discrepancy", TEXT, BG))
+                    lbl_tbadge = tk.Label(card, text=f" {t_lbl} ", bg=t_bg, fg=t_fg, font=(FONT_FAMILY, 9, "bold"), padx=5, pady=3, width=14, anchor="center")
+                    lbl_tbadge.grid(row=0, column=2, padx=(0, 6), pady=7, sticky="w")
+
+                    # Col 3: Bank badge
+                    bname = item["bank"].upper()
+                    fg_b, bg_b = BANK_BADGE_COLS.get(bname, BANK_BADGE_COLS["OTHER"])
+                    lbl_badge = tk.Label(card, text=f" {bname} ", bg=bg_b, fg=fg_b, font=(FONT_FAMILY, 9, "bold"), padx=5, pady=3, width=7, anchor="center")
+                    lbl_badge.grid(row=0, column=3, padx=(0, 6), pady=7, sticky="w")
+
+                    # Col 4: Date
+                    lbl_d = tk.Label(card, text=item["date"], bg=PANEL, fg=TEXT, font=(FONT_FAMILY, 10, "bold"), width=10, anchor="w")
+                    lbl_d.grid(row=0, column=4, padx=(0, 6), pady=7, sticky="w")
+
+                    # Col 5: Journal
+                    lbl_j = tk.Label(card, text=item["journal"], bg=PANEL, fg=MUTED, font=(FONT_FAMILY, 9), width=16, anchor="w")
+                    lbl_j.grid(row=0, column=5, padx=(0, 6), pady=7, sticky="w")
+
+                    # Col 6: Bank Ref or Odoo Doc (Unclipped, expands into available space)
+                    if item["discrepancy_type"] == "bank_only":
+                        b_ref = item["number_bank"] or "-"
+                        ref_text = f"Ref: {b_ref}"
+                    elif item["discrepancy_type"] == "unreconciled_odoo":
+                        o_doc = item["number_odo"] or item["invoice_no"] or "-"
+                        ref_text = f"Unrecon: {o_doc}"
+                    else:
+                        o_doc = item["number_odo"] or item["invoice_no"] or "-"
+                        ref_text = f"Doc: {o_doc}"
+
+                    lbl_ref = tk.Label(card, text=ref_text, bg=PANEL, fg=TEXT, font=(FONT_MONO, 10, "bold"), anchor="w")
+                    lbl_ref.grid(row=0, column=6, padx=(0, 10), pady=7, sticky="ew")
+
+                    # Col 7: Amount
+                    lbl_amt = tk.Label(card, text=f"Rp {item['amount']:,.2f}", bg=PANEL, fg=TEXT, font=(FONT_FAMILY, 11, "bold"), width=16, anchor="e")
+                    lbl_amt.grid(row=0, column=7, padx=(0, 10), pady=7, sticky="e")
+
+                    # Col 8: Status
+                    if item["is_synced"]:
+                        lbl_st = tk.Label(card, text="● Synced", bg=PANEL, fg="#059669", font=(FONT_FAMILY, 9, "bold"), width=12, anchor="w")
+                    else:
+                        lbl_st = tk.Label(card, text="● Ready to Sync", bg=PANEL, fg="#D97706", font=(FONT_FAMILY, 9, "bold"), width=12, anchor="w")
+                    lbl_st.grid(row=0, column=8, padx=(0, 10), pady=7, sticky="w")
+
+                    # Hover styling
+                    labels_hover = [lbl_d, lbl_j, lbl_ref, lbl_amt, lbl_st]
+                    if item["is_synced"]:
+                        labels_hover.append(lbl_lock)
+
+                    def _make_hover(c_widget=card, labels=labels_hover, it=item):
+                        def _enter(e):
+                            c_widget.config(bg=PREVIEW_BG, highlightbackground=ACCENT)
+                            for l in labels: l.config(bg=PREVIEW_BG)
+                        def _leave(e):
+                            c_widget.config(bg=PANEL, highlightbackground=BORDER)
+                            for l in labels: l.config(bg=PANEL)
+                        def _on_double_click(e):
+                            self._open_discrepancy_inspection_modal(it, parent_win=top)
+                        c_widget.bind("<Enter>", _enter)
+                        c_widget.bind("<Leave>", _leave)
+                        c_widget.bind("<Double-Button-1>", _on_double_click)
+                        for l in labels:
+                            l.bind("<Double-Button-1>", _on_double_click)
+                    _make_hover()
+
+                # Load More button if more items exist
+                if len(visible) > len(slice_items):
+                    remaining = len(visible) - len(slice_items)
+                    more_frame = tk.Frame(scroll_cards, bg=BG)
+                    more_frame.pack(fill="x", pady=10)
+                    def _show_more():
+                        display_limit[0] += 100
+                        _render_modal_cards()
+                    btn_more = ctk.CTkButton(
+                        more_frame, text=f"Load Next 100 Items (Showing {len(slice_items)} of {len(visible)} items — {remaining} remaining)",
+                        height=32, fg_color=WHITE, hover_color=PREVIEW_BG, border_color=BORDER_DARK, border_width=1,
+                        text_color=TEXT, font=(FONT_FAMILY, 9, "bold"), command=_show_more
+                    )
+                    btn_more.pack(pady=4)
+
+                _update_counts()
+
+                # Reset scroll position to top
+                def _reset_scroll():
+                    try:
+                        scroll_cards._parent_canvas.yview_moveto(0.0)
+                    except Exception:
+                        pass
+                _reset_scroll()
+                top.after(10, _reset_scroll)
+                top.after(50, _reset_scroll)
+
+            def _switch_type(tk_val):
+                display_limit[0] = 100
+                cur_type[0] = tk_val
+                for k, btn in type_btn_map.items():
+                    if k == tk_val:
+                        btn.configure(fg_color=ACCENT, text_color=WHITE, border_color=ACCENT, hover_color=ACCENT_DARK)
+                    else:
+                        btn.configure(fg_color=WHITE, text_color=TEXT, border_color=BORDER_DARK, hover_color=PREVIEW_BG)
+                _render_modal_cards()
+
+            for tk_val, btn in type_btn_map.items():
+                btn.configure(command=lambda t=tk_val: _switch_type(t))
+
+            def _switch_status(st):
+                display_limit[0] = 100
+                cur_status[0] = st
+                btn_st_ready.configure(
+                    fg_color=ACCENT if st == "READY" else WHITE,
+                    text_color=WHITE if st == "READY" else TEXT,
+                    border_color=ACCENT if st == "READY" else BORDER_DARK,
+                    hover_color=ACCENT_DARK if st == "READY" else PREVIEW_BG
+                )
+                btn_st_synced.configure(
+                    fg_color=ACCENT if st == "SYNCED" else WHITE,
+                    text_color=WHITE if st == "SYNCED" else TEXT,
+                    border_color=ACCENT if st == "SYNCED" else BORDER_DARK,
+                    hover_color=ACCENT_DARK if st == "SYNCED" else PREVIEW_BG
+                )
+                btn_st_all.configure(
+                    fg_color=ACCENT if st == "ALL" else WHITE,
+                    text_color=WHITE if st == "ALL" else TEXT,
+                    border_color=ACCENT if st == "ALL" else BORDER_DARK,
+                    hover_color=ACCENT_DARK if st == "ALL" else PREVIEW_BG
+                )
+                _render_modal_cards()
+
+            btn_st_ready.configure(command=lambda: _switch_status("READY"))
+            btn_st_synced.configure(command=lambda: _switch_status("SYNCED"))
+            btn_st_all.configure(command=lambda: _switch_status("ALL"))
+
+            def _switch_bank(bn):
+                display_limit[0] = 100
+                cur_bank[0] = bn
+                for k, btn in bank_btn_map.items():
+                    if k == bn:
+                        btn.configure(fg_color=ACCENT, text_color=WHITE, border_color=ACCENT)
+                    else:
+                        btn.configure(fg_color=WHITE, text_color=TEXT, border_color=BORDER_DARK)
+                _render_modal_cards()
+
+            for bn, btn in bank_btn_map.items():
+                btn.configure(command=lambda b=bn: _switch_bank(b))
+
+            def _on_search_change(*args):
+                display_limit[0] = 100
+                search_q[0] = search_v.get().strip().lower()
+                _render_modal_cards()
+
+            search_v.trace_add("write", _on_search_change)
+
+            # Send Action
+            def _do_push_to_sales():
+                to_send = []
+                for idx, item in enumerate(discrepancy_items):
+                    if not item["is_synced"] and item_checks[idx].get():
+                        to_send.append(item)
+
+                if not to_send:
+                    return
+
+                btn_submit.configure(state="disabled", text="⏳ Sending to Cloud...")
+                top.update_idletasks()
+
+                recon_date = to_send[0]["date"] if to_send else ""
+                res = push_bank_discrepancies(to_send, recon_date=recon_date)
+
+                if res.get("success"):
+                    self._log_write(f"\n✅ Uploaded {res.get('count', len(to_send))} discrepancies to Sales Portal!\n", "ok")
+                    self._set_status(f"Sent {res.get('count')} items to Sales Portal", SUCCESS)
+                    # Mark as synced locally
+                    for item in to_send:
+                        item["is_synced"] = True
+                    _switch_status("SYNCED")
+                    _render_modal_cards()
+                else:
+                    self._log_write(f"\n❌ Failed to send to cloud: {res.get('error')}\n", "err")
+                    self._set_status(f"Upload failed: {res.get('error')}", ERROR)
+                    btn_submit.configure(state="normal", text="📤 Send Selected to Sales Portal")
+
+            btn_submit.configure(command=_do_push_to_sales)
+            _render_modal_cards()
+            _update_counts()
+
+            # Background cloud check to flag already-synced items without freezing the UI
+            import threading
+            def _bg_check_synced():
+                try:
+                    existing = fetch_discrepancies(limit=1000)
+                    if not existing or not top.winfo_exists():
+                        return
+                    cloud_keys = set()
+                    for ci in existing:
+                        d = str(ci.get("transaction_date", "")).strip()
+                        b = str(ci.get("bank_name", "")).strip().upper()
+                        num = str(ci.get("bank_number", "")).strip()
+                        onum = str(ci.get("odoo_number", "")).strip()
+                        dtype = str(ci.get("discrepancy_type", "bank_only")).strip()
+                        a = round(float(ci.get("amount", 0.0)), 2)
+                        if num or onum:
+                            cloud_keys.add((d, b, num, onum, dtype, a))
+                            if num: cloud_keys.add((d, b, num, "", dtype, a))
+                            if onum: cloud_keys.add((d, b, "", onum, dtype, a))
+                        else:
+                            cloud_keys.add((d, b, "", "", dtype, a))
+
+                    changed = False
+                    for item in discrepancy_items:
+                        d = item["date"]
+                        b = item["bank"].upper()
+                        num = item["number_bank"]
+                        onum = item["number_odo"]
+                        dtype = item["discrepancy_type"]
+                        a = round(item["amount"], 2)
+                        is_match = False
+                        if (d, b, num, onum, dtype, a) in cloud_keys:
+                            is_match = True
+                        elif num and (d, b, num, "", dtype, a) in cloud_keys:
+                            is_match = True
+                        elif onum and (d, b, "", onum, dtype, a) in cloud_keys:
+                            is_match = True
+
+                        if is_match:
+                            item["is_synced"] = True
+                            changed = True
+
+                    if changed and top.winfo_exists():
+                        top.after(0, _render_modal_cards)
+                        top.after(0, _update_counts)
+                except Exception:
+                    pass
+
+            threading.Thread(target=_bg_check_synced, daemon=True).start()
+
+        finally:
+            self._sync_cloud_btn.configure(text="☁️  Sync Sales Portal", state="normal")
+
+    # ── Live Odoo Diagnostics Modal for Finance ──────────────────────────────
+    def _open_discrepancy_inspection_modal(self, item: dict, parent_win=None):
+        import odoo_inspector
+        import threading
+
+        parent = parent_win if (parent_win and parent_win.winfo_exists()) else self
+        dlg = ctk.CTkToplevel(parent)
+        dlg.title("Odoo Discrepancy Diagnostics (Finance)")
+        dlg.geometry("820x460")
+        dlg.minsize(760, 400)
+        dlg.resizable(True, True)
+        dlg.transient(parent)
+
+        sw, sh = dlg.winfo_screenwidth(), dlg.winfo_screenheight()
+        cx, cy = max(0, int(sw / 2 - 820 / 2)), max(0, int(sh / 2 - 460 / 2))
+        dlg.geometry(f"820x460+{cx}+{cy}")
+        dlg.configure(fg_color=BG)
+
+        def _safe_grab():
+            try:
+                if dlg.winfo_exists():
+                    dlg.grab_set()
+            except Exception:
+                pass
+        dlg.after(100, _safe_grab)
+
+        scroll_root = ctk.CTkScrollableFrame(dlg, fg_color="transparent")
+        scroll_root.pack(fill="both", expand=True, padx=16, pady=16)
+
+        content = ctk.CTkFrame(scroll_root, fg_color=PANEL, corner_radius=10, border_color=BORDER, border_width=1)
+        content.pack(fill="both", expand=True)
+
+        # ── 1. Header Info ──
+        hdr = ctk.CTkFrame(content, fg_color=PREVIEW_BG, corner_radius=8, border_color=BORDER, border_width=1)
+        hdr.pack(fill="x", padx=16, pady=(16, 12))
+
+        amt = float(item.get("amount", 0.0))
+        t_date = str(item.get("date", item.get("transaction_date", ""))).strip()
+        b_name = str(item.get("bank", item.get("bank_name", ""))).upper()
+        journal = str(item.get("journal", "")).strip()
+        dtype = str(item.get("discrepancy_type") or "bank_only").strip()
+        badge_map = {
+            "bank_only":         ("🏦 Bank Only", "#4338CA", "#EEF2FF"),
+            "odoo_only":         ("📦 Odoo Only", "#B45309", "#FEF3C7"),
+            "unreconciled_odoo": ("⚠️ Unreconciled", "#BE123C", "#FFE4E6"),
+        }
+        t_lbl, t_fg, t_bg = badge_map.get(dtype, ("Discrepancy", TEXT, BG))
+
+        ctk.CTkLabel(hdr, text=f"Rp {amt:,.2f}  •  {t_lbl}", font=(FONT_FAMILY, 16, "bold"), text_color=TEXT).pack(anchor="w", padx=14, pady=(10, 3))
+        ctk.CTkLabel(hdr, text=f"{b_name} • {journal} • Date: {t_date}", font=(FONT_FAMILY, 11, "bold"), text_color=ACCENT).pack(anchor="w", padx=14)
+
+        b_num = str(item.get("number_bank") or item.get("bank_number") or "-").strip()
+        o_num = str(item.get("number_odo") or item.get("odoo_number") or item.get("invoice_no") or "").strip()
+        ref_txt = f"Bank Ref: {b_num}"
+        if o_num:
+            ref_txt += f"  •  Odoo Doc: {o_num}"
+        ctk.CTkLabel(hdr, text=ref_txt, font=(FONT_MONO, 11), text_color=MUTED).pack(anchor="w", padx=14, pady=(3, 10))
+
+        # ── 2. Odoo Live Diagnostics Assistant ──
+        diag_frame = ctk.CTkFrame(content, fg_color="#F8FAFC", corner_radius=8, border_color=BORDER_DARK, border_width=1)
+        diag_frame.pack(fill="x", padx=16, pady=(0, 16))
+
+        diag_hdr = ctk.CTkFrame(diag_frame, fg_color="transparent")
+        diag_hdr.pack(fill="x", padx=14, pady=(10, 6))
+
+        ctk.CTkLabel(diag_hdr, text="🔍 Odoo Live Diagnostics (Read-Only)", font=(FONT_FAMILY, 12, "bold"), text_color=ACCENT_DARK).pack(side="left")
+        lbl_status = ctk.CTkLabel(diag_hdr, text="⏳ Checking Odoo...", font=(FONT_FAMILY, 11, "bold"), text_color=MUTED)
+        lbl_status.pack(side="right")
+
+        diag_body = ctk.CTkFrame(diag_frame, fg_color="transparent")
+        diag_body.pack(fill="x", padx=14, pady=(0, 14))
+
+        btn_bar = ctk.CTkFrame(content, fg_color="transparent")
+        btn_bar.pack(fill="x", side="bottom", padx=16, pady=(0, 16))
+
+        btn_close = ctk.CTkButton(
+            btn_bar, text="Close", height=32, width=90,
+            fg_color=WHITE, hover_color=PREVIEW_BG,
+            border_color=BORDER_DARK, border_width=1,
+            text_color=TEXT, font=(FONT_FAMILY, 10, "bold"),
+            command=dlg.destroy
+        )
+        btn_close.pack(side="right")
+
+        inspect_item = {
+            "discrepancy_type": dtype,
+            "amount": amt,
+            "transaction_date": t_date,
+            "odoo_number": o_num,
+            "bank_number": b_num,
+            "bank_name": b_name,
+            "journal": journal
+        }
+
+        def _apply_diag_ui(res: dict):
+            if not dlg.winfo_exists():
+                return
+            for w in diag_body.winfo_children():
+                w.destroy()
+
+            if not res.get("success"):
+                lbl_status.configure(text="⚠️ Odoo Check Offline", text_color=WARN)
+                err_msg = res.get("error") or "Could not connect to Odoo server."
+                ctk.CTkLabel(diag_body, text=err_msg, font=(FONT_FAMILY, 11), text_color=MUTED, wraplength=640, justify="left").pack(anchor="w", pady=4)
+                return
+
+            lbl_status.configure(text="✅ Checked Live", text_color=SUCCESS)
+
+            if dtype == "bank_only":
+                invoices = res.get("invoices", [])
+                summary = res.get("summary", "")
+                ctk.CTkLabel(diag_body, text=summary, font=(FONT_FAMILY, 12, "bold"), text_color=TEXT, wraplength=640, justify="left").pack(anchor="w", pady=(0, 8))
+
+                if invoices:
+                    for inv in invoices:
+                        inv_card = ctk.CTkFrame(diag_body, fg_color=WHITE, corner_radius=8, border_color=BORDER, border_width=1)
+                        inv_card.pack(fill="x", pady=4)
+
+                        top_row = ctk.CTkFrame(inv_card, fg_color="transparent")
+                        top_row.pack(fill="x", padx=12, pady=(10, 4))
+
+                        badge_color = SUCCESS if inv["status_code"] == "AVAILABLE_OPEN" else (WARN if inv["status_code"] == "DRAFT_INVOICE" else ERROR)
+                        ctk.CTkLabel(top_row, text=f" {inv['badge']} ", font=(FONT_FAMILY, 10, "bold"), text_color=WHITE, fg_color=badge_color, corner_radius=4).pack(side="left", padx=(0, 8))
+                        ctk.CTkLabel(top_row, text=inv['name'], font=(FONT_MONO, 13, "bold"), text_color=TEXT).pack(side="left")
+                        ctk.CTkLabel(top_row, text=f"Rp {inv['amount']:,.2f}", font=(FONT_FAMILY, 13, "bold"), text_color=SUCCESS_DARK).pack(side="right")
+
+                        desc = f"Customer: {inv['customer']}  •  Date: {inv['date']}"
+                        ctk.CTkLabel(inv_card, text=desc, font=(FONT_FAMILY, 11, "bold"), text_color=MUTED).pack(anchor="w", padx=12, pady=(0, 4))
+                        if inv.get("detail"):
+                            ctk.CTkLabel(inv_card, text=f"↳ {inv['detail']}", font=(FONT_FAMILY, 11), text_color=TEXT, wraplength=620, justify="left").pack(anchor="w", padx=12, pady=(0, 10))
+
+            elif dtype == "odoo_only":
+                summary = res.get("summary", "")
+                linked_invoices = res.get("linked_invoices", [])
+                ctk.CTkLabel(diag_body, text=summary, font=(FONT_FAMILY, 12, "bold"), text_color=TEXT, wraplength=640, justify="left").pack(anchor="w", pady=(0, 8))
+
+                if linked_invoices:
+                    for li in linked_invoices:
+                        li_box = ctk.CTkFrame(diag_body, fg_color=WHITE, corner_radius=8, border_color=BORDER, border_width=1)
+                        li_box.pack(fill="x", pady=4)
+
+                        r1 = ctk.CTkFrame(li_box, fg_color="transparent")
+                        r1.pack(fill="x", padx=12, pady=(10, 4))
+                        ctk.CTkLabel(r1, text="🔗 Linked Invoice:", font=(FONT_FAMILY, 11, "bold"), text_color=ACCENT).pack(side="left", padx=(0, 6))
+                        ctk.CTkLabel(r1, text=li['name'], font=(FONT_MONO, 13, "bold"), text_color=TEXT).pack(side="left")
+                        ctk.CTkLabel(r1, text=f"Rp {li['amount']:,.2f}", font=(FONT_FAMILY, 13, "bold"), text_color=TEXT).pack(side="right")
+
+                        desc = f"Customer: {li['customer']}  •  Invoice Date: {li['date']}  •  State: {li['state']}"
+                        ctk.CTkLabel(li_box, text=desc, font=(FONT_FAMILY, 11, "bold"), text_color=MUTED).pack(anchor="w", padx=12, pady=(0, 10))
+                else:
+                    no_inv_box = ctk.CTkFrame(diag_body, fg_color=WHITE, corner_radius=6, border_color=BORDER, border_width=1)
+                    no_inv_box.pack(fill="x", pady=3)
+                    ctk.CTkLabel(no_inv_box, text="⚪ No linked invoice found on this payment document in Odoo.", font=(FONT_FAMILY, 11, "bold"), text_color=MUTED).pack(anchor="w", padx=12, pady=10)
+
+            elif dtype == "unreconciled_odoo":
+                summary = res.get("summary", "")
+                invoices = res.get("invoices", [])
+                ctk.CTkLabel(diag_body, text=summary, font=(FONT_FAMILY, 12, "bold"), text_color=TEXT, wraplength=640, justify="left").pack(anchor="w", pady=(0, 8))
+
+                if invoices:
+                    for inv in invoices:
+                        inv_card = ctk.CTkFrame(diag_body, fg_color=WHITE, corner_radius=8, border_color=BORDER, border_width=1)
+                        inv_card.pack(fill="x", pady=4)
+
+                        r1 = ctk.CTkFrame(inv_card, fg_color="transparent")
+                        r1.pack(fill="x", padx=12, pady=(10, 4))
+                        ctk.CTkLabel(r1, text=f" {inv['badge']} ", font=(FONT_FAMILY, 10, "bold"), text_color=WHITE, fg_color=ERROR if inv.get("other_payments") else SUCCESS, corner_radius=4).pack(side="left", padx=(0, 8))
+                        ctk.CTkLabel(r1, text=f"Invoice: {inv['name']}", font=(FONT_MONO, 13, "bold"), text_color=TEXT).pack(side="left")
+                        ctk.CTkLabel(r1, text=f"Rp {inv['amount']:,.2f}", font=(FONT_FAMILY, 13, "bold"), text_color=TEXT).pack(side="right")
+
+                        desc = f"Customer: {inv['customer']}  •  Date: {inv['date']}"
+                        ctk.CTkLabel(inv_card, text=desc, font=(FONT_FAMILY, 11, "bold"), text_color=MUTED).pack(anchor="w", padx=12, pady=(0, 4))
+
+                        if inv.get("other_payments"):
+                            other_box = ctk.CTkFrame(inv_card, fg_color=ERROR_LIGHT, corner_radius=6, border_color=ERROR, border_width=1)
+                            other_box.pack(fill="x", padx=12, pady=(4, 10))
+                            ctk.CTkLabel(other_box, text="⚠️ Already linked to other payment(s):", font=(FONT_FAMILY, 11, "bold"), text_color=ERROR).pack(anchor="w", padx=8, pady=(6, 2))
+                            for op in inv["other_payments"]:
+                                op_txt = f"• {op['ref']}  |  Date: {op['date']}  |  Journal: {op['journal']}  |  Rp {op['amount']:,.2f}"
+                                ctk.CTkLabel(other_box, text=op_txt, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, justify="left").pack(anchor="w", padx=12, pady=1)
+                        else:
+                            ctk.CTkLabel(inv_card, text="🟢 Invoice is not linked to any other customer payment.", font=(FONT_FAMILY, 11, "bold"), text_color=SUCCESS).pack(anchor="w", padx=12, pady=(2, 10))
+
+            else:
+                summary = res.get("summary", "")
+                ctk.CTkLabel(diag_body, text=summary, font=(FONT_FAMILY, 9), text_color=MUTED).pack(anchor="w")
+
+        def _bg_inspect():
+            try:
+                res = odoo_inspector.inspect_discrepancy(inspect_item)
+            except Exception as e:
+                res = {"success": False, "error": str(e)}
+            if dlg.winfo_exists():
+                dlg.after(0, lambda: _apply_diag_ui(res))
+
+        threading.Thread(target=_bg_inspect, daemon=True).start()
 
     # ── Manual Match & Discrepancy Reconciler Modal ─────────────────────────
     def _on_manual_match(self):
@@ -2182,7 +3435,25 @@ class App(ctk.CTk):
                 wb.close()
         except Exception as e:
             self._set_status(f"Error loading recon file: {e}", ERROR)
-            return
+        # Dynamic header mapping for backwards and forwards compatibility
+        hdr_row = [str(cell.value or "").strip().lower() for cell in ws[3]]
+        def _find_c(name, fallback):
+            for i, h in enumerate(hdr_row):
+                if name in h: return i
+            return fallback
+
+        c_date     = _find_c("date", 1)
+        c_bank     = _find_c("bank", 2)
+        c_journal  = _find_c("journal", 3)
+        c_odo_num  = _find_c("odoo number", 4)
+        c_ref      = _find_c("reference", 5)
+        c_bank_num = _find_c("bank number", 6)
+        c_file     = _find_c("filename", 7)
+        c_bank_amt = _find_c("bank amount", 8)
+        c_odo_amt  = _find_c("odoo amount", 9 if len(hdr_row) > 13 else 8)
+        c_src      = _find_c("source", 10 if len(hdr_row) > 13 else 9)
+        c_recon    = _find_c("reconciled", 11 if len(hdr_row) > 13 else 10)
+        c_status   = _find_c("status", 12 if len(hdr_row) > 13 else 11)
 
         bank_items = []
         odo_items = []
@@ -2190,24 +3461,32 @@ class App(ctk.CTk):
         odo_by_key = defaultdict(list)
 
         for r_idx, r in enumerate(rows[3:], 4):
-            if not r or len(r) < 12:
+            if not r or len(r) <= c_status:
                 continue
-            st = str(r[11] or "").strip()
+            st = str(r[c_status] or "").strip()
             if not st or st.startswith("DIFFERENCES") or st.startswith("Date:"):
                 continue
+
+            src = str(r[c_src] or "").strip()
+            # Extract amount based on source column
+            if src == "Bank":
+                amt = float(r[c_bank_amt] or r[c_odo_amt] or 0.0)
+            else:
+                amt = float(r[c_odo_amt] or r[c_bank_amt] or 0.0)
+
             row_dict = {
                 "row_idx": r_idx,
                 "no": r[0],
-                "date": str(r[1] or "").strip(),
-                "bank": str(r[2] or "").strip(),
-                "journal": str(r[3] or "").strip(),
-                "number_odo": str(r[4] or "").strip(),
-                "reference": str(r[5] or "").strip(),
-                "number_bank": str(r[6] or "").strip(),
-                "filename": str(r[7] or "").strip(),
-                "amount": float(r[8] or 0.0),
-                "source": str(r[9] or "").strip(),
-                "reconciled": str(r[10] or "").strip(),
+                "date": str(r[c_date] or "").strip(),
+                "bank": str(r[c_bank] or "").strip(),
+                "journal": str(r[c_journal] or "").strip(),
+                "number_odo": str(r[c_odo_num] or "").strip(),
+                "reference": str(r[c_ref] or "").strip(),
+                "number_bank": str(r[c_bank_num] or "").strip(),
+                "filename": str(r[c_file] or "").strip(),
+                "amount": amt,
+                "source": src,
+                "reconciled": str(r[c_recon] or "").strip(),
                 "status": st,
             }
             if st == "Only in Bank":
@@ -2847,11 +4126,13 @@ class App(ctk.CTk):
 
         def _update_recon_file(open_journal_modal=False):
             if not active_matched:
-                self._set_status("No matched pairs to update!", ERROR)
+                show_modal_msg("⚠️ No matched pairs in queue! Click '🔗 Match Pair' or '🔗 Pair Selected Items' first.")
                 return
             try:
                 import openpyxl
                 from openpyxl.styles import PatternFill, Font as XLFont
+                from excel_writer import _normalize_date_str
+                from reconciler import STATUS_DONE, STATUS_BANK_ONLY, STATUS_ODO_ONLY
 
                 wb = openpyxl.load_workbook(latest_file)
                 GREEN_FILL = PatternFill("solid", fgColor="E2EFDA")
@@ -2862,7 +4143,7 @@ class App(ctk.CTk):
                     import re as _re
                     ws_scan = wb["Differences"]
                     for r_scan in range(4, ws_scan.max_row + 1):
-                        v = ws_scan.cell(r_scan, 12).value
+                        v = ws_scan.cell(r_scan, 13).value or ws_scan.cell(r_scan, 12).value
                         if v:
                             m = _re.search(r"M(\d+)", str(v))
                             if m:
@@ -2894,30 +4175,41 @@ class App(ctk.CTk):
                     b_item = pair["bank"]
                     o_item = pair["odoo"]
                     diff   = pair["diff"]  # Bank - Odoo
+                    b_date_norm = _normalize_date_str(b_item["date"])
+                    o_date_norm = _normalize_date_str(o_item["date"])
 
                     # ── 1. Differences Sheet ──────────────────────────────────────
                     if "Differences" in wb.sheetnames:
                         ws_diff = wb["Differences"]
-                        _ensure_diff_header(ws_diff, 13)
+                        _ensure_diff_header(ws_diff, 14)
                         b_row_d = None
                         o_row_d = None
                         for r_idx in range(4, ws_diff.max_row + 1):
-                            src_v = str(ws_diff.cell(r_idx, 10).value or "").strip()
-                            d_v   = str(ws_diff.cell(r_idx, 2).value or "").strip()
-                            a_v   = float(ws_diff.cell(r_idx, 9).value or 0)
-                            if src_v == "Bank" and d_v == b_item["date"] and abs(a_v - b_item["amount"]) < 0.01:
+                            src_v = str(ws_diff.cell(r_idx, 11).value or ws_diff.cell(r_idx, 10).value or "").strip()
+                            d_v   = _normalize_date_str(ws_diff.cell(r_idx, 2).value)
+                            # Check col 9 (Bank Amt / Amt) and col 10 (Odoo Amt)
+                            a_v9  = float(ws_diff.cell(r_idx, 9).value or 0)
+                            a_v10 = float(ws_diff.cell(r_idx, 10).value or 0)
+                            if src_v == "Bank" and d_v == b_date_norm and (abs(a_v9 - b_item["amount"]) < 0.01 or abs(a_v10 - b_item["amount"]) < 0.01):
                                 b_row_d = r_idx
-                            elif src_v == "Odoo" and d_v == o_item["date"] and abs(a_v - o_item["amount"]) < 0.01:
+                            elif src_v == "Odoo" and d_v == o_date_norm and (abs(a_v9 - o_item["amount"]) < 0.01 or abs(a_v10 - o_item["amount"]) < 0.01):
                                 o_row_d = r_idx
 
                         # Write merged row on the Bank row; mark Odoo row for deletion
                         if b_row_d:
-                            ws_diff.cell(b_row_d, 12).value = pair_tag
-                            ws_diff.cell(b_row_d, 12).font = XLFont(bold=True, size=10)
-                            c_diff = ws_diff.cell(b_row_d, 13)
+                            ws_diff.cell(b_row_d, 5).value = o_item.get("number_odo", "")
+                            ws_diff.cell(b_row_d, 6).value = o_item.get("reference", "")
+                            c_o = ws_diff.cell(b_row_d, 10)
+                            c_o.value = o_item["amount"]
+                            c_o.number_format = '#,##0.00'
+                            ws_diff.cell(b_row_d, 11).value = "Manual"
+                            ws_diff.cell(b_row_d, 12).value = o_item.get("reconciled", "Yes")
+                            ws_diff.cell(b_row_d, 13).value = pair_tag
+                            ws_diff.cell(b_row_d, 13).font = XLFont(bold=True, size=10)
+                            c_diff = ws_diff.cell(b_row_d, 14)
                             c_diff.value = diff
                             c_diff.number_format = '#,##0.00'
-                            for c in range(1, 14): ws_diff.cell(b_row_d, c).fill = GREEN_FILL
+                            for c in range(1, 15): ws_diff.cell(b_row_d, c).fill = GREEN_FILL
                         if o_row_d:
                             diff_rows_to_delete.append(o_row_d)
 
@@ -2926,29 +4218,37 @@ class App(ctk.CTk):
                     for sname in wb.sheetnames:
                         if sname in SKIP_SHEETS:
                             continue
-                        if target_j not in sname.lower():
+                        if target_j not in sname.lower() and sname.lower() not in target_j:
                             continue
                         ws_b = wb[sname]
-                        _ensure_diff_header(ws_b, 12)
+                        _ensure_diff_header(ws_b, 13)
                         b_row_b = None
                         o_row_b = None
                         bank_rows_to_delete = []
                         for r in range(4, ws_b.max_row + 1):
-                            d_v = str(ws_b.cell(r, 2).value or "").strip()
-                            a_v = float(ws_b.cell(r, 8).value or 0.0)
-                            s_v = str(ws_b.cell(r, 9).value or "").strip()
-                            if s_v == "Bank" and d_v == b_item["date"] and abs(a_v - b_item["amount"]) < 0.01:
+                            d_v = _normalize_date_str(ws_b.cell(r, 2).value)
+                            src_v = str(ws_b.cell(r, 10).value or ws_b.cell(r, 9).value or "").strip()
+                            a_v8 = float(ws_b.cell(r, 8).value or 0.0)
+                            a_v9 = float(ws_b.cell(r, 9).value or 0.0)
+                            if (src_v in ("Bank", "Both", "Manual") or ws_b.cell(r, 12).value == STATUS_DONE) and d_v == b_date_norm and (abs(a_v8 - b_item["amount"]) < 0.01 or abs(a_v9 - b_item["amount"]) < 0.01):
                                 b_row_b = r
-                            elif s_v == "Odoo" and d_v == o_item["date"] and abs(a_v - o_item["amount"]) < 0.01:
+                            elif src_v == "Odoo" and d_v == o_date_norm and (abs(a_v8 - o_item["amount"]) < 0.01 or abs(a_v9 - o_item["amount"]) < 0.01):
                                 o_row_b = r
 
                         if b_row_b:
-                            ws_b.cell(b_row_b, 11).value = pair_tag
-                            ws_b.cell(b_row_b, 11).font = XLFont(bold=True, size=10)
-                            c_diff = ws_b.cell(b_row_b, 12)
+                            ws_b.cell(b_row_b, 4).value = o_item.get("number_odo", "")
+                            ws_b.cell(b_row_b, 5).value = o_item.get("reference", "")
+                            c_o = ws_b.cell(b_row_b, 9)
+                            c_o.value = o_item["amount"]
+                            c_o.number_format = '#,##0.00'
+                            ws_b.cell(b_row_b, 10).value = "Manual"
+                            ws_b.cell(b_row_b, 11).value = o_item.get("reconciled", "Yes")
+                            ws_b.cell(b_row_b, 12).value = pair_tag
+                            ws_b.cell(b_row_b, 12).font = XLFont(bold=True, size=10)
+                            c_diff = ws_b.cell(b_row_b, 13)
                             c_diff.value = diff
                             c_diff.number_format = '#,##0.00'
-                            for c in range(1, 13): ws_b.cell(b_row_b, c).fill = GREEN_FILL
+                            for c in range(1, 14): ws_b.cell(b_row_b, c).fill = GREEN_FILL
                         if o_row_b:
                             bank_rows_to_delete.append(o_row_b)
 
@@ -2973,30 +4273,35 @@ class App(ctk.CTk):
                         sidecar_entries = []
                         for pi, pair in enumerate(active_matched, next_pair_idx):
                             sidecar_entries.append({
-                                "pair_tag":     f"Match (M{pi:02d})",
-                                "bank_date":    pair["bank"]["date"],
-                                "bank_journal": pair["bank"]["journal"],
-                                "bank_amount":  pair["bank"]["amount"],
-                                "bank_number":  pair["bank"].get("number_bank", ""),
-                                "odoo_date":    pair["odoo"]["date"],
-                                "odoo_journal": pair["odoo"]["journal"],
-                                "odoo_amount":  pair["odoo"]["amount"],
-                                "odoo_number":  pair["odoo"].get("number_odo", ""),
-                                "diff":         pair["diff"],
+                                "pair_tag":        f"Match (M{pi:02d})",
+                                "bank_date":       pair["bank"]["date"],
+                                "bank_journal":    pair["bank"]["journal"],
+                                "bank_amount":     pair["bank"]["amount"],
+                                "bank_number":     pair["bank"].get("number_bank", ""),
+                                "odoo_date":       pair["odoo"]["date"],
+                                "odoo_journal":    pair["odoo"]["journal"],
+                                "odoo_amount":     pair["odoo"]["amount"],
+                                "odoo_number":     pair["odoo"].get("number_odo", ""),
+                                "odoo_reference":  pair["odoo"].get("reference", ""),
+                                "odoo_reconciled": pair["odoo"].get("reconciled", "Yes"),
+                                "diff":            pair["diff"],
                             })
 
                         save_manual_matches(output_dir, sidecar_entries)
                         self._log_write(f"\u2705 Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
                     except Exception as _se:
                         self._log_write(f"\u26a0\ufe0f Could not save .manual_matches.json: {_se}\n", "warn")
+                    top.destroy()
+                    if open_journal_modal:
+                        self._on_journal()
                 else:
-                    self._log_write(f"\n\u26a0\ufe0f Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel manually.\n", "warn")
-                top.destroy()
-
-                if open_journal_modal:
-                    self._on_journal()
+                    self._log_write(f"\n\u26a0\ufe0f Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel and try again.\n", "warn")
+                    show_modal_msg("⚠️ Could not save Excel file. Please close Excel and try again.")
 
             except Exception as e:
+                self._set_status(f"Failed to update recon report: {e}", ERROR)
+                self._log_write(f"\n❌ Error updating recon report: {e}\n", "err")
+                show_modal_msg(f"❌ Error updating recon report: {e}")
                 self._log_write(f"\n\u274c Error updating recon file: {e}\n", "err")
                 self._set_status(f"Error updating recon file: {e}", ERROR)
 
@@ -3159,6 +4464,7 @@ class App(ctk.CTk):
                     status = ws.cell(row=row, column=c_status).value
                     journal_status = ws.cell(row=row, column=c_jstatus).value
                     if not bank or not status: continue
+                    if "incomplete" in str(status).lower(): continue
                 
                     try:
                         diff = abs(float(selisih)) if selisih is not None else 0
@@ -4089,10 +5395,33 @@ class App(ctk.CTk):
 
     def _open_output(self):
         path = getattr(self, "_last_output", None)
-        if path and Path(path).exists():
-            _open_path(path)
-        elif OUTPUT_DIR.exists():
+        if path and Path(path).exists() and Path(path).is_file():
+            _open_path(str(path))
+            return
+
+        if OUTPUT_DIR.exists():
+            files = [f for f in OUTPUT_DIR.glob("Reconciliation_*.xlsx") if f.is_file() and not f.name.startswith("~$")]
+            if files:
+                latest = max(files, key=lambda p: p.stat().st_mtime)
+                _open_path(str(latest))
+                return
             _open_path(str(OUTPUT_DIR))
+        else:
+            self._set_status("No reconciliation file found. Run recon first!", WARN)
+
+    def _open_odoo_file(self):
+        from config import ODO_EXCEL_PATH
+        if ODO_EXCEL_PATH.exists():
+            _open_path(str(ODO_EXCEL_PATH))
+        else:
+            self._set_status("Odoo payment file not found. Click Download first!", WARN)
+
+    def _open_journal_file(self):
+        from config import ODO_JOURNAL_EXCEL_PATH
+        if ODO_JOURNAL_EXCEL_PATH.exists():
+            _open_path(str(ODO_JOURNAL_EXCEL_PATH))
+        else:
+            self._set_status("Odoo journal entries file not found.", WARN)
 
     def _open_input(self):
         input_dir = BASE_DIR / "input"
@@ -4108,6 +5437,22 @@ class App(ctk.CTk):
         recap_dir = BASE_DIR / "recap"
         recap_dir.mkdir(parents=True, exist_ok=True)
         _open_path(str(recap_dir))
+
+    def _on_export_summary_pdf(self):
+        def _run():
+            self._set_status("Generating PDF Summary...", WARN)
+            self._log_write("\n── Generating Executive PDF Summary ──\n", "head")
+            try:
+                from pdf_summary_generator import generate_executive_summary_pdf
+                pdf_path = generate_executive_summary_pdf()
+                self.after(0, self._log_write, f"✅ Executive Summary PDF Generated: {pdf_path.name}\n", "ok")
+                self.after(0, self._set_status, "PDF Ready", SUCCESS)
+                _open_path(str(pdf_path))
+            except Exception as e:
+                self.after(0, self._log_write, f"❌ PDF generation failed: {e}\n", "err")
+                self.after(0, self._set_status, "PDF Error", ERROR)
+
+        threading.Thread(target=_run, daemon=True).start()
 
 
 if __name__ == "__main__":

@@ -7,14 +7,53 @@ import argparse
 
 from config import ODO_JOURNAL_EXCEL_PATH, ODOO_JOURNAL_EDC, ODOO_JOURNAL_AR
 
-def check_journals(excel_path: str, skip_download: bool = False, debug: bool = False, get_dates: bool = False):
-    # Force UTF-8 — Windows CP1252 can't encode ──, ✅, ❌ etc.
-    import io as _io
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    elif hasattr(sys.stdout, "buffer"):
-        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+def extract_journal_date_range(excel_path: Path | str) -> tuple[str, str] | None:
+    """Extract (date_from, date_to) ISO strings from a Reconciliation Excel file in-process."""
+    path = Path(excel_path)
+    if not path.exists():
+        return None
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        if "Daily Summary" not in wb.sheetnames:
+            wb.close()
+            return None
+        ws = wb["Daily Summary"]
+        header_row = next(ws.iter_rows(min_row=3, max_row=3, values_only=True))
+        col_map = {str(cell).strip().lower(): idx for idx, cell in enumerate(header_row) if cell}
+        c_date = col_map.get("date", 1)
+        c_pdate = col_map.get("payment date", 2)
 
+        dates = []
+        for row in ws.iter_rows(min_row=4, values_only=True):
+            if c_date < len(row) and row[c_date] and row[c_date] != "-":
+                dates.append(row[c_date])
+            if c_pdate < len(row) and row[c_pdate] and row[c_pdate] != "-":
+                dates.append(row[c_pdate])
+        wb.close()
+
+        parsed_dates = []
+        for d in dates:
+            if isinstance(d, datetime):
+                parsed_dates.append(d)
+                continue
+            d_str = str(d).strip().split(" ")[0]
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d %b %y"):
+                try:
+                    parsed_dates.append(datetime.strptime(d_str, fmt))
+                    break
+                except Exception:
+                    pass
+
+        if parsed_dates:
+            min_d = min(parsed_dates).strftime("%Y-%m-%d")
+            max_d = max(parsed_dates).strftime("%Y-%m-%d")
+            return (min_d, max_d)
+    except Exception:
+        pass
+    return None
+
+
+def check_journals(excel_path: Path | str, skip_download: bool = False, get_dates: bool = False, debug: bool = False):
     path = Path(excel_path)
     if not path.exists():
         print(f"❌ File not found: {excel_path}")
@@ -89,21 +128,21 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
         min_date = min(parsed_dates)
         max_date = max(parsed_dates)
         
-        date_from_str = min_date.strftime("%m/%d/%Y")
-        date_to_str = max_date.strftime("%m/%d/%Y")
+        date_from_str = min_date.strftime("%Y-%m-%d")
+        date_to_str = max_date.strftime("%Y-%m-%d")
         
         if get_dates:
             print(f"[DATE_RANGE]|{date_from_str}|{date_to_str}")
             return True
             
-        print(f"[+] Date Range untuk Journal Entries: {date_from_str} to {date_to_str}")
+        print(f"[+] Date Range for Journal Entries: {date_from_str} to {date_to_str}")
         
         if not skip_download:
-            print("[+] Pastikan Journal Entries sudah didownload menggunakan odoo_downloader.py")
+            print("[+] Make sure Journal Entries are downloaded using odoo_downloader.py")
             
         # Load downloaded journals
         if not ODO_JOURNAL_EXCEL_PATH.exists():
-            print(f"\n⚠️ File '{ODO_JOURNAL_EXCEL_PATH.name}' tidak ditemukan. Skipping Journal Entries check.\n")
+            print(f"\n⚠️ File '{ODO_JOURNAL_EXCEL_PATH.name}' not found. Skipping Journal Entries check.\n")
             return True
 
         existing_journals = [] # list of dicts: {"journal": str, "date": str, "reference": str}
@@ -289,6 +328,13 @@ def check_journals(excel_path: str, skip_download: bool = False, debug: bool = F
 
                 
         if updated > 0:
+            from openpyxl.utils import get_column_letter
+            if c_edc_num:
+                ws.column_dimensions[get_column_letter(c_edc_num)].width = 18
+            if c_ar_num:
+                ws.column_dimensions[get_column_letter(c_ar_num)].width = 18
+            if c_jstatus:
+                ws.column_dimensions[get_column_letter(c_jstatus)].width = 22
             from odoo_journal_creator import safe_save_workbook
             safe_save_workbook(wb, path)
             print(f"\n✅ Successfully updated {updated} Journal Information rows in {path.name}")

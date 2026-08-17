@@ -70,6 +70,27 @@ def load_manual_matches(output_dir: Path) -> list[dict]:
         return []
 
 
+def _normalize_date_str(val) -> str:
+    """Normalize any date representation (date obj, YYYY-MM-DD, DD/MM/YYYY) to YYYY-MM-DD."""
+    if not val:
+        return ""
+    if isinstance(val, (date, datetime)):
+        return val.strftime("%Y-%m-%d")
+    s = str(val).strip()
+    if "/" in s:
+        parts = s.split("/")
+        if len(parts) == 3:
+            return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+    elif "-" in s:
+        parts = s.split("-")
+        if len(parts) == 3:
+            if len(parts[0]) == 4:
+                return f"{parts[0]}-{parts[1].zfill(2)}-{parts[2].zfill(2)}"
+            elif len(parts[2]) == 4:
+                return f"{parts[2]}-{parts[1].zfill(2)}-{parts[0].zfill(2)}"
+    return s
+
+
 def apply_manual_matches_to_results(
     all_results: dict[str, list[dict]],
     matches: list[dict],
@@ -92,118 +113,75 @@ def apply_manual_matches_to_results(
 
     for m in matches:
         pair_tag = m["pair_tag"]
-        b_date   = str(m.get("bank_date", "")).strip()
+        b_date   = _normalize_date_str(m.get("bank_date", ""))
         b_j      = str(m.get("bank_journal", "")).strip().lower()
         b_amt    = float(m.get("bank_amount", 0))
-        o_date   = str(m.get("odoo_date", "")).strip()
+        o_date   = _normalize_date_str(m.get("odoo_date", ""))
         o_amt    = float(m.get("odoo_amount", 0))
         diff     = float(m.get("diff", b_amt - o_amt))
 
         bank_row: dict | None = None
         odoo_row: dict | None = None
         bank_acc_key: str | None = None
+        odoo_acc_key: str | None = None
 
         for acc_key, rows in all_results.items():
             if acc_key == "other":
                 continue
-            _, acc_name = _get_account_info(acc_key)
-            if b_j not in acc_name.strip().lower() and acc_name.strip().lower() not in b_j:
-                continue
             for r in rows:
                 st = r.get("status", "")
-                r_date = str(r.get("date", "")).strip()
+                r_date = _normalize_date_str(r.get("date", ""))
                 r_amt  = float(r.get("amount", 0))
-                if st == STATUS_BANK_ONLY and r_date == b_date and abs(r_amt - b_amt) < AMT_TOL:
+                if bank_row is None and st == STATUS_BANK_ONLY and r_date == b_date and abs(r_amt - b_amt) < AMT_TOL:
                     bank_row = r
                     bank_acc_key = acc_key
-                elif st == STATUS_ODO_ONLY and r_date == o_date and abs(r_amt - o_amt) < AMT_TOL:
+                elif odoo_row is None and st == STATUS_ODO_ONLY and r_date == o_date and abs(r_amt - o_amt) < AMT_TOL:
                     odoo_row = r
-
-        if bank_row is None and odoo_row is None:
-            # Engine already matched both — no longer needed in sidecar
-            continue
+                    odoo_acc_key = acc_key
 
         if bank_row is not None and odoo_row is not None:
-            # Merge: upgrade Bank row to Match, remove Odoo row
+            # Merge: upgrade Bank row to Match, copy Odoo metadata, remove Odoo row
             bank_row["status"] = STATUS_DONE
             bank_row["manual_match_tag"] = pair_tag
+            bank_row["source"] = "Manual"
+            bank_row["bank_amount"] = b_amt
             bank_row["odoo_amount"] = o_amt
             bank_row["manual_diff"] = diff
-            # Remove the Odoo row from its acc_key results list
-            all_results[bank_acc_key] = [r for r in all_results[bank_acc_key] if r is not odoo_row]
+            bank_row["number_odo"] = odoo_row.get("number_odo") or m.get("odoo_number", "")
+            bank_row["invoice_no"] = odoo_row.get("invoice_no") or m.get("odoo_reference", "")
+            bank_row["is_reconciled"] = odoo_row.get("is_reconciled") or m.get("odoo_reconciled", "Yes")
+            
+            # Remove the Odoo row from results
+            if odoo_acc_key and odoo_acc_key in all_results:
+                all_results[odoo_acc_key] = [r for r in all_results[odoo_acc_key] if r is not odoo_row]
             still_needed.append(m)
         else:
-            # Stale: Bank row exists but Odoo payment is gone from Odoo data
-            stale_entries.append(m)
-            still_needed.append(m)  # keep so user can resolve manually
+            # Keep in sidecar for safety
+            still_needed.append(m)
 
     return all_results, stale_entries, still_needed
 
 
 def _reapply_manual_matches(wb, output_dir: Path) -> None:
-    """After a fresh write_report, re-stamp Match(Mxx) tags from the sidecar.
-    Matches on (date, journal, amount, source) in Differences + bank sheets.
-    Removes entries from sidecar when the recon engine already matched them
-    (status == Match → row no longer appears in Differences).
-    """
+    """After a fresh write_report, ensure manual match cells in bank sheets have proper green fill and values."""
     matches = load_manual_matches(output_dir)
     if not matches:
         return
 
     GREEN_FILL = PatternFill("solid", fgColor="E2EFDA")
-    AMT_TOL = 0.01  # tolerance for float amount comparison
-
-    still_needed: list[dict] = []
+    AMT_TOL = 0.01
 
     for m in matches:
         pair_tag = m["pair_tag"]
-        b_date   = str(m.get("bank_date", "")).strip()
-        b_j      = str(m.get("bank_journal", "")).strip().lower()
+        b_date   = _normalize_date_str(m.get("bank_date", ""))
         b_amt    = float(m.get("bank_amount", 0))
-        b_num    = str(m.get("bank_number", "")).strip()
-        o_date   = str(m.get("odoo_date", "")).strip()
-        o_j      = str(m.get("odoo_journal", "")).strip().lower()
+        o_date   = _normalize_date_str(m.get("odoo_date", ""))
         o_amt    = float(m.get("odoo_amount", 0))
         o_num    = str(m.get("odoo_number", "")).strip()
+        o_ref    = str(m.get("odoo_reference", "")).strip()
+        o_recon  = str(m.get("odoo_reconciled", "Yes")).strip()
+        diff_val = float(m.get("diff", b_amt - o_amt))
 
-        stamped_diff   = False
-        stamped_bank_b = False
-        stamped_bank_o = False
-
-        # 1. Differences sheet (col 12 = Status)
-        if "Differences" in wb.sheetnames:
-            ws_d = wb["Differences"]
-            for rn in range(4, ws_d.max_row + 1):
-                d_v     = str(ws_d.cell(rn, 2).value or "").strip()
-                j_v     = str(ws_d.cell(rn, 4).value or "").strip().lower()
-                o_num_v = str(ws_d.cell(rn, 5).value or "").strip()
-                b_num_v = str(ws_d.cell(rn, 7).value or "").strip()
-                a_v     = float(ws_d.cell(rn, 9).value or 0)
-                src     = str(ws_d.cell(rn, 10).value or "").strip()
-                cur     = str(ws_d.cell(rn, 12).value or "").strip()
-                if cur == pair_tag:
-                    stamped_diff = True
-                    continue
-
-                b_num_match = (b_num == b_num_v) if (b_num and b_num_v) else True
-                o_num_match = (o_num == o_num_v) if (o_num and o_num_v) else True
-
-                if src == "Bank" and d_v == b_date and j_v == b_j and abs(a_v - b_amt) < AMT_TOL and b_num_match:
-                    ws_d.cell(rn, 12).value = pair_tag
-                    diff_val = b_amt - o_amt
-                    ws_d.cell(rn, 13).value = diff_val
-                    ws_d.cell(rn, 13).number_format = '#,##0.00'
-                    for c in range(1, 14): ws_d.cell(rn, c).fill = GREEN_FILL
-                    stamped_diff = True
-                elif src == "Odoo" and d_v == o_date and j_v == o_j and abs(a_v - o_amt) < AMT_TOL and o_num_match:
-                    ws_d.cell(rn, 12).value = pair_tag
-                    diff_val = b_amt - o_amt
-                    ws_d.cell(rn, 13).value = diff_val
-                    ws_d.cell(rn, 13).number_format = '#,##0.00'
-                    for c in range(1, 14): ws_d.cell(rn, c).fill = GREEN_FILL
-                    stamped_diff = True
-
-        # 2. Individual bank sheets (col 11 = Status)
         skip_sheets = {"Daily Summary", "Differences", "Mutation Summary",
                        "Admin Fee", "Excluded Payment", "Other Payment",
                        "Other Mutation", "Legend"}
@@ -212,36 +190,22 @@ def _reapply_manual_matches(wb, output_dir: Path) -> None:
                 continue
             ws_b = wb[sname]
             for rn in range(4, ws_b.max_row + 1):
-                d_v = str(ws_b.cell(rn, 2).value or "").strip()
-                a_v = float(ws_b.cell(rn, 8).value or 0)
-                src = str(ws_b.cell(rn, 9).value or "").strip()
-                cur = str(ws_b.cell(rn, 11).value or "").strip()
-                if cur == pair_tag:
-                    if src == "Bank": stamped_bank_b = True
-                    else:             stamped_bank_o = True
-                    continue
-                if src == "Bank" and d_v == b_date and abs(a_v - b_amt) < AMT_TOL:
-                    ws_b.cell(rn, 11).value = pair_tag
-                    diff_val = b_amt - o_amt
-                    ws_b.cell(rn, 12).value = diff_val
-                    ws_b.cell(rn, 12).number_format = '#,##0.00'
-                    for c in range(1, 13): ws_b.cell(rn, c).fill = GREEN_FILL
-                    stamped_bank_b = True
-                elif src == "Odoo" and d_v == o_date and abs(a_v - o_amt) < AMT_TOL:
-                    ws_b.cell(rn, 11).value = pair_tag
-                    diff_val = b_amt - o_amt
-                    ws_b.cell(rn, 12).value = diff_val
-                    ws_b.cell(rn, 12).number_format = '#,##0.00'
-                    for c in range(1, 13): ws_b.cell(rn, c).fill = GREEN_FILL
-                    stamped_bank_o = True
-
-        # Keep in sidecar only if it still needs to be re-applied next time
-        # (i.e. at least one side was found and stamped in the Differences sheet)
-        if stamped_diff:
-            still_needed.append(m)
-
-    # Overwrite sidecar with only the entries still relevant
-    _write_manual_matches_json(output_dir, still_needed)
+                d_v = _normalize_date_str(ws_b.cell(rn, 2).value)
+                b_amt_v = float(ws_b.cell(rn, 8).value or 0)
+                src = str(ws_b.cell(rn, 10).value or "").strip()
+                if (src in ("Bank", "Both", "Manual") or ws_b.cell(rn, 12).value == STATUS_DONE) and d_v == b_date and abs(b_amt_v - b_amt) < AMT_TOL:
+                    if o_num: ws_b.cell(rn, 4).value = o_num
+                    if o_ref: ws_b.cell(rn, 5).value = o_ref
+                    c_o = ws_b.cell(rn, 9)
+                    c_o.value = o_amt
+                    c_o.number_format = '#,##0.00'
+                    ws_b.cell(rn, 10).value = "Manual"
+                    ws_b.cell(rn, 11).value = o_recon
+                    ws_b.cell(rn, 12).value = pair_tag
+                    c_diff = ws_b.cell(rn, 13)
+                    c_diff.value = diff_val
+                    c_diff.number_format = '#,##0.00'
+                    for c in range(1, 14): ws_b.cell(rn, c).fill = GREEN_FILL
 
 
 def _get_account_info(acc_key: str) -> tuple[str, str]:
@@ -382,7 +346,10 @@ def _fmt_amount_str(val) -> str:
 def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     ws.title = bank_name[:31]
     
-    COL_HEADERS = ["No", "Date", "Payment Date", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status", "Difference"]
+    COL_HEADERS = [
+        "No", "Date", "Payment Date", "Odoo Number", "Reference", "Bank Number", "Filename",
+        "Bank Amount", "Odoo Amount", "Source", "Reconciled", "Status", "Difference"
+    ]
     ncols = len(COL_HEADERS)
 
     done_count  = sum(1 for r in rows if r["status"] == STATUS_DONE)
@@ -410,6 +377,7 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
     for idx, r in enumerate(rows_sorted, 1):
         rn = idx + 3  # offset by 3 header rows
         st = r["status"]
+        src = r.get("source", "")
         _cell(ws.cell(rn, 1), idx,                              st, "center")
         _cell(ws.cell(rn, 2), _fmt_date(r.get("date", "")),         st, "center")
         _cell(ws.cell(rn, 3), _fmt_date(r.get("payment_date", "")), st, "center")
@@ -418,26 +386,49 @@ def _write_bank_sheet(ws, rows: list[dict], bank_name: str, odo_date=None):
         _cell(ws.cell(rn, 6), r.get("number_bank", ""),         st)
         _cell(ws.cell(rn, 7), r.get("filename_bank", ""),       st)
         
-        c_amt = ws.cell(rn, 8)
-        _cell(c_amt, float(r["amount"]), st, "right")
-        c_amt.number_format = '#,##0.00'
+        # Col 8 — Bank Amount
+        c_b_amt = ws.cell(rn, 8)
+        if st == STATUS_DONE or src == "Bank":
+            b_val = float(r.get("bank_amount", r.get("amount", 0)))
+            _cell(c_b_amt, b_val, st, "right")
+            c_b_amt.number_format = '#,##0.00'
+        else:
+            _cell(c_b_amt, "", st, "right")
+
+        # Col 9 — Odoo Amount
+        c_o_amt = ws.cell(rn, 9)
+        if st == STATUS_DONE or src == "Odoo":
+            o_val = float(r.get("odoo_amount", r.get("amount", 0)))
+            _cell(c_o_amt, o_val, st, "right")
+            c_o_amt.number_format = '#,##0.00'
+        else:
+            _cell(c_o_amt, "", st, "right")
         
-        _cell(ws.cell(rn, 9), r.get("source", ""),              st, "center")
-        _cell(ws.cell(rn, 10), r.get("is_reconciled", ""),      st, "center")
-        sc = ws.cell(rn, 11)
+        # Determine display source
+        if r.get("manual_match_tag") or src == "Manual":
+            display_src = "Manual"
+        elif st == STATUS_DONE:
+            display_src = "Both"
+        else:
+            display_src = src
+
+        _cell(ws.cell(rn, 10), display_src,                     st, "center")
+        _cell(ws.cell(rn, 11), r.get("is_reconciled", ""),      st, "center")
+        sc = ws.cell(rn, 12)
         # manual_match_tag present → show "Match (M01)" etc; st stays STATUS_DONE for fill color
         display_status = r.get("manual_match_tag", st)
         _cell(sc, display_status, st, "center")
         sc.font = Font(bold=True, size=10)
-        # col 12 — Difference: manual matches carry actual diff; normal Match = 0
+        
+        # col 13 — Difference: manual matches carry actual diff; normal Match = 0
         diff_val = r.get("manual_diff", 0) if st == STATUS_DONE else ""
-        c_diff = ws.cell(rn, 12)
+        c_diff = ws.cell(rn, 13)
         _cell(c_diff, diff_val, st, "right")
         if st == STATUS_DONE:
             c_diff.number_format = '#,##0.00'
         ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 15, 18, 20, 20, 30, 20, 15, 15, 15, 18], start=1):
+    for col, width in enumerate([6, 15, 15, 18, 20, 20, 30, 20, 20, 15, 15, 15, 18], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
     
     ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{len(rows) + 3}"
@@ -493,17 +484,20 @@ def _write_other_sheet(ws, rows: list[dict], odo_date=None):
 
 def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=None):
     ws.title = "Differences"
-    COL_HEADERS = ["No", "Date", "Bank", "Journal", "Odoo Number", "Reference", "Bank Number", "Filename", "Amount", "Source", "Reconciled", "Status", "Difference"]
+    COL_HEADERS = [
+        "No", "Date", "Bank", "Journal", "Odoo Number", "Reference", "Bank Number", "Filename",
+        "Bank Amount", "Odoo Amount", "Source", "Reconciled", "Status", "Difference"
+    ]
     ncols = len(COL_HEADERS)
     
     date_str   = odo_date.strftime("%d %B %Y") if odo_date else "-"
     
     rows_data = [
         r for rows in all_results.values()
-        for r in rows if r["status"] != STATUS_DONE
+        for r in rows if r["status"] != STATUS_DONE or r.get("manual_match_tag")
     ]
-    total_disc = len(rows_data)
-    total_amount = sum(float(r.get("amount", 0)) for r in rows_data)
+    total_disc = len([r for r in rows_data if not r.get("manual_match_tag")])
+    total_amount = sum(float(r.get("amount", 0)) for r in rows_data if not r.get("manual_match_tag"))
 
     # ── Title block ────────────────────────────────────────────────────
     _merge_title(ws, "DIFFERENCES — ALL BANKS", ncols, row=1)
@@ -525,13 +519,16 @@ def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=No
             
         bank_label, acc_name = _get_account_info(acc_key)
         rows_sorted = sorted(
-            (r for r in rows if r["status"] != STATUS_DONE),
+            (r for r in rows if r["status"] != STATUS_DONE or r.get("manual_match_tag")),
             key=_date_sort_key
         )
         for r in rows_sorted:
             idx += 1
             rn = idx + 3
             st = r["status"]
+            src = r.get("source", "")
+            is_manual = bool(r.get("manual_match_tag") or src == "Manual")
+
             _cell(ws.cell(rn, 1), idx,                            st, "center")
             _cell(ws.cell(rn, 2), _fmt_date(r.get("date", "")),   st, "center")
             _cell(ws.cell(rn, 3), bank_label,                     st, "center")
@@ -541,23 +538,43 @@ def _write_discrepancy_sheet(ws, all_results: dict[str, list[dict]], odo_date=No
             _cell(ws.cell(rn, 7), r.get("number_bank", ""),       st)
             _cell(ws.cell(rn, 8), r.get("filename_bank", ""),     st)
             
-            c_amt = ws.cell(rn, 9)
-            _cell(c_amt, float(r["amount"]), st, "right")
-            c_amt.number_format = '#,##0.00'
+            # Col 9 — Bank Amount
+            c_b_amt = ws.cell(rn, 9)
+            if src == "Bank" or is_manual:
+                b_val = float(r.get("bank_amount", r.get("amount", 0)))
+                _cell(c_b_amt, b_val, st, "right")
+                c_b_amt.number_format = '#,##0.00'
+            else:
+                _cell(c_b_amt, "", st, "right")
+
+            # Col 10 — Odoo Amount
+            c_o_amt = ws.cell(rn, 10)
+            if src == "Odoo" or is_manual:
+                o_val = float(r.get("odoo_amount", r.get("amount", 0)))
+                _cell(c_o_amt, o_val, st, "right")
+                c_o_amt.number_format = '#,##0.00'
+            else:
+                _cell(c_o_amt, "", st, "right")
             
-            _cell(ws.cell(rn, 10), r.get("source", ""),            st, "center")
-            _cell(ws.cell(rn, 11), r.get("is_reconciled", ""),     st, "center")
-            sc = ws.cell(rn, 12)
-            _cell(sc, st, st, "center")
+            display_src = "Manual" if is_manual else src
+            _cell(ws.cell(rn, 11), display_src,                   st, "center")
+            _cell(ws.cell(rn, 12), r.get("is_reconciled", ""),     st, "center")
+            sc = ws.cell(rn, 13)
+            display_status = r.get("manual_match_tag", st)
+            _cell(sc, display_status, st, "center")
             sc.font = Font(bold=True, size=10)
-            # col 13 — Difference: empty for individual discrepancy rows;
-            # manual-match merged rows will have this written by _update_recon_file
-            _cell(ws.cell(rn, 13), "", st, "right")
+            
+            # col 14 — Difference
+            diff_val = r.get("manual_diff", "")
+            c_diff = ws.cell(rn, 14)
+            _cell(c_diff, diff_val, st, "right")
+            if diff_val != "":
+                c_diff.number_format = '#,##0.00'
             ws.row_dimensions[rn].height = 18
 
-    for col, width in enumerate([6, 15, 10, 18, 20, 20, 20, 40, 20, 15, 15, 15, 18], start=1):
+    for col, width in enumerate([6, 15, 10, 18, 20, 20, 20, 30, 20, 20, 15, 15, 15, 18], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
-    ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{total_disc + 3}"
+    ws.auto_filter.ref = f"A3:{get_column_letter(ncols)}{idx + 3}"
     ws.freeze_panes = "A4"
 
 
@@ -720,7 +737,7 @@ def _write_daily_summary_sheet(ws, all_results: dict, odo_date=None):
         ws.row_dimensions[rn].height = 18
 
 
-    for col, width in enumerate([6, 15, 15, 18, 30, 20, 20, 20, 15, 20, 22, 22, 22], start=1):
+    for col, width in enumerate([6, 15, 15, 18, 30, 20, 20, 20, 15, 20, 22, 18, 18], start=1):
         ws.column_dimensions[get_column_letter(col)].width = width
 
     
@@ -763,6 +780,35 @@ def _auto_adjust_headers(wb):
 
 def _auto_adjust_col_widths(wb):
     for ws in wb.worksheets:
+        if ws.title == "Daily Summary":
+            daily_widths = {
+                1: 6,   # No
+                2: 15,  # Date
+                3: 15,  # Payment Date
+                4: 15,  # Bank
+                5: 18,  # Journal
+                6: 20,  # Total Bank
+                7: 20,  # Total Odoo
+                8: 20,  # Difference
+                9: 15,  # Reconciled
+                10: 20, # Status
+                11: 22, # Journal Information
+                12: 18, # EDC Number
+                13: 18, # AR Number
+            }
+            for col_idx, width in daily_widths.items():
+                ws.column_dimensions[get_column_letter(col_idx)].width = width
+            continue
+
+        if ws.title == "Differences":
+            diff_widths = {
+                1: 6, 2: 15, 3: 12, 4: 22, 5: 22, 6: 22, 7: 20, 8: 30,
+                9: 20, 10: 20, 11: 15, 12: 15, 13: 15, 14: 18
+            }
+            for col_idx, width in diff_widths.items():
+                ws.column_dimensions[get_column_letter(col_idx)].width = width
+            continue
+
         for col_idx in range(1, ws.max_column + 1):
             max_length = 0
             for row_idx in range(1, ws.max_row + 1):
@@ -779,7 +825,9 @@ def _auto_adjust_col_widths(wb):
             adjusted_width = min(max_length + 2, 60)
             if adjusted_width < 10:
                 adjusted_width = 10
-            ws.column_dimensions[get_column_letter(col_idx)].width = adjusted_width
+            # Keep whichever is larger between calculated width and current width
+            curr_width = getattr(ws.column_dimensions[get_column_letter(col_idx)], "width", 0) or 0
+            ws.column_dimensions[get_column_letter(col_idx)].width = max(adjusted_width, curr_width)
 
 
 def write_report(
