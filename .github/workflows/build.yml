@@ -1,0 +1,114 @@
+name: Build Desktop Apps (Windows & macOS)
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build Windows (.exe)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Install Playwright Browsers
+        run: |
+          python -m playwright install chromium
+
+      - name: Create empty folders
+        run: |
+          New-Item -ItemType Directory -Force -Path input
+          New-Item -ItemType Directory -Force -Path output
+          New-Item -ItemType Directory -Force -Path mutations
+          New-Item -ItemType Directory -Force -Path recap
+        shell: pwsh
+
+      - name: Build Recon (Finance GUI)
+        run: pyinstaller bank_recon.spec --clean --noconfirm
+
+      - name: Build SalesPortal (Store GUI)
+        run: pyinstaller SalesPortal.spec --clean --noconfirm
+
+      - name: Upload Recon Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: Recon-Windows-EXE
+          path: dist/Recon.exe
+          retention-days: 30
+
+      - name: Upload SalesPortal Windows EXE
+        uses: actions/upload-artifact@v4
+        with:
+          name: SalesPortal-Windows-EXE
+          path: dist/SalesPortal.exe
+          retention-days: 30
+
+  build-macos:
+    name: Build macOS (.app)
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r requirements.txt
+          pip3 install pyinstaller
+
+      - name: Install Playwright Browsers
+        run: |
+          python3 -m playwright install chromium
+
+      - name: Create empty folders
+        run: |
+          mkdir -p input output mutations recap
+
+      - name: Build Recon (Finance GUI)
+        run: pyinstaller bank_recon.spec --clean --noconfirm
+
+      - name: Build SalesPortal (Store GUI)
+        run: pyinstaller SalesPortal.spec --clean --noconfirm
+
+      - name: Package macOS Apps as ZIP
+        run: |
+          cd dist
+          zip -r -y Recon-macOS.zip Recon.app
+          zip -r -y SalesPortal-macOS.zip SalesPortal.app
+          cd ..
+
+      - name: Upload Recon macOS App
+        uses: actions/upload-artifact@v4
+        with:
+          name: Recon-macOS-App
+          path: dist/Recon-macOS.zip
+          retention-days: 30
+
+      - name: Upload SalesPortal macOS App
+        uses: actions/upload-artifact@v4
+        with:
+          name: SalesPortal-macOS-App
+          path: dist/SalesPortal-macOS.zip
+          retention-days: 30

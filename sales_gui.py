@@ -23,6 +23,8 @@ from cloud_sync import (
 import threading
 import odoo_inspector
 
+BASE_DIR = Path(__file__).resolve().parent
+
 # ── Design System & Color Tokens ──────────────────────────────────────────────
 IS_WINDOWS = (sys.platform == "win32")
 FONT_FAMILY = ("Segoe UI", "Segoe UI Emoji", "Arial") if IS_WINDOWS else "Helvetica Neue"
@@ -120,11 +122,39 @@ class SalesPortalApp(ctk.CTk):
         self._current_status_filter = "pending_sales"
         self._search_query = ""
 
+        self._set_app_icon()
+
         # Container for swapping between Login and Dashboard
         self._root_container = ctk.CTkFrame(self, fg_color=BG, corner_radius=0)
         self._root_container.pack(fill="both", expand=True)
 
         self._show_login_view()
+
+    def _set_app_icon(self):
+        """Set high-res native window icon."""
+        try:
+            assets = (
+                Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "assets"
+                if getattr(sys, "frozen", False)
+                else BASE_DIR / "assets"
+            )
+            if sys.platform.startswith("win"):
+                ico = assets / "sales_app_icon.ico"
+                if not ico.exists():
+                    ico = assets / "app_icon.ico"
+                if ico.exists():
+                    self.iconbitmap(str(ico))
+            else:
+                png = assets / "sales_app_icon.png"
+                if not png.exists():
+                    png = assets / "app_icon.png"
+                if png.exists():
+                    from PIL import Image as _Img, ImageTk as _ImgTk
+                    _icon = _ImgTk.PhotoImage(_Img.open(png).resize((256, 256)))
+                    self.iconphoto(True, _icon)
+                    self._icon_ref = _icon
+        except Exception:
+            pass
 
     # =========================================================================
     # ── Login View ───────────────────────────────────────────────────────────
@@ -202,18 +232,18 @@ class SalesPortalApp(ctk.CTk):
         )
         btn_login.pack(fill="x", pady=(4, 8))
 
-        # Demo credentials quick-fill hint
-        def _fill_demo():
-            var_email.set("sales@eyerizz.com")
-            var_pass.set("sales123")
-            lbl_err.configure(text="")
-
-        lbl_demo = tk.Label(
-            ci, text="Quick Fill Test Account (sales@eyerizz.com)",
-            bg=PANEL, fg=ACCENT, font=(FONT_FAMILY, 8, "bold"), cursor="hand2"
-        )
-        lbl_demo.pack(anchor="center", pady=(2, 0))
-        lbl_demo.bind("<Button-1>", lambda e: _fill_demo())
+        # Demo credentials quick-fill hint (disabled for production)
+        # def _fill_demo():
+        #     var_email.set("sales@eyerizz.com")
+        #     var_pass.set("sales123")
+        #     lbl_err.configure(text="")
+        #
+        # lbl_demo = tk.Label(
+        #     ci, text="Quick Fill Test Account (sales@eyerizz.com)",
+        #     bg=PANEL, fg=ACCENT, font=(FONT_FAMILY, 8, "bold"), cursor="hand2"
+        # )
+        # lbl_demo.pack(anchor="center", pady=(2, 0))
+        # lbl_demo.bind("<Button-1>", lambda e: _fill_demo())
 
         def _do_login(event=None):
             em = var_email.get().strip()

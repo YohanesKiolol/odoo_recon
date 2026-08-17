@@ -40,12 +40,15 @@ a = Analysis(
         (str(ROOT / 'journal_checker.py'),'.'),
         (str(ROOT / 'journal_generator.py'),'.'),
         (str(ROOT / 'odoo_journal_creator.py'),'.'),
+        (str(ROOT / 'pdf_summary_generator.py'),'.'),
+        (str(ROOT / 'cloud_sync.py'),     '.'),
         (str(ROOT / 'readers'),           'readers'),
         (str(ROOT / 'assets'),            'assets'),   # includes app_icon.ico + app_icon.png
     ] + _pw_driver + _ctk_data,
     hiddenimports=[
         'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
         'journal_checker', 'journal_generator', 'odoo_journal_creator',
+        'pdf_summary_generator', 'cloud_sync',
         'readers.odoo_reader', 'readers.bca_reader',
         'readers.mandiri_reader', 'readers.bri_reader',
         'openpyxl', 'pdfplumber', 'pdfminer', 'pyzipper',
@@ -81,13 +84,17 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,   # No black terminal window
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # .exe file icon shown in Windows Explorer, taskbar, and Alt+Tab.
-    # The multi-resolution .ico (16/24/32/48/64/128/256 px) ensures Windows
-    # picks the best size for each context automatically.
-    icon=str(ROOT / 'assets' / 'app_icon.ico'),
+    icon=str(ROOT / 'assets' / 'app_icon.ico') if sys.platform.startswith('win') else str(ROOT / 'assets' / 'app_icon.png'),
+)
+
+app = BUNDLE(
+    exe,
+    name='Recon.app',
+    icon=str(ROOT / 'assets' / 'app_icon.png'),
+    bundle_identifier='com.eyerizz.recon',
 )
