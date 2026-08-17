@@ -14,7 +14,6 @@ env/
 # PyInstaller build artifacts
 build/
 dist/
-*.spec
 *.spec.bak
 
 # Sensitive config — add your own .env next to the .exe
