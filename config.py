@@ -13,19 +13,31 @@ warnings.filterwarnings("ignore", category=UserWarning, module="openpyxl")
 
 def _load_dotenv(dotenv_path):
     try:
-        with open(dotenv_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    if "=" in line:
-                        k, v = line.split("=", 1)
-                        v = v.strip()
-                        if v.startswith('"') and v.endswith('"'):
-                            v = v[1:-1]
-                        elif v.startswith("'") and v.endswith("'"):
-                            v = v[1:-1]
-                        os.environ[k.strip()] = v
-    except FileNotFoundError:
+        content = None
+        for enc in ("utf-8-sig", "utf-8", "cp1252", "latin-1"):
+            try:
+                with open(dotenv_path, "r", encoding=enc) as f:
+                    content = f.readlines()
+                break
+            except (UnicodeDecodeError, LookupError, OSError):
+                continue
+
+        if content is None:
+            with open(dotenv_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.readlines()
+
+        for line in content:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    v = v.strip()
+                    if v.startswith('"') and v.endswith('"'):
+                        v = v[1:-1]
+                    elif v.startswith("'") and v.endswith("'"):
+                        v = v[1:-1]
+                    os.environ[k.strip()] = v
+    except Exception:
         pass
 
 # In frozen (PyInstaller) mode, config.py lives in a temp _MEI* folder.
