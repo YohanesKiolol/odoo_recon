@@ -321,35 +321,16 @@ def close_excel_window_for_file(fname: str):
             pass
     elif os.name == "nt" or sys.platform == "win32":
         try:
-            import ctypes
-            from ctypes import wintypes
-            user32 = ctypes.windll.user32
-
-            def enum_cb(hwnd, extra):
-                if user32.IsWindowVisible(hwnd):
-                    length = user32.GetWindowTextLengthW(hwnd)
-                    if length > 0:
-                        buff = ctypes.create_unicode_buffer(length + 1)
-                        user32.GetWindowTextW(hwnd, buff, length + 1)
-                        val = buff.value.lower()
-                        if fname.lower() in val or "reconciliation" in val:
-                            user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
-                return True
-
-            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
-            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
-            time.sleep(0.5)
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            # Strictly target Microsoft Excel process only
+            subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f'Get-Process excel -ErrorAction SilentlyContinue | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
+                capture_output=True, creationflags=flags
+            )
+            time.sleep(0.3)
         except Exception:
-            try:
-                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                subprocess.run(
-                    ["powershell", "-NoProfile", "-Command",
-                     f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" -or $_.MainWindowTitle -like "*Reconciliation*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
-                    capture_output=True, creationflags=flags
-                )
-                time.sleep(0.5)
-            except Exception:
-                pass
+            pass
 
 
 def safe_save_workbook(wb, file_path: Path) -> Path | None:
