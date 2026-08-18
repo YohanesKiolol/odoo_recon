@@ -5285,6 +5285,7 @@ class App(ctk.CTk):
             
             def run_script():
                 try:
+                    import subprocess
                     env = os.environ.copy()
                     env.pop("TCL_LIBRARY", None)
                     env.pop("TK_LIBRARY", None)
