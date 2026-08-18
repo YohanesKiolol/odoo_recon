@@ -18,6 +18,58 @@ from openpyxl.utils import get_column_letter
 from reconciler import STATUS_DONE, STATUS_BANK_ONLY, STATUS_ODO_ONLY
 from config import BANK_ACCOUNTS, ODOO_COMPANY_NAME
 
+
+def read_locked_file_bytes(file_path: Path | str) -> bytes:
+    """Read binary content of a file even if locked by Excel on Windows."""
+    import sys, os
+    fpath = str(file_path)
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            kernel32 = ctypes.windll.kernel32
+            GENERIC_READ = 0x80000000
+            FILE_SHARE_READ = 0x00000001
+            FILE_SHARE_WRITE = 0x00000002
+            FILE_SHARE_DELETE = 0x00000004
+            OPEN_EXISTING = 3
+            INVALID_HANDLE_VALUE = -1
+
+            handle = kernel32.CreateFileW(
+                fpath,
+                GENERIC_READ,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                None,
+                OPEN_EXISTING,
+                0,
+                None
+            )
+            if handle != INVALID_HANDLE_VALUE and handle != 0:
+                try:
+                    size_high = wintypes.DWORD()
+                    size_low = kernel32.GetFileSize(handle, ctypes.byref(size_high))
+                    total_size = (size_high.value << 32) + size_low
+                    if total_size > 0:
+                        buf = ctypes.create_string_buffer(total_size)
+                        bytes_read = wintypes.DWORD()
+                        if kernel32.ReadFile(handle, buf, total_size, ctypes.byref(bytes_read), None):
+                            return buf.raw[:bytes_read.value]
+                finally:
+                    kernel32.CloseHandle(handle)
+        except Exception:
+            pass
+
+    with open(fpath, "rb") as f:
+        return f.read()
+
+
+def safe_load_workbook(file_path: Path | str, data_only=True):
+    """Load openpyxl workbook safely from disk or shared memory buffer."""
+    import io
+    content = read_locked_file_bytes(file_path)
+    return openpyxl.load_workbook(io.BytesIO(content), data_only=data_only)
+
+
 # ── Manual-match sidecar helpers ──────────────────────────────────────────────
 MANUAL_MATCHES_FILE = "manual_matches.json"
 

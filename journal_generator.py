@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from datetime import datetime
 from openpyxl import load_workbook, Workbook
+from excel_writer import safe_load_workbook
 
 from config import (
     OUTPUT_DIR,
@@ -50,7 +51,7 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
     elif hasattr(sys.stdout, "buffer"):
         sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-    wb_source = load_workbook(reconciliation_file, data_only=True)
+    wb_source = safe_load_workbook(reconciliation_file, data_only=True)
     if "Daily Summary" not in wb_source.sheetnames:
         print("❌ Sheet 'Daily Summary' not found.")
         return None

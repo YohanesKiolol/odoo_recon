@@ -3440,11 +3440,9 @@ class App(ctk.CTk):
             return
         latest_file = max(output_files, key=os.path.getctime)
 
-        import io
+        from excel_writer import safe_load_workbook
         try:
-            with open(latest_file, "rb") as f:
-                file_bytes = io.BytesIO(f.read())
-            wb = load_workbook(file_bytes, data_only=True)
+            wb = safe_load_workbook(latest_file, data_only=True)
             if "Differences" not in wb.sheetnames:
                 self._set_status("No 'Differences' sheet found in recon file", ERROR)
                 wb.close()
@@ -4159,10 +4157,10 @@ class App(ctk.CTk):
             try:
                 import openpyxl
                 from openpyxl.styles import PatternFill, Font as XLFont
-                from excel_writer import _normalize_date_str
+                from excel_writer import _normalize_date_str, safe_load_workbook
                 from reconciler import STATUS_DONE, STATUS_BANK_ONLY, STATUS_ODO_ONLY
 
-                wb = openpyxl.load_workbook(latest_file)
+                wb = safe_load_workbook(latest_file, data_only=False)
                 GREEN_FILL = PatternFill("solid", fgColor="E2EFDA")
 
                 # Find highest existing match sequence number so reopening the modal doesn't restart at M01
@@ -4405,11 +4403,9 @@ class App(ctk.CTk):
             output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
             if not output_files: return
             latest_file = max(output_files, key=os.path.getctime)
-            import io
+            from excel_writer import safe_load_workbook
             try:
-                with open(latest_file, "rb") as f:
-                    file_bytes = io.BytesIO(f.read())
-                wb = load_workbook(file_bytes, data_only=True)
+                wb = safe_load_workbook(latest_file, data_only=True)
                 if "Daily Summary" not in wb.sheetnames:
                     self._set_status("'Daily Summary' sheet not found", ERROR)
                     wb.close()
