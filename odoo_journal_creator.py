@@ -331,7 +331,8 @@ def close_excel_window_for_file(fname: str):
                     if length > 0:
                         buff = ctypes.create_unicode_buffer(length + 1)
                         user32.GetWindowTextW(hwnd, buff, length + 1)
-                        if fname.lower() in buff.value.lower():
+                        val = buff.value.lower()
+                        if fname.lower() in val or "reconciliation" in val:
                             user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
                 return True
 
@@ -343,7 +344,7 @@ def close_excel_window_for_file(fname: str):
                 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 subprocess.run(
                     ["powershell", "-NoProfile", "-Command",
-                     f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
+                     f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" -or $_.MainWindowTitle -like "*Reconciliation*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
                     capture_output=True, creationflags=flags
                 )
                 time.sleep(0.5)

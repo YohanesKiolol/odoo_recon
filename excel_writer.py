@@ -881,7 +881,11 @@ def write_report(
 
     odo_date_str = odo_date.strftime("%d%m%Y") if odo_date else "unknown"
     prefix = f"Reconciliation_{company_str}_{odo_date_str}__"
-    
+    out_path = output_dir / f"{prefix}{banks_str}__{date_range_str}.xlsx"
+
+    # Close any open reconciliation workbook in Excel before deleting/overwriting
+    _close_workbook_in_excel(out_path)
+
     if output_dir.exists():
         for existing_file in output_dir.iterdir():
             if existing_file.is_file() and existing_file.name.startswith(prefix) and existing_file.name.endswith(".xlsx"):
@@ -889,8 +893,6 @@ def write_report(
                     existing_file.unlink()
                 except Exception:
                     pass
-
-    out_path = output_dir / f"{prefix}{banks_str}__{date_range_str}.xlsx"
 
     wb = openpyxl.Workbook()
 
@@ -995,7 +997,8 @@ def _close_workbook_in_excel(file_path: Path):
                     if length > 0:
                         buff = ctypes.create_unicode_buffer(length + 1)
                         user32.GetWindowTextW(hwnd, buff, length + 1)
-                        if fname.lower() in buff.value.lower():
+                        val = buff.value.lower()
+                        if fname.lower() in val or "reconciliation" in val:
                             user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
                 return True
 
@@ -1007,7 +1010,7 @@ def _close_workbook_in_excel(file_path: Path):
                 flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
                 subprocess.run(
                     ["powershell", "-NoProfile", "-Command",
-                     f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
+                     f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" -or $_.MainWindowTitle -like "*Reconciliation*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
                     capture_output=True, creationflags=flags
                 )
                 time.sleep(0.5)
