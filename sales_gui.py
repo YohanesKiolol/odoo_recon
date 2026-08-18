@@ -23,7 +23,13 @@ from cloud_sync import (
 import threading
 import odoo_inspector
 
-BASE_DIR = Path(__file__).resolve().parent
+if getattr(sys, "frozen", False):
+    if sys.platform == "darwin" and ".app/Contents/MacOS" in str(sys.executable):
+        BASE_DIR = Path(sys.executable).parents[2].parent
+    else:
+        BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
 
 # ── Design System & Color Tokens ──────────────────────────────────────────────
 IS_WINDOWS = (sys.platform == "win32")

@@ -11,11 +11,14 @@ import platform
 from pathlib import Path
 
 # ── Resolve base directory ────────────────────────────────────────────────────
-BASE_DIR = (
-    Path(sys.executable).parent   # frozen: next to the .exe
-    if getattr(sys, "frozen", False)
-    else Path(__file__).parent    # dev: next to gui.py
-)
+if getattr(sys, "frozen", False):
+    if sys.platform == "darwin" and ".app/Contents/MacOS" in str(sys.executable):
+        BASE_DIR = Path(sys.executable).parents[2].parent
+    else:
+        BASE_DIR = Path(sys.executable).parent
+else:
+    BASE_DIR = Path(__file__).resolve().parent
+
 INPUT_DIR  = BASE_DIR / "input"
 OUTPUT_DIR = BASE_DIR / "output"
 IS_WINDOWS = platform.system() == "Windows"

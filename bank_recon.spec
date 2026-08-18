@@ -70,31 +70,68 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    [],
-    name='Recon',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=str(ROOT / 'assets' / 'app_icon.ico') if sys.platform.startswith('win') else str(ROOT / 'assets' / 'app_icon.png'),
-)
-
-app = BUNDLE(
-    exe,
-    name='Recon.app',
-    icon=str(ROOT / 'assets' / 'app_icon.png'),
-    bundle_identifier='com.eyerizz.recon',
-)
+if sys.platform == 'darwin':
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='Recon',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='Recon'
+    )
+    app = BUNDLE(
+        coll,
+        name='Recon.app',
+        icon=str(ROOT / 'assets' / 'app_icon.png'),
+        bundle_identifier='com.eyerizz.recon',
+        info_plist={
+            'CFBundleName': 'Recon',
+            'CFBundleDisplayName': 'Bank Reconciliation Studio',
+            'CFBundleIdentifier': 'com.eyerizz.recon',
+            'CFBundleVersion': '1.0.0',
+            'CFBundleShortVersionString': '1.0.0',
+            'NSHighResolutionCapable': True,
+            'LSBackgroundOnly': False,
+            'NSRequiresAquaSystemAppearance': False,
+        }
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        [],
+        name='Recon',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=str(ROOT / 'assets' / 'app_icon.ico'),
+    )

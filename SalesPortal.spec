@@ -37,31 +37,68 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
-    a.binaries,
-    a.datas,
-    [],
-    name='SalesPortal',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
-    console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
-    icon=str(ROOT / 'assets' / 'sales_app_icon.ico') if sys.platform.startswith('win') else str(ROOT / 'assets' / 'sales_app_icon.png'),
-)
-
-app = BUNDLE(
-    exe,
-    name='SalesPortal.app',
-    icon=str(ROOT / 'assets' / 'sales_app_icon.png'),
-    bundle_identifier='com.eyerizz.salesportal',
-)
+if sys.platform == 'darwin':
+    exe = EXE(
+        pyz,
+        a.scripts,
+        [],
+        exclude_binaries=True,
+        name='SalesPortal',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        disable_windowed_traceback=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name='SalesPortal'
+    )
+    app = BUNDLE(
+        coll,
+        name='SalesPortal.app',
+        icon=str(ROOT / 'assets' / 'sales_app_icon.png'),
+        bundle_identifier='com.eyerizz.salesportal',
+        info_plist={
+            'CFBundleName': 'SalesPortal',
+            'CFBundleDisplayName': 'Sales Discrepancy Portal',
+            'CFBundleIdentifier': 'com.eyerizz.salesportal',
+            'CFBundleVersion': '1.0.0',
+            'CFBundleShortVersionString': '1.0.0',
+            'NSHighResolutionCapable': True,
+            'LSBackgroundOnly': False,
+            'NSRequiresAquaSystemAppearance': False,
+        }
+    )
+else:
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.datas,
+        [],
+        name='SalesPortal',
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        runtime_tmpdir=None,
+        console=False,
+        disable_windowed_traceback=False,
+        argv_emulation=False,
+        target_arch=None,
+        codesign_identity=None,
+        entitlements_file=None,
+        icon=str(ROOT / 'assets' / 'sales_app_icon.ico'),
+    )

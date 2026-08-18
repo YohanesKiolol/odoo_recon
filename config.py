@@ -41,11 +41,14 @@ def _load_dotenv(dotenv_path):
         pass
 
 # In frozen (PyInstaller) mode, config.py lives in a temp _MEI* folder.
-# The .env file is always next to the .exe (or next to config.py in dev).
+# The .env file is always next to the .exe / .app (or next to config.py in dev).
 if getattr(sys, "frozen", False):
-    _base = Path(sys.executable).parent   # folder containing BankRekonsiliasi.exe
+    if sys.platform == "darwin" and ".app/Contents/MacOS" in str(sys.executable):
+        _base = Path(sys.executable).parents[2].parent
+    else:
+        _base = Path(sys.executable).parent
 else:
-    _base = Path(__file__).parent         # folder containing config.py (project root)
+    _base = Path(__file__).resolve().parent
 
 _load_dotenv(_base / ".env")
 

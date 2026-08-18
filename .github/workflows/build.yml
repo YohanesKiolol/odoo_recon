@@ -92,9 +92,11 @@ jobs:
       - name: Build SalesPortal (Store GUI)
         run: pyinstaller SalesPortal.spec --clean --noconfirm
 
-      - name: Package macOS Apps as ZIP
+      - name: Code Sign & Package macOS Apps as ZIP
         run: |
           cd dist
+          codesign --force --deep --sign - Recon.app
+          codesign --force --deep --sign - SalesPortal.app
           zip -r -y Recon-macOS.zip Recon.app
           zip -r -y SalesPortal-macOS.zip SalesPortal.app
           cd ..
