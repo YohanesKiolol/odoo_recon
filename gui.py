@@ -4773,10 +4773,15 @@ class App(ctk.CTk):
                 sel = float(item['selisih']) if item['selisih'] else 0
                 
                 def _on_jurnal_toggle(vi=var_item, ve=var_edc, va=var_ar, de=state["disabled_edc"], da=state["disabled_ar"]):
+                    val = vi.get()
                     if not de:
-                        ve.set(vi.get())
+                        ve.set(val)
                     if not da:
-                        va.set(vi.get())
+                        va.set(val)
+
+                def _on_sub_toggle(vi=var_item, ve=var_edc, va=var_ar, de=state["disabled_edc"], da=state["disabled_ar"]):
+                    has_any = (bool(ve.get()) and not de) or (bool(va.get()) and not da)
+                    vi.set(1 if has_any else 0)
                 
                 import config
                 from collections import defaultdict
@@ -5003,7 +5008,8 @@ class App(ctk.CTk):
                     tk.Label(_cell8, text="—", bg=bg_row, fg=MUTED,
                              font=(FONT_FAMILY, 11, "bold")).grid(row=0, column=0)
                 else:
-                    _make_cb(scrollable_frame, var_edc, bg_row
+                    _make_cb(scrollable_frame, var_edc, bg_row,
+                             command=_on_sub_toggle
                              ).grid(row=r_main, column=8, pady=4)
 
                 # AR checkbox
@@ -5015,7 +5021,8 @@ class App(ctk.CTk):
                     tk.Label(_cell10, text="—", bg=bg_row, fg=MUTED,
                              font=(FONT_FAMILY, 11, "bold")).grid(row=0, column=0)
                 else:
-                    _make_cb(scrollable_frame, var_ar, bg_row
+                    _make_cb(scrollable_frame, var_ar, bg_row,
+                             command=_on_sub_toggle
                              ).grid(row=r_main, column=10, pady=4)
                 
                 edc_info_texts = []
@@ -5112,11 +5119,14 @@ class App(ctk.CTk):
         def _get_selected_config():
             selected = []
             for v in journal_state:
-                if v["var_item"].get():
+                is_edc = bool(v["var_edc"].get()) and not v["disabled_edc"]
+                is_ar = bool(v["var_ar"].get()) and not v["disabled_ar"]
+                is_sel = bool(v["var_item"].get())
+                if (is_sel and (is_edc or is_ar)) or is_edc or is_ar:
                     selected.append({
                         "row": v["item"]["row"],
-                        "edc": v["var_edc"].get(),
-                        "ar": v["var_ar"].get()
+                        "edc": is_edc,
+                        "ar": is_ar
                     })
             return selected
             

@@ -965,12 +965,48 @@ def write_report(
     return _safe_save_report(wb, out_path)
 
 
+def _close_workbook_in_excel(file_path: Path):
+    """Close the specific open workbook in Excel on Windows/Mac before writing."""
+    import sys, subprocess, os, time
+    fname = file_path.name
+    if sys.platform == "darwin":
+        try:
+            subprocess.run(
+                ["osascript", "-e",
+                 f'tell application "Microsoft Excel"\n'
+                 f'  set wb_list to every workbook whose name is "{fname}"\n'
+                 f'  repeat with wb_item in wb_list\n'
+                 f'    close wb_item saving no\n'
+                 f'  end repeat\n'
+                 f'end tell'],
+                capture_output=True, timeout=5
+            )
+        except Exception:
+            pass
+    elif os.name == "nt" or sys.platform == "win32":
+        try:
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            subprocess.run(["taskkill", "/FI", f"WINDOWTITLE eq *{fname}*", "/F"], capture_output=True, creationflags=flags)
+            subprocess.run(["taskkill", "/FI", f"WINDOWTITLE eq {fname}*", "/F"], capture_output=True, creationflags=flags)
+            time.sleep(0.3)
+        except Exception:
+            pass
+
+
 def _safe_save_report(wb, out_path: Path) -> Path:
-    """Save workbook safely even if locked by Microsoft Excel on Windows."""
+    """Save workbook safely, automatically closing old instance in Excel if needed."""
     try:
         wb.save(out_path)
         return out_path
     except PermissionError:
+        # File is locked in Excel, close it and retry saving
+        _close_workbook_in_excel(out_path)
+        try:
+            wb.save(out_path)
+            return out_path
+        except Exception:
+            pass
+
         tmp_path = out_path.with_suffix(".tmp.xlsx")
         try:
             wb.save(tmp_path)
@@ -988,7 +1024,7 @@ def _safe_save_report(wb, out_path: Path) -> Path:
         alt_path = out_path.parent / f"{out_path.stem}_{ts}.xlsx"
         try:
             wb.save(alt_path)
-            print(f"\n⚠️ Note: '{out_path.name}' is currently open in Excel.")
+            print(f"\n⚠️ Note: '{out_path.name}' was locked by Excel.")
             print(f"   Saved updated report to '{alt_path.name}' instead.\n")
             return alt_path
         except Exception:
