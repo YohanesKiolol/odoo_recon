@@ -49,14 +49,14 @@ jobs:
         with:
           name: Recon-Windows-EXE
           path: dist/Recon.exe
-          retention-days: 30
+          retention-days: 1
 
       - name: Upload SalesPortal Windows EXE
         uses: actions/upload-artifact@v4
         with:
           name: SalesPortal-Windows-EXE
           path: dist/SalesPortal.exe
-          retention-days: 30
+          retention-days: 1
 
   build-macos:
     name: Build macOS (.app)
@@ -120,11 +120,11 @@ jobs:
         with:
           name: Recon-macOS-DMG
           path: dist/Recon-macOS.dmg
-          retention-days: 30
+          retention-days: 1
 
       - name: Upload SalesPortal macOS DMG
         uses: actions/upload-artifact@v4
         with:
           name: SalesPortal-macOS-DMG
           path: dist/SalesPortal-macOS.dmg
-          retention-days: 30
+          retention-days: 1
