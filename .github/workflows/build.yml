@@ -94,11 +94,23 @@ jobs:
 
       - name: Code Sign & Package macOS Apps (DMG & ZIP)
         run: |
+          codesign --force --deep --sign - dist/Recon.app
+          codesign --force --deep --sign - dist/SalesPortal.app
+
+          # Build Recon DMG via staging folder
+          mkdir -p /tmp/dmg_recon
+          cp -R dist/Recon.app /tmp/dmg_recon/
+          hdiutil create -volname "Recon" -srcfolder /tmp/dmg_recon -ov -format UDZO dist/Recon-macOS.dmg
+          rm -rf /tmp/dmg_recon
+          sleep 2
+
+          # Build SalesPortal DMG via staging folder
+          mkdir -p /tmp/dmg_sales
+          cp -R dist/SalesPortal.app /tmp/dmg_sales/
+          hdiutil create -volname "SalesPortal" -srcfolder /tmp/dmg_sales -ov -format UDZO dist/SalesPortal-macOS.dmg
+          rm -rf /tmp/dmg_sales
+
           cd dist
-          codesign --force --deep --sign - Recon.app
-          codesign --force --deep --sign - SalesPortal.app
-          hdiutil create -volname "Recon" -srcfolder "Recon.app" -ov -format UDZO "Recon-macOS.dmg"
-          hdiutil create -volname "SalesPortal" -srcfolder "SalesPortal.app" -ov -format UDZO "SalesPortal-macOS.dmg"
           zip -r -y Recon-macOS.zip Recon.app
           zip -r -y SalesPortal-macOS.zip SalesPortal.app
           cd ..
