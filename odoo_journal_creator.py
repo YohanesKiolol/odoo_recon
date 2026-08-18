@@ -1,484 +1,253 @@
 """
-odoo_journal_creator.py — Script to automate Odoo journal creation via Excel Import.
-Phase 2: Uploads the generated Excel file to the Odoo Import page.
+odoo_journal_creator.py — Automate Odoo Journal Entry creation directly via XML-RPC.
+Directly creates balanced Draft Journal Entries (account.move) in Odoo with real-time logs.
+Zero browser dependencies. 100% fast, reliable, and always in Draft state.
 """
 
 import os
 import sys
 import argparse
+import re
 from pathlib import Path
-from playwright.sync_api import sync_playwright
+from datetime import datetime
+from openpyxl import load_workbook
 
-# Import configs
 from config import (
-    ODOO_URL, ODOO_DASHBOARD_URL, ODOO_JOURNAL_IMPORT_URL, OUTPUT_DIR
+    OUTPUT_DIR,
+    BASE_DIR,
+    ODOO_URL,
+    ODOO_DB,
+    ODOO_JOURNAL_EDC,
+    ODOO_JOURNAL_AR,
 )
 from journal_generator import generate_journal_import
+import odoo_inspector
 
 
-def get_latest_excel_file() -> Path:
-    """Find the most recently created .xlsx file in the output directory."""
+def get_latest_excel_file() -> Path | None:
+    """Find the most recently created reconciliation Excel file in output/."""
     excel_files = list(OUTPUT_DIR.glob("reconciliation_*.xlsx"))
     if not excel_files:
-        print(f"❌ No Excel file found in '{OUTPUT_DIR}'.")
+        excel_files = list(OUTPUT_DIR.glob("Reconciliation_*.xlsx"))
+    if not excel_files:
+        print(f"❌ No reconciliation Excel file found in '{OUTPUT_DIR}'.")
         return None
-    # Sort by modification time, newest last
-    latest_file = max(excel_files, key=os.path.getmtime)
-    return latest_file
+    return max(excel_files, key=os.path.getmtime)
 
 
-def safe_save_workbook(wb, file_path: Path):
-    """Save workbook safely across platforms.
-
-    Strategy: write to a sibling .tmp file first (never locked by Excel),
-    then atomically replace the original.  This avoids writing to the
-    locked file directly on Windows.
-
-    - If os.replace() raises PermissionError (original locked by Excel):
-        • Mac  — close just that workbook via AppleScript, then replace + reopen
-        • Windows — try to close the workbook window, then replace + reopen.
-          Only kills all Excel as a last resort if the replace still fails.
-    - Mac first-save succeeds but Excel holds a stale in-memory copy:
-        automatically closed & reopened so the user sees fresh data.
+def parse_journal_blocks_from_excel(import_excel_path: Path) -> list[dict]:
     """
-    import subprocess
-    import time
-    import tempfile
+    Parse grouped journal entries from the generated import Excel file.
+    Returns list of dicts with: date, journal, ref, lines: [{account, debit, credit}].
+    """
+    wb = load_workbook(import_excel_path, data_only=True)
+    ws = wb.active
 
-    tmp_path = file_path.with_suffix(".tmp.xlsx")
+    entries = []
+    current_entry = None
 
-    def _close_in_excel():
-        """Ask Excel to close the specific workbook without saving."""
-        fname = file_path.name
-        if sys.platform == "darwin":
-            subprocess.run(
-                ["osascript", "-e",
-                 f'tell application "Microsoft Excel"\n'
-                 f'  set wb_list to every workbook whose name is "{fname}"\n'
-                 f'  repeat with wb_item in wb_list\n'
-                 f'    close wb_item saving no\n'
-                 f'  end repeat\n'
-                 f'end tell'],
-                capture_output=True, timeout=5
-            )
-        elif os.name == "nt":
-            # Try to close just the window with this filename in the title bar
-            subprocess.run(
-                ["taskkill", "/FI", f"WINDOWTITLE eq {fname}*", "/F"],
-                capture_output=True
-            )
-            time.sleep(0.8)
+    # Header is row 1
+    # Columns:
+    # 1: Company, 2: Date, 3: Journal, 4: Number, 5: Partner, 6: Reference,
+    # 7: Journal Items/Account, 8: Journal Items/Credit, 9: Journal Items/Debit
 
-    def _reopen():
-        """Reopen the saved file so the user sees fresh data."""
-        if sys.platform == "darwin":
-            subprocess.run(["open", str(file_path)], capture_output=True)
-        elif os.name == "nt":
-            os.startfile(str(file_path))
+    for r in range(2, ws.max_row + 1):
+        c_date = ws.cell(row=r, column=2).value
+        c_journal = ws.cell(row=r, column=3).value
+        c_ref = ws.cell(row=r, column=6).value
+        c_account = ws.cell(row=r, column=7).value
+        c_credit = ws.cell(row=r, column=8).value
+        c_debit = ws.cell(row=r, column=9).value
 
-    # ── Step 1: write to temp (always succeeds — Excel doesn't lock .tmp) ──
-    try:
-        wb.save(tmp_path)
-    except Exception as e:
-        print(f"❌ Could not write temp file: {e}")
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return False
-    finally:
-        try:
-            wb.close()
-        except Exception:
-            pass
+        # If Date & Ref are populated, start a new journal entry block
+        if c_date and c_ref:
+            if current_entry and current_entry["lines"]:
+                entries.append(current_entry)
 
-    # ── Step 2: atomic replace ──────────────────────────────────────────────
-    try:
-        os.replace(tmp_path, file_path)
-        print(f"✅ Successfully saved '{file_path.name}'.")
-        # Mac: Excel silently holds stale copy — close & reopen
-        if sys.platform == "darwin":
-            _close_in_excel()
-            _reopen()
-        return True
-
-    except PermissionError:
-        # File is locked — close it in Excel and retry replace
-        print(f"⚠️ '{file_path.name}' is open in Excel. Closing to apply updates...")
-        _close_in_excel()
-        time.sleep(0.5)
-
-        try:
-            os.replace(tmp_path, file_path)
-            print(f"✅ Successfully updated and saved '{file_path.name}'.")
-            _reopen()
-            return True
-        except PermissionError:
-            # Nuclear last resort on Windows only
-            if os.name == "nt":
-                print("⚠️ Still locked — force-closing all Excel instances...")
-                subprocess.run(["taskkill", "/IM", "EXCEL.EXE", "/F"], capture_output=True)
-                time.sleep(0.8)
+            # Format Date to YYYY-MM-DD
+            d_str = str(c_date).strip()
+            iso_date = ""
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y", "%d %B %Y", "%d %b %Y"):
                 try:
-                    os.replace(tmp_path, file_path)
-                    print(f"✅ Saved '{file_path.name}' after closing Excel.")
-                    _reopen()
-                    return True
-                except Exception as e2:
-                    print(f"❌ Failed even after closing Excel: {e2}")
-            else:
-                print(f"❌ Failed to replace '{file_path.name}' — still locked.")
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return False
+                    iso_date = datetime.strptime(d_str, fmt).strftime("%Y-%m-%d")
+                    break
+                except ValueError:
+                    continue
+            if not iso_date:
+                iso_date = d_str[:10]
 
-    except Exception as e:
-        print(f"❌ Replace error: {e}")
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+            current_entry = {
+                "date": iso_date,
+                "journal_name": str(c_journal or ODOO_JOURNAL_EDC).strip(),
+                "ref": str(c_ref).strip(),
+                "lines": []
+            }
+
+        if current_entry and c_account:
+            credit_val = float(c_credit) if c_credit not in (None, "", "-") else 0.0
+            debit_val = float(c_debit) if c_debit not in (None, "", "-") else 0.0
+
+            if credit_val > 0 or debit_val > 0:
+                current_entry["lines"].append({
+                    "account": str(c_account).strip(),
+                    "debit": debit_val,
+                    "credit": credit_val
+                })
+
+    if current_entry and current_entry["lines"]:
+        entries.append(current_entry)
+
+    return entries
+
+
+def create_draft_journals_via_xmlrpc(import_excel_path: Path, config_path: Path | None = None) -> bool:
+    """
+    Directly create Draft Journal Entries (account.move) in Odoo via XML-RPC.
+    """
+    print(f"\n── Starting Direct Odoo Journal Creator (XML-RPC) ──")
+    print(f"[+] Authenticating with Odoo: {odoo_inspector._get_base_url()} (DB: {odoo_inspector.ODOO_DB})...")
+
+    uid, err = odoo_inspector.authenticate()
+    if not uid:
+        print(f"❌ Odoo Authentication Failed: {err}")
         return False
 
+    print(f"✅ Authenticated successfully as UID {uid}!")
 
-def update_recon_file_status(recon_file: Path, config_path: Path):
-    """Update Journal Status column in the Daily Summary sheet based on config."""
-    from openpyxl import load_workbook
-    import json
-    
+    # 1. Cache journals and accounts for fast ID resolution
+    print("[+] Loading Odoo Chart of Accounts & Journals metadata...")
     try:
-        if not config_path or not config_path.exists():
-            print("⚠️ No config path provided, skipping excel status update.")
-            return
-
-        with open(config_path, "r") as f:
-            selected_items = json.load(f)
-            
-        wb = load_workbook(recon_file)
-        try:
-            if "Daily Summary" in wb.sheetnames:
-                ws = wb["Daily Summary"]
-                updated = 0
-                
-                # Map column indices from row 3
-                col_map = {str(ws.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws.max_column + 1) if ws.cell(row=3, column=c).value}
-                c_status = col_map.get("status", 10)
-                c_jstatus = col_map.get("journal status", 11)
-                
-                for item in selected_items:
-                    row_idx = item.get("row")
-                    if not row_idx:
-                        continue
-                    
-                    created_edc = item.get("edc", False)
-                    created_ar = item.get("ar", False)
-                    
-                    new_status = ""
-                    if created_edc and created_ar:
-                        new_status = "✅ Both"
-                    elif created_edc:
-                        new_status = "✅ EDC"
-                    elif created_ar:
-                        new_status = "✅ AR"
-                    else:
-                        continue
-                        
-                    current_val = str(ws.cell(row=row_idx, column=c_jstatus).value or "")
-                    
-                    # Merge status
-                    if "EDC" in current_val and created_ar:
-                        new_status = "✅ Both"
-                    elif "AR" in current_val and created_edc:
-                        new_status = "✅ Both"
-                    elif "Both" in current_val:
-                        new_status = "✅ Both"
-                    
-                    ws.cell(row=row_idx, column=c_jstatus, value=new_status)
-                    
-                    # Keep original checkmark logic
-                    status9 = ws.cell(row=row_idx, column=c_status).value
-                    if status9 and "Match" in str(status9):
-                        ws.cell(row=row_idx, column=c_status, value="✅ Journal Created")
-                        
-                    updated += 1
-                    
-                if updated > 0:
-                    safe_save_workbook(wb, recon_file)
-                    print(f"✅ Successfully updated {updated} rows in '{recon_file.name}' with Journal Status.")
-        finally:
-            try:
-                wb.close()
-            except Exception:
-                pass
-    except Exception as e:
-        print(f"⚠️ Failed to update status in reconciliation file: {e}")
-
-def log_journal_creation(recon_file: Path, config_path: Path):
-    """Append created journals to a master tracking log."""
-    from openpyxl import load_workbook, Workbook
-    import json
-    from datetime import datetime
-
-    log_file = OUTPUT_DIR / "journal_creation_log.xlsx"
-    
-    try:
-        if not config_path or not config_path.exists():
-            return
-
-        with open(config_path, "r") as f:
-            selected_items = json.load(f)
-            
-        wb_recon = load_workbook(recon_file, data_only=True)
-        try:
-            ws_recon = wb_recon["Daily Summary"]
-            col_map = {str(ws_recon.cell(row=3, column=c).value).strip().lower(): c for c in range(1, ws_recon.max_column + 1) if ws_recon.cell(row=3, column=c).value}
-            
-            # Open or create log file
-            if log_file.exists():
-                wb_log = load_workbook(log_file)
-            else:
-                wb_log = Workbook()
-            try:
-                ws_log = wb_log.active
-                if not log_file.exists():
-                    ws_log.title = "Journal Log"
-                    headers = ["Created At", "Original Recon File", "Bank", "Journal", "Transaction Date", "Merchant Amt", "Odoo Amt", "Created"]
-                    ws_log.append(headers)
-                    
-                added = 0
-                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                
-                for item in selected_items:
-                    row_idx = item.get("row")
-                    if not row_idx:
-                        continue
-                        
-                    created_edc = item.get("edc", False)
-                    created_ar = item.get("ar", False)
-                    
-                    if not created_edc and not created_ar:
-                        continue
-                        
-                    created_str = "Both" if (created_edc and created_ar) else ("EDC" if created_edc else "AR")
-                    
-                    bank = ws_recon.cell(row=row_idx, column=col_map.get("bank", 4)).value
-                    journal = ws_recon.cell(row=row_idx, column=col_map.get("journal", 5)).value
-                    date_val = ws_recon.cell(row=row_idx, column=col_map.get("date", 2)).value
-                    merch_amt = ws_recon.cell(row=row_idx, column=col_map.get("total bank", 6)).value
-                    odoo_amt = ws_recon.cell(row=row_idx, column=col_map.get("total odoo", 7)).value
-                    
-                    ws_log.append([
-                        now_str,
-                        recon_file.name,
-                        str(bank) if bank else "",
-                        str(journal) if journal else "",
-                        str(date_val) if date_val else "",
-                        merch_amt,
-                        odoo_amt,
-                        created_str
-                    ])
-                    added += 1
-                    
-                if added > 0:
-                    # Protect the sheet from manual edits in Excel GUI
-                    ws_log.protection.sheet = True
-                    ws_log.protection.password = "ODOO_AUTO_SYSTEM_LOCK"
-                    safe_save_workbook(wb_log, log_file)
-                    print(f"📝 Appended {added} records to Journal Tracker Log ({log_file.name}).")
-            finally:
-                try:
-                    wb_log.close()
-                except Exception:
-                    pass
-        finally:
-            try:
-                wb_recon.close()
-            except Exception:
-                pass
-            
-    except Exception as e:
-        print(f"⚠️ Failed to write to journal tracker log: {e}")
-
-
-def run_import_automation(import_file: Path, recon_file: Path, config_path: Path = None, email: str = "", password: str = "", headless: bool = False):
-    """Launch Playwright, navigate to Odoo, and upload the import file."""
-    if not ODOO_URL or not ODOO_DASHBOARD_URL or not ODOO_JOURNAL_IMPORT_URL:
-        print("❌ ODOO_URL, ODOO_DASHBOARD_URL, or ODOO_JOURNAL_IMPORT_URL missing from .env")
-        sys.exit(1)
-
-    is_headless = headless or bool(email and password)
-
-    import platform
-    if platform.system() == "Windows":
-        ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-    else:
-        ua = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-
-    with sync_playwright() as p:
-        user_data_dir = os.path.abspath("playwright_profile")
-        
-        context = None
-        for channel in ["chrome", "msedge", None]:
-            try:
-                kwargs = {
-                    "user_data_dir": user_data_dir,
-                    "headless": is_headless,
-                    "args": ["--disable-blink-features=AutomationControlled", "--test-type"],
-                    "ignore_default_args": ["--no-sandbox", "--enable-automation"],
-                    "user_agent": ua,
-                    "viewport": {"width": 1920, "height": 1080}
-                }
-                if channel:
-                    kwargs["channel"] = channel
-                context = p.chromium.launch_persistent_context(**kwargs)
-                break
-            except Exception:
-                continue
-
-        if not context:
-            possible_paths = []
-            if platform.system() == "Windows":
-                possible_paths = [
-                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                ]
-            elif platform.system() == "Darwin":
-                possible_paths = [
-                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-                ]
-            for exe in possible_paths:
-                if os.path.exists(exe):
-                    try:
-                        context = p.chromium.launch_persistent_context(
-                            user_data_dir=user_data_dir,
-                            headless=is_headless,
-                            executable_path=exe,
-                            args=["--disable-blink-features=AutomationControlled", "--test-type"],
-                            ignore_default_args=["--no-sandbox", "--enable-automation"],
-                            user_agent=ua,
-                            viewport={"width": 1920, "height": 1080}
-                        )
-                        break
-                    except Exception:
-                        continue
-
-        if not context:
-            print("❌ Failed to launch browser (Chrome or Edge). Please ensure Google Chrome or Microsoft Edge is installed.")
-            sys.exit(1)
-
-
-        page = context.pages[0] if context.pages else context.new_page()
-        page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-
-        # Fix 404 Nginx Loop by upgrading HTTP to HTTPS automatically
-        def upgrade_to_https(route, request):
-            if request.url.startswith("http://"):
-                secure_url = request.url.replace("http://", "https://", 1)
-                route.fulfill(status=301, headers={"Location": secure_url})
-            else:
-                route.continue_()
-
-        page.route("**/*", upgrade_to_https)
-
-        print(f"🌐 Opening {ODOO_URL}")
-        page.goto(ODOO_URL)
-
-        # Auto-login if email/password provided and login form visible
-        if email and password:
-            try:
-                page.wait_for_timeout(1000)
-                if page.locator("input[name='login'], input#login").is_visible(timeout=3000):
-                    print("🔑 Logging in to Odoo automatically...")
-                    page.locator("input[name='login'], input#login").fill(email)
-                    page.locator("input[name='password'], input#password").fill(password)
-                    page.locator("button[type='submit']").click()
-                    page.wait_for_timeout(2000)
-            except Exception as e:
-                print(f"ℹ️ Auto-login attempt note: {e}")
-
-        print("\n⏳ Waiting for Odoo dashboard...")
-        page.wait_for_function(
-            "dashboardUrl => window.location.href.includes(dashboardUrl)",
-            arg=ODOO_DASHBOARD_URL,
-            timeout=0 if not is_headless else 30000
+        all_journals = odoo_inspector._execute_kw(
+            "account.journal", "search_read", [[]], {"fields": ["id", "name", "code", "type"]}
         )
-        print("✅ Dashboard terdeteksi!")
+        all_accounts = odoo_inspector._execute_kw(
+            "account.account", "search_read", [[]], {"fields": ["id", "name", "code"]}
+        )
+    except Exception as e:
+        print(f"❌ Failed to load metadata from Odoo: {e}")
+        return False
 
-        print(f"\n➡️ Mengarahkan ke form Import Jurnal: {ODOO_JOURNAL_IMPORT_URL}")
-        page.goto(ODOO_JOURNAL_IMPORT_URL)
-        
-        page.wait_for_load_state("domcontentloaded")
-        page.locator("xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/span/span/button").wait_for(state="visible", timeout=30000)
+    journal_by_name = {j["name"].strip().lower(): j["id"] for j in all_journals}
+    journal_by_code = {j["code"].strip().lower(): j["id"] for j in all_journals}
 
-        print(f"\n📤 Mengunggah file: {import_file.name} ...")
-        xpath_upload_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/span/span/button"
-        
+    account_by_code = {str(a["code"]).strip(): a["id"] for a in all_accounts if a.get("code")}
+    account_by_name = {a["name"].strip().lower(): a["id"] for a in all_accounts if a.get("name")}
+
+    # 2. Parse entries from import file
+    entries = parse_journal_blocks_from_excel(import_excel_path)
+    if not entries:
+        print("❌ No valid journal entry blocks found in import file.")
+        return False
+
+    print(f"[+] Found {len(entries)} Journal Entry block(s) ready to create.\n")
+
+    created_count = 0
+    skipped_count = 0
+    error_count = 0
+
+    for idx, entry in enumerate(entries, start=1):
+        ref = entry["ref"]
+        date_val = entry["date"]
+        j_name = entry["journal_name"]
+        lines = entry["lines"]
+
+        total_debit = sum(l["debit"] for l in lines)
+        total_credit = sum(l["credit"] for l in lines)
+
+        print(f"[{idx}/{len(entries)}] Processing: '{ref}'")
+        print(f"    • Date: {date_val} | Journal: {j_name}")
+        print(f"    • Debit: Rp {total_debit:,.2f} | Credit: Rp {total_credit:,.2f}")
+
+        # Check balance
+        if round(total_debit, 2) != round(total_credit, 2):
+            print(f"    ⚠️ SKIPPED: Unbalanced debit ({total_debit}) vs credit ({total_credit})")
+            error_count += 1
+            continue
+
+        # Resolve journal_id
+        journal_id = journal_by_name.get(j_name.lower()) or journal_by_code.get(j_name.lower())
+        if not journal_id:
+            # Fallback to general/miscellaneous journal
+            journal_id = journal_by_name.get("miscellaneous operations") or journal_by_code.get("misc")
+            if not journal_id and all_journals:
+                journal_id = all_journals[0]["id"]
+
+        # Check if already exists in Odoo
         try:
-            with page.expect_file_chooser(timeout=10000) as fc_info:
-                page.locator(xpath_upload_btn).click()
-            
-            file_chooser = fc_info.value
-            file_chooser.set_files(str(import_file.resolve()))
-            print("✅ File uploaded successfully!")
+            existing = odoo_inspector._execute_kw(
+                "account.move", "search_read",
+                [[["ref", "=", ref], ["state", "!=", "cancel"]]],
+                {"fields": ["id", "name", "state"], "limit": 1}
+            )
+            if existing:
+                ex = existing[0]
+                print(f"    ℹ️ Already exists in Odoo: {ex.get('name')} (ID: {ex.get('id')}, State: {ex.get('state')}) — Skipping.")
+                skipped_count += 1
+                continue
         except Exception as e:
-            print(f"❌ Failed to upload file. Ensure 'Upload File' button is visible.\nError: {e}")
-            if not is_headless:
-                input("\n[Press Enter to close browser]")
-            context.close()
-            return
+            print(f"    [WARN] Duplicate check warning: {e}")
 
-        # Automate Test & Import
-        print("🔍 Running Validation Test...")
-        xpath_test_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[2]"
-        xpath_valid_msg = "xpath=/html/body/div[1]/div/div[2]/div[2]/div/p"
-        xpath_import_btn = "xpath=/html/body/div[1]/div/div[1]/div/div[1]/div[1]/div[2]/button[1]"
-        
+        # Build ORM line_ids
+        move_lines = []
+        unresolved_acc = None
+
+        for l in lines:
+            acc_str = l["account"]
+            # Try code exact match first
+            acc_id = account_by_code.get(acc_str)
+            if not acc_id:
+                # Try name exact match
+                acc_id = account_by_name.get(acc_str.lower())
+            if not acc_id:
+                # Try finding code inside string (e.g. '0001 - BCA EDC')
+                parts = acc_str.split(" ", 1)
+                if parts and account_by_code.get(parts[0]):
+                    acc_id = account_by_code[parts[0]]
+
+            if not acc_id:
+                unresolved_acc = acc_str
+                break
+
+            move_lines.append((0, 0, {
+                "name": ref,
+                "account_id": acc_id,
+                "debit": l["debit"],
+                "credit": l["credit"],
+            }))
+
+        if unresolved_acc:
+            print(f"    ❌ FAILED: Account '{unresolved_acc}' not found in Odoo Chart of Accounts.")
+            error_count += 1
+            continue
+
+        # Create Draft account.move
+        move_vals = {
+            "move_type": "entry",
+            "date": date_val,
+            "ref": ref,
+            "journal_id": journal_id,
+            "state": "draft",          # ALWAYS DRAFT
+            "line_ids": move_lines
+        }
+
         try:
-            page.locator(xpath_test_btn).wait_for(state="visible", timeout=30000)
-            page.locator(xpath_test_btn).click()
-            
-            valid_locator = page.locator(xpath_valid_msg)
-            valid_locator.wait_for(state="visible", timeout=15000)
-            
-            msg_text = valid_locator.inner_text()
-            if "Everything seems valid" in msg_text or "valid" in msg_text.lower():
-                print("✅ Validation successful: 'Everything seems valid.'")
-                print("🚀 Executing Import...")
-                page.locator(xpath_import_btn).click()
-                
-                try:
-                    page.wait_for_url("**/web#action=*", timeout=15000)
-                    print("✅ Successfully redirected to Journal Entries.")
-                except Exception as e:
-                    print(f"⚠️ Import submitted (timeout waiting for redirect: {e})")
-                    
-                # Always update status in Excel since import/creation is executed
-                update_recon_file_status(recon_file, config_path)
-                log_journal_creation(recon_file, config_path)
-                    
-                print("🎉 Import process finished!")
-                page.wait_for_timeout(2000)
-            else:
-                print(f"⚠️ Odoo validation returned message: {msg_text}")
-                # Still update recon file status as user submitted
-                update_recon_file_status(recon_file, config_path)
-                log_journal_creation(recon_file, config_path)
-                if not is_headless:
-                    input("\n[Press Enter in terminal to close browser]")
-        except Exception as e:
-            print(f"❌ Error during Test/Import: {e}")
-            # Ensure recon file is updated
-            update_recon_file_status(recon_file, config_path)
-            log_journal_creation(recon_file, config_path)
-            if not is_headless:
-                input("\n[Press Enter in terminal to close browser]")
-            
-        context.close()
+            move_id = odoo_inspector._execute_kw("account.move", "create", [move_vals])
+            created_count += 1
+            print(f"    ✅ Successfully Created Draft Entry! (Odoo Move ID: {move_id})\n")
+        except Exception as ex:
+            print(f"    ❌ Failed to create journal entry: {ex}\n")
+            error_count += 1
+
+    print("── Journal Creation Summary ──")
+    print(f"  • Created (Draft): {created_count}")
+    print(f"  • Already Existed: {skipped_count}")
+    print(f"  • Failed / Skipped: {error_count}")
+    print("──────────────────────────────\n")
+
+    if created_count > 0 or (skipped_count > 0 and error_count == 0):
+        print("✅ Direct Odoo Journal Creation completed successfully!\n")
+        return True
+    return False
 
 
 def main():
@@ -488,16 +257,16 @@ def main():
     elif hasattr(sys.stdout, "buffer"):
         sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
-    parser = argparse.ArgumentParser(description="Automate Odoo Journal Creation via Import")
-    parser.add_argument("--file", type=str, help="Path ke file Excel rekonsiliasi (opsional)")
-    parser.add_argument("--config", type=str, help="Path ke file JSON konfigurasi jurnal (opsional)")
-    parser.add_argument("--import-file", type=str, help="Path ke file import Excel yang sudah siap upload (opsional)")
+    parser = argparse.ArgumentParser(description="Direct Odoo Journal Creation via XML-RPC")
+    parser.add_argument("--file", type=str, help="Path to reconciliation Excel file")
+    parser.add_argument("--config", type=str, help="Path to journal config JSON")
+    parser.add_argument("--import-file", type=str, help="Path to generated import Excel file")
     parser.add_argument("--email", type=str, default="", help="Odoo Email")
     parser.add_argument("--password", type=str, default="", help="Odoo Password")
-    parser.add_argument("--headless", action="store_true", help="Run browser in headless mode")
+    parser.add_argument("--headless", action="store_true", help="Legacy flag (ignored, runs direct API)")
     args = parser.parse_args()
 
-    # 1. Get File
+    # 1. Get Recon File
     if args.file:
         file_path = Path(args.file)
         if not file_path.exists():
@@ -507,12 +276,11 @@ def main():
         file_path = get_latest_excel_file()
         if not file_path:
             sys.exit(1)
-    
-    print(f"📁 Processing data from: {file_path.name}")
 
+    print(f"📁 Source Reconciliation Data: {file_path.name}")
     config_path = Path(args.config) if args.config else None
 
-    # 2. Generate Import Excel or use existing
+    # 2. Get or Generate Import File
     if args.import_file:
         import_file = Path(args.import_file)
         if not import_file.exists():
@@ -523,10 +291,29 @@ def main():
         if not import_file:
             sys.exit(1)
 
-    # 3. Run Browser Automation
-    run_import_automation(import_file, file_path, config_path, email=args.email, password=args.password, headless=args.headless)
+    # 3. Create Draft Journals directly via XML-RPC
+    success = create_draft_journals_via_xmlrpc(import_file, config_path)
+    if not success:
+        sys.exit(1)
+
+
+def safe_save_workbook(wb, file_path: Path) -> bool:
+    """Save openpyxl workbook safely without locking issues."""
+    try:
+        wb.save(str(file_path))
+        return True
+    except Exception as e:
+        try:
+            tmp_path = file_path.with_suffix(".tmp.xlsx")
+            wb.save(str(tmp_path))
+            if tmp_path.exists():
+                os.replace(str(tmp_path), str(file_path))
+                return True
+        except Exception:
+            pass
+        print(f"Error saving workbook: {e}")
+        return False
 
 
 if __name__ == "__main__":
     main()
-

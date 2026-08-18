@@ -27,6 +27,22 @@ IS_WINDOWS = platform.system() == "Windows"
 # The GUI re-launches the same binary with --worker for a clean stdout stream.
 # Must be checked BEFORE any tkinter import so the headless worker doesn't
 # require a display or GUI toolkit.
+if "--run-journal-creator" in sys.argv:
+    sys.argv = [a for a in sys.argv if a != "--run-journal-creator"]
+    os.chdir(str(BASE_DIR))
+    import io as _io
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    elif hasattr(sys.stdout, "buffer"):
+        sys.stdout = _io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+    import runpy
+    if getattr(sys, "frozen", False):
+        jc_path = str(Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "odoo_journal_creator.py")
+    else:
+        jc_path = str(BASE_DIR / "odoo_journal_creator.py")
+    runpy.run_path(jc_path, run_name="__main__")
+    sys.exit(0)
+
 if "--worker" in sys.argv:
     sys.argv = [a for a in sys.argv if a != "--worker"]  # hide flag from main's argparse
     os.chdir(str(BASE_DIR))
@@ -5267,16 +5283,20 @@ class App(ctk.CTk):
                     
                     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if IS_WINDOWS else 0
                     
-                    cmd = [
-                        _venv_python, "odoo_journal_creator.py",
-                        "--file", str(recon_file),
-                        "--import-file", str(out_path),
-                        "--config", str(config_path)
-                    ]
-                    email = self._email_var.get().strip() if hasattr(self, "_email_var") else ""
-                    pwd = self._password_var.get() if hasattr(self, "_password_var") else ""
-                    if email and pwd:
-                        cmd.extend(["--email", email, "--password", pwd, "--headless"])
+                    if getattr(sys, "frozen", False):
+                        cmd = [
+                            sys.executable, "--run-journal-creator",
+                            "--file", str(recon_file),
+                            "--import-file", str(out_path),
+                            "--config", str(config_path)
+                        ]
+                    else:
+                        cmd = [
+                            _venv_python, "odoo_journal_creator.py",
+                            "--file", str(recon_file),
+                            "--import-file", str(out_path),
+                            "--config", str(config_path)
+                        ]
 
                     if hasattr(self, "_stop_btn"):
                         self.after(0, lambda: self._stop_btn.pack(fill="x", pady=(6, 0)))
@@ -5293,14 +5313,6 @@ class App(ctk.CTk):
                         for line in iter(proc.stdout.readline, ''):
                             self.after(0, self._log_write, line, "")
                     proc.wait()
-
-                    # Always ensure local recon file status is updated
-                    try:
-                        from odoo_journal_creator import update_recon_file_status, log_journal_creation
-                        update_recon_file_status(recon_file, config_path)
-                        log_journal_creation(recon_file, config_path)
-                    except Exception as ex:
-                        print(f"Status update note: {ex}")
 
                     if proc.returncode == 0:
                         self.after(0, self._on_done, 0, None)
