@@ -4307,9 +4307,9 @@ class App(ctk.CTk):
                             })
 
                         save_manual_matches(output_dir, sidecar_entries)
-                        self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
+                        self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to manual_matches.json\n", "ok")
                     except Exception as _se:
-                        self._log_write(f"⚠️ Could not save .manual_matches.json: {_se}\n", "warn")
+                        self._log_write(f"⚠️ Could not save manual_matches.json: {_se}\n", "warn")
                     top.destroy()
                     if open_journal_modal:
                         self._on_journal()

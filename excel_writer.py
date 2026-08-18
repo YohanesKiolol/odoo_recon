@@ -19,40 +19,26 @@ from reconciler import STATUS_DONE, STATUS_BANK_ONLY, STATUS_ODO_ONLY
 from config import BANK_ACCOUNTS, ODOO_COMPANY_NAME
 
 # ── Manual-match sidecar helpers ──────────────────────────────────────────────
-MANUAL_MATCHES_FILE = ".manual_matches.json"  # dot-prefix = hidden on Mac/Linux
-
-
-def _hide_file(path: Path) -> None:
-    """Dot-prefix covers Mac/Linux. On Windows, do NOT set +H attribute because it causes PermissionError when Python tries to write/overwrite it later."""
-    pass
+MANUAL_MATCHES_FILE = "manual_matches.json"
 
 
 def _write_manual_matches_json(output_dir: Path, data: list[dict]) -> None:
-    """Safely write sidecar JSON with directory creation, Windows attribute un-hiding, and exception protection."""
+    """Safely write manual_matches.json to output directory."""
     try:
         output_dir.mkdir(parents=True, exist_ok=True)
         path = output_dir / MANUAL_MATCHES_FILE
-        import sys
-        if sys.platform == "win32" and path.exists():
-            try:
-                import subprocess
-                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-                subprocess.run(["attrib", "-H", str(path)], check=False, capture_output=True, creationflags=flags)
-            except Exception:
-                pass
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     except Exception as e:
-        print(f"  [WARN] Sidecar write skipped: {e}")
+        print(f"  [WARN] Manual matches write skipped: {e}")
 
 
 def save_manual_matches(output_dir: Path, matches: list[dict]) -> None:
-    """Persist manual-match pairs to a JSON sidecar in output_dir.
+    """Persist manual-match pairs to manual_matches.json in output_dir.
     Each entry: {pair_tag, bank_date, bank_journal, bank_amount,
                  odoo_date, odoo_journal, odoo_amount}
     Merges with any pre-existing entries (deduped by pair_tag).
     """
     existing = load_manual_matches(output_dir)
-    # index by pair_tag so re-saves don't duplicate
     by_tag: dict[str, dict] = {m["pair_tag"]: m for m in existing}
     for m in matches:
         by_tag[m["pair_tag"]] = m
@@ -60,10 +46,15 @@ def save_manual_matches(output_dir: Path, matches: list[dict]) -> None:
 
 
 def load_manual_matches(output_dir: Path) -> list[dict]:
-    """Load persisted manual-match pairs from the JSON sidecar."""
+    """Load persisted manual-match pairs from manual_matches.json."""
     path = output_dir / MANUAL_MATCHES_FILE
     if not path.exists():
-        return []
+        # Fallback to legacy hidden name if present
+        legacy = output_dir / ".manual_matches.json"
+        if legacy.exists():
+            path = legacy
+        else:
+            return []
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
