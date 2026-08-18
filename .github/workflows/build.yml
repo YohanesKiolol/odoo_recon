@@ -92,25 +92,27 @@ jobs:
       - name: Build SalesPortal (Store GUI)
         run: pyinstaller SalesPortal.spec --clean --noconfirm
 
-      - name: Code Sign & Package macOS Apps as ZIP
+      - name: Code Sign & Package macOS Apps (DMG & ZIP)
         run: |
           cd dist
           codesign --force --deep --sign - Recon.app
           codesign --force --deep --sign - SalesPortal.app
+          hdiutil create -volname "Recon" -srcfolder "Recon.app" -ov -format UDZO "Recon-macOS.dmg"
+          hdiutil create -volname "SalesPortal" -srcfolder "SalesPortal.app" -ov -format UDZO "SalesPortal-macOS.dmg"
           zip -r -y Recon-macOS.zip Recon.app
           zip -r -y SalesPortal-macOS.zip SalesPortal.app
           cd ..
 
-      - name: Upload Recon macOS App
+      - name: Upload Recon macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: Recon-macOS-App
-          path: dist/Recon-macOS.zip
+          name: Recon-macOS-DMG
+          path: dist/Recon-macOS.dmg
           retention-days: 30
 
-      - name: Upload SalesPortal macOS App
+      - name: Upload SalesPortal macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: SalesPortal-macOS-App
-          path: dist/SalesPortal-macOS.zip
+          name: SalesPortal-macOS-DMG
+          path: dist/SalesPortal-macOS.dmg
           retention-days: 30
