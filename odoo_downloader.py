@@ -163,7 +163,7 @@ def download_via_xmlrpc(
                 ('date', '>=', iso_from),
                 ('date', '<=', iso_to),
                 ('move_type', '=', 'entry'),
-                ('state', '=', 'posted'),
+                ('state', 'in', ['posted', 'draft']),
             ]
             if settlement_journals:
                 m_domain.append(('journal_id.name', 'in', settlement_journals))

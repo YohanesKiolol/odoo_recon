@@ -373,8 +373,6 @@ class App(ctk.CTk):
         self.geometry(f"{init_w}x{init_h}+{(sw - init_w)//2}+{max(10, (sh - init_h)//2 - 25)}")
         self.minsize(960, 540)
         self.resizable(True, True)
-        # Maximise on startup — platform-correct
-        self.after(50, lambda: _maximize_window(self))
         self._running = False
         self._active_proc = None
         self._last_output = None
