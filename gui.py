@@ -1804,33 +1804,19 @@ class App(ctk.CTk):
                     if _stale(): return []
                     mandiri_stmt_by_alias = {}
                     try:
-                        import pyzipper
+                        from readers.mandiri_reader import extract_mandiri_dates_from_zip
                         for alias_d in sorted(MANDIRI_ZIP_DIR.iterdir()):
                             if _stale(): break
                             if alias_d.is_dir():
                                 alias_dates = []
                                 for z_path in alias_d.glob("*.zip"):
-                                    try:
-                                        with pyzipper.AESZipFile(z_path, 'r', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
-                                            zf.setpassword(MANDIRI_ZIP_PASSWORD.encode())
-                                            for name in zf.namelist():
-                                                m = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
-                                                for ds in m:
-                                                    alias_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
-                                    except Exception: pass
+                                    alias_dates.extend(extract_mandiri_dates_from_zip(z_path, MANDIRI_ZIP_PASSWORD))
                                 if alias_dates:
                                     mandiri_stmt_by_alias[alias_d.name] = alias_dates
                         if not mandiri_stmt_by_alias and MANDIRI_ZIP_DIR.exists():
                             alias_dates = []
                             for z_path in MANDIRI_ZIP_DIR.glob("*.zip"):
-                                try:
-                                    with pyzipper.AESZipFile(z_path, 'r', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
-                                        zf.setpassword(MANDIRI_ZIP_PASSWORD.encode())
-                                        for name in zf.namelist():
-                                            m = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
-                                            for ds in m:
-                                                alias_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
-                                except Exception: pass
+                                alias_dates.extend(extract_mandiri_dates_from_zip(z_path, MANDIRI_ZIP_PASSWORD))
                             if alias_dates:
                                 mandiri_stmt_by_alias["main"] = alias_dates
                     except Exception: pass

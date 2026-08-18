@@ -137,7 +137,7 @@ def scan_bank_date_range(banks=None, log_fn=None) -> tuple[str, str] | None:
     def _do_mandiri():
         man_dates = []
         try:
-            import pyzipper
+            from readers.mandiri_reader import extract_mandiri_dates_from_zip
             search_dirs = []
             for alias, acc_info in BANK_ACCOUNTS.get("mandiri", {}).items():
                 target_dir = MANDIRI_ZIP_DIR / alias
@@ -148,17 +148,10 @@ def scan_bank_date_range(banks=None, log_fn=None) -> tuple[str, str] | None:
 
             for sdir in search_dirs:
                 for z_path in sdir.glob("*.zip"):
-                    try:
-                        with pyzipper.AESZipFile(z_path, 'r', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
-                            zf.setpassword(MANDIRI_ZIP_PASSWORD.encode())
-                            for name in zf.namelist():
-                                m = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', name)
-                                for ds in m:
-                                    iso_d = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
-                                    all_dates.append(iso_d)
-                                    man_dates.append(iso_d)
-                    except Exception:
-                        pass
+                    found = extract_mandiri_dates_from_zip(z_path, MANDIRI_ZIP_PASSWORD)
+                    for d in found:
+                        all_dates.append(d)
+                        man_dates.append(d)
         except Exception:
             pass
         bank_details["mandiri"] = Counter(man_dates)

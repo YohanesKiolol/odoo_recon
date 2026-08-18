@@ -295,3 +295,71 @@ def read_mandiri(
         all_txns = filtered_txns
 
     return all_txns, excluded_txns
+
+
+def extract_mandiri_dates_from_zip(z_path: Path, password: str = "") -> list[str]:
+    """Extract actual ISO transaction dates from Mandiri ZIP (CSV contents + filename fallback)."""
+    import re
+    found_dates = []
+
+    try:
+        with pyzipper.AESZipFile(z_path, 'r', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_AES) as zf:
+            if password:
+                zf.setpassword(password.encode("utf-8"))
+            for name in zf.namelist():
+                # 1. Try reading actual transaction dates from CSV inside the ZIP
+                try:
+                    data = zf.read(name)
+                    text = data.decode("utf-8", errors="replace")
+                    lines = text.splitlines()
+                    if len(lines) >= 7:
+                        header_line = lines[5]
+                        headers = [h.strip().upper() for h in header_line.split(",")]
+                        date_idx = -1
+                        for idx, h in enumerate(headers):
+                            if h in ("TRXDATE", "TRANSACTION DATE", "TGL TRANSAKSI", "DATE", "TXN DATE"):
+                                date_idx = idx
+                                break
+                        if date_idx >= 0:
+                            for l in lines[6:]:
+                                parts = l.split(",")
+                                if len(parts) > date_idx:
+                                    d_parsed = _parse_any_date(parts[date_idx].strip().strip('"'))
+                                    if d_parsed:
+                                        found_dates.append(d_parsed.isoformat())
+                except Exception:
+                    pass
+
+                # 2. If no dates found from CSV rows, check inner filename & zip filename
+                if not found_dates:
+                    for target_str in (name, z_path.name):
+                        m_iso = re.findall(r'((?:20\d{2})[-_/.](?:0[1-9]|1[0-2])[-_/.](?:0[1-9]|[12]\d|3[01]))', target_str)
+                        for ds in m_iso:
+                            found_dates.append(ds.replace("_", "-").replace("/", "-").replace(".", "-"))
+
+                        m_dmy = re.findall(r'((?:0[1-9]|[12]\d|3[01])[-_/.](?:0[1-9]|1[0-2])[-_/.](?:20\d{2}))', target_str)
+                        for ds in m_dmy:
+                            parts = re.split(r'[-_ /.]', ds)
+                            if len(parts) == 3:
+                                found_dates.append(f"{parts[2]}-{parts[1]}-{parts[0]}")
+
+                        m_8d = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', target_str)
+                        for ds in m_8d:
+                            found_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
+    except Exception:
+        for target_str in [z_path.name]:
+            m_iso = re.findall(r'((?:20\d{2})[-_/.](?:0[1-9]|1[0-2])[-_/.](?:0[1-9]|[12]\d|3[01]))', target_str)
+            for ds in m_iso:
+                found_dates.append(ds.replace("_", "-").replace("/", "-").replace(".", "-"))
+
+            m_dmy = re.findall(r'((?:0[1-9]|[12]\d|3[01])[-_/.](?:0[1-9]|1[0-2])[-_/.](?:20\d{2}))', target_str)
+            for ds in m_dmy:
+                parts = re.split(r'[-_ /.]', ds)
+                if len(parts) == 3:
+                    found_dates.append(f"{parts[2]}-{parts[1]}-{parts[0]}")
+
+            m_8d = re.findall(r'((?:20\d{2})(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01]))', target_str)
+            for ds in m_8d:
+                found_dates.append(f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}")
+
+    return found_dates

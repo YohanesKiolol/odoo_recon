@@ -823,17 +823,82 @@ def generate_executive_summary_pdf(excel_path: Path | str | None = None, output_
         output_pdf_path = Path(output_pdf_path)
 
     # Convert HTML to PDF via Playwright
+    import os
+    import sys
+    browsers_path = str(Path.home() / ".playwright_browsers")
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
+
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = None
+        # 1. Try system-installed browsers (Edge, Chrome) or default Playwright Chromium
+        for channel in ["msedge", "chrome", None]:
+            try:
+                kwargs = {"headless": True}
+                if channel:
+                    kwargs["channel"] = channel
+                browser = p.chromium.launch(**kwargs)
+                break
+            except Exception:
+                continue
+
+        # 2. Fallback to common Windows / Mac executable paths if channel launch failed
+        if browser is None:
+            possible_paths = []
+            if sys.platform == "win32" or os.name == "nt":
+                possible_paths = [
+                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                ]
+            elif sys.platform == "darwin":
+                possible_paths = [
+                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                ]
+
+            for path_str in possible_paths:
+                if Path(path_str).exists():
+                    try:
+                        browser = p.chromium.launch(executable_path=path_str, headless=True)
+                        break
+                    except Exception:
+                        continue
+
+        if browser is None:
+            # Auto-install chromium if no browser found
+            try:
+                import subprocess
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == 'nt' else 0
+                if getattr(sys, "frozen", False):
+                    from playwright._impl._driver import compute_driver_executable, get_driver_env
+                    node_exe, cli_js = compute_driver_executable()
+                    driver_env = get_driver_env()
+                    driver_env["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
+                    subprocess.run([node_exe, cli_js, "install", "chromium"], check=True, env=driver_env, creationflags=flags)
+                else:
+                    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True, creationflags=flags)
+                browser = p.chromium.launch(headless=True)
+            except Exception as ex:
+                raise RuntimeError(f"Could not find or launch a web browser to render PDF: {ex}")
+
         page = browser.new_page()
         page.set_content(html_content, wait_until="networkidle")
+
+        # Generate PDF with clean professional layout
         page.pdf(
             path=str(output_pdf_path),
             format="A4",
             print_background=True,
-            margin={"top": "12mm", "bottom": "14mm", "left": "12mm", "right": "12mm"}
+            margin={
+                "top": "12mm",
+                "right": "12mm",
+                "bottom": "12mm",
+                "left": "12mm"
+            },
+            prefer_css_page_size=True,
         )
         browser.close()
 
