@@ -4321,6 +4321,8 @@ class App(ctk.CTk):
                     top.destroy()
                     if open_journal_modal:
                         self._on_journal()
+                    else:
+                        self._open_path(saved_path)
                 else:
                     self._log_write(f"\n⚠️ Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel and try again.\n", "warn")
                     show_modal_msg("⚠️ Could not save Excel file. Please close Excel and try again.")

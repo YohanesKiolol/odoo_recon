@@ -1031,7 +1031,13 @@ def _close_workbook_in_excel(file_path: Path):
     elif os.name == "nt" or sys.platform == "win32":
         try:
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            # Strictly target Microsoft Excel process only
+            ps_script = (
+                f"$ErrorActionPreference = 'SilentlyContinue'; "
+                f"$xl = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application'); "
+                f"if ($xl) {{ foreach ($w in $xl.Workbooks) {{ if ($w.Name -like '*{fname}*') {{ $w.Close($false) }} }} }}"
+            )
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, creationflags=flags)
+            time.sleep(0.3)
             subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
                  f'Get-Process excel -ErrorAction SilentlyContinue | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
@@ -1043,12 +1049,11 @@ def _close_workbook_in_excel(file_path: Path):
 
 
 def _safe_save_report(wb, out_path: Path) -> Path:
-    """Save workbook safely, automatically closing old instance in Excel if needed."""
+    """Save workbook directly to out_path, closing Excel first if locked."""
     try:
         wb.save(out_path)
         return out_path
     except PermissionError:
-        # File is locked in Excel, close it and retry saving
         _close_workbook_in_excel(out_path)
         try:
             wb.save(out_path)
@@ -1068,16 +1073,8 @@ def _safe_save_report(wb, out_path: Path) -> Path:
                 except Exception:
                     pass
 
-        from datetime import datetime
-        ts = datetime.now().strftime("%H%M%S")
-        alt_path = out_path.parent / f"{out_path.stem}_{ts}.xlsx"
-        try:
-            wb.save(alt_path)
-            print(f"\n⚠️ Note: '{out_path.name}' was locked by Excel.")
-            print(f"   Saved updated report to '{alt_path.name}' instead.\n")
-            return alt_path
-        except Exception:
-            raise
+        wb.save(out_path)
+        return out_path
 
 
 

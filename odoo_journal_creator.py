@@ -322,7 +322,13 @@ def close_excel_window_for_file(fname: str):
     elif os.name == "nt" or sys.platform == "win32":
         try:
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            # Strictly target Microsoft Excel process only
+            ps_script = (
+                f"$ErrorActionPreference = 'SilentlyContinue'; "
+                f"$xl = [Runtime.InteropServices.Marshal]::GetActiveObject('Excel.Application'); "
+                f"if ($xl) {{ foreach ($w in $xl.Workbooks) {{ if ($w.Name -like '*{fname}*') {{ $w.Close($false) }} }} }}"
+            )
+            subprocess.run(["powershell", "-NoProfile", "-Command", ps_script], capture_output=True, creationflags=flags)
+            time.sleep(0.3)
             subprocess.run(
                 ["powershell", "-NoProfile", "-Command",
                  f'Get-Process excel -ErrorAction SilentlyContinue | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
@@ -334,12 +340,11 @@ def close_excel_window_for_file(fname: str):
 
 
 def safe_save_workbook(wb, file_path: Path) -> Path | None:
-    """Save openpyxl workbook safely without locking issues, returning saved Path."""
+    """Save openpyxl workbook safely, closing Excel first if locked."""
     try:
         wb.save(str(file_path))
         return file_path
     except PermissionError:
-        # File is locked in Excel — close it and retry
         close_excel_window_for_file(file_path.name)
         try:
             wb.save(str(file_path))
@@ -359,15 +364,9 @@ def safe_save_workbook(wb, file_path: Path) -> Path | None:
         except Exception:
             pass
 
-        # Fallback to saving with timestamp if Excel keeps absolute lock
-        from datetime import datetime
-        ts = datetime.now().strftime("%H%M%S")
-        alt_path = file_path.parent / f"{file_path.stem}_{ts}.xlsx"
         try:
-            wb.save(str(alt_path))
-            print(f"\n⚠️ Note: '{file_path.name}' was locked by Excel.")
-            print(f"   Saved updated report to '{alt_path.name}' instead.\n")
-            return alt_path
+            wb.save(str(file_path))
+            return file_path
         except Exception as e:
             print(f"❌ Error saving workbook: {e}")
             return None
