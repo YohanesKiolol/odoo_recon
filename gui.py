@@ -315,10 +315,7 @@ def _maximize_window(win):
 
 
 def _center_modal_on_parent(win, parent):
-    """Size and center modal dialog.
-    Windows: always centers inside SPI_GETWORKAREA (maximized parent coords are unreliable
-             due to invisible shadow/resize borders that skew winfo_rootx/y).
-    Mac/Linux: centers relative to parent window coords."""
+    """Size and center modal dialog within safe work area without bottom cut-off."""
     import sys
     win.update_idletasks()
     parent.update_idletasks()
@@ -349,15 +346,15 @@ def _center_modal_on_parent(win, parent):
             ref_w = win.winfo_screenwidth()
             ref_h = win.winfo_screenheight()
 
-    target_w = max(1000, int(ref_w * 0.88))
-    target_h = max(600, int(ref_h * 0.82))
+    max_avail_w = max(600, ref_w - 40)
+    max_avail_h = max(450, ref_h - 70)
+    target_w = min(1080, max(840, int(ref_w * 0.82)), max_avail_w)
+    target_h = min(580, max(460, int(ref_h * 0.76)), max_avail_h)
 
-    x = ref_x + (ref_w - target_w) // 2
-    y = ref_y + (ref_h - target_h) // 2
+    x = ref_x + max(0, (ref_w - target_w) // 2)
+    y = ref_y + max(5, (ref_h - target_h) // 2 - 20)
 
-    win.geometry(f"{target_w}x{target_h}+{max(0, x)}+{max(0, y)}")
-
-
+    win.geometry(f"{target_w}x{target_h}+{x}+{y}")
 
 
 class App(ctk.CTk):
@@ -365,14 +362,16 @@ class App(ctk.CTk):
         super().__init__()
         self.title("Bank Reconciliation Studio")
         self.configure(fg_color=BG)
-        # Apply DPI scaling BEFORE building UI so every widget is created at
-        # the correct physical scale from the start. Applying it after causes
-        # some widgets to render at default 96-DPI scale and others at the
-        # real DPI — the mismatch makes fonts look patchy/inconsistent.
         if IS_WINDOWS:
             self._apply_dpi_scaling()
-        self.geometry("1280x860")
-        self.minsize(1100, 720)
+
+        # Adaptive window size to fit comfortably on standard laptop screens (1080p @ 125%/150% scaling)
+        sw = self.winfo_screenwidth()
+        sh = self.winfo_screenheight()
+        init_w = min(1200, max(950, sw - 80))
+        init_h = min(720, max(560, sh - 100))
+        self.geometry(f"{init_w}x{init_h}+{(sw - init_w)//2}+{max(10, (sh - init_h)//2 - 25)}")
+        self.minsize(960, 540)
         self.resizable(True, True)
         # Maximise on startup — platform-correct
         self.after(50, lambda: _maximize_window(self))
@@ -1258,7 +1257,20 @@ class App(ctk.CTk):
         self.update_idletasks()
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         w,  h  = self.winfo_width(),       self.winfo_height()
-        self.geometry(f"+{(sw-w)//2}+{(sh-h)//2}")
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                from ctypes import wintypes
+                rect = wintypes.RECT()
+                if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
+                    ref_x, ref_y = rect.left, rect.top
+                    ref_w = rect.right - rect.left
+                    ref_h = rect.bottom - rect.top
+                    self.geometry(f"+{ref_x + max(0, (ref_w - w)//2)}+{ref_y + max(5, (ref_h - h)//2 - 15)}")
+                    return
+            except Exception:
+                pass
+        self.geometry(f"+{max(0, (sw-w)//2)}+{max(10, (sh-h)//2 - 20)}")
 
     def _refresh_folder_status(self):
         files = [
@@ -2703,7 +2715,7 @@ class App(ctk.CTk):
             # ── Open Modal Window ──
             top = ctk.CTkToplevel(self)
             top.title("Share Discrepancies to Sales Portal")
-            top.minsize(1050, 640)
+            top.minsize(860, 480)
             top.resizable(True, True)
             top.configure(fg_color=BG)
             top.transient(self)
@@ -3555,7 +3567,7 @@ class App(ctk.CTk):
         top.withdraw()
         top.title("Manual Match — Reconcile Differences")
 
-        top.minsize(1050, 640)
+        top.minsize(860, 480)
         top.configure(fg_color=BG)
         top.transient(self)
         top.grab_set()
@@ -4365,7 +4377,7 @@ class App(ctk.CTk):
 
         top.protocol("WM_DELETE_WINDOW", _on_close_modal)
         top.title("Confirm Journal Creation")
-        top.minsize(1050, 640)
+        top.minsize(860, 480)
         top.resizable(True, True)
         top.configure(fg_color=BG)
         top.transient(self)
@@ -5315,7 +5327,11 @@ class App(ctk.CTk):
                     proc.wait()
 
                     if proc.returncode == 0:
-                        self.after(0, self._on_done, 0, None)
+                        def _auto_recon_followup():
+                            self._on_done(0, None)
+                            self._log_write("\n🔄 Automatically re-running Reconciliation to sync newly created draft journals...\n", "head")
+                            self._on_run()
+                        self.after(0, _auto_recon_followup)
                     else:
                         self.after(0, self._on_done, proc.returncode, None)
 

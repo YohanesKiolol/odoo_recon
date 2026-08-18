@@ -142,6 +142,11 @@ def generate_journal_import(reconciliation_file: Path, config_path: Path | None 
                 "amount": total_odo
             })
 
+    try:
+        wb_source.close()
+    except Exception:
+        pass
+
     # Filter items based on config
     if config_path and config_path.exists():
         import json

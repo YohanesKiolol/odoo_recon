@@ -97,6 +97,11 @@ def parse_journal_blocks_from_excel(import_excel_path: Path) -> list[dict]:
     if current_entry and current_entry["lines"]:
         entries.append(current_entry)
 
+    try:
+        wb.close()
+    except Exception:
+        pass
+
     return entries
 
 
