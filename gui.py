@@ -3440,21 +3440,30 @@ class App(ctk.CTk):
             return
         latest_file = max(output_files, key=os.path.getctime)
 
+        import io
         try:
-            wb = load_workbook(latest_file, data_only=True)
-            try:
-                if "Differences" not in wb.sheetnames:
-                    self._set_status("No 'Differences' sheet found in recon file", ERROR)
-                    return
-
-                ws = wb["Differences"]
-                rows = list(ws.iter_rows(values_only=True))
-            finally:
+            with open(latest_file, "rb") as f:
+                file_bytes = io.BytesIO(f.read())
+            wb = load_workbook(file_bytes, data_only=True)
+            if "Differences" not in wb.sheetnames:
+                self._set_status("No 'Differences' sheet found in recon file", ERROR)
                 wb.close()
+                return
+
+            ws = wb["Differences"]
+            rows = list(ws.iter_rows(values_only=True))
+            wb.close()
         except Exception as e:
             self._set_status(f"Error loading recon file: {e}", ERROR)
-        # Dynamic header mapping for backwards and forwards compatibility
-        hdr_row = [str(cell.value or "").strip().lower() for cell in ws[3]]
+            return
+
+        if len(rows) < 3:
+            self._set_status("Differences sheet is empty!", WARN)
+            messagebox.showinfo("Manual Match", "Differences sheet is empty. No discrepancy items to reconcile.")
+            return
+
+        # Dynamic header mapping from row 3
+        hdr_row = [str(v or "").strip().lower() for v in rows[2]]
         def _find_c(name, fallback):
             for i, h in enumerate(hdr_row):
                 if name in h: return i
@@ -3515,6 +3524,7 @@ class App(ctk.CTk):
 
         if not bank_items and not odo_items:
             self._set_status("No discrepancy items found in Differences sheet!", SUCCESS)
+            messagebox.showinfo("Manual Match", "No unmatched discrepancy items found in the Differences sheet! All items are already reconciled or matched.")
             return
 
         candidate_pairs = []
@@ -4395,10 +4405,14 @@ class App(ctk.CTk):
             output_files = glob.glob(str(OUTPUT_DIR / "[Rr]econciliation_*.xlsx"))
             if not output_files: return
             latest_file = max(output_files, key=os.path.getctime)
+            import io
             try:
-                wb = load_workbook(latest_file, data_only=True)
+                with open(latest_file, "rb") as f:
+                    file_bytes = io.BytesIO(f.read())
+                wb = load_workbook(file_bytes, data_only=True)
                 if "Daily Summary" not in wb.sheetnames:
                     self._set_status("'Daily Summary' sheet not found", ERROR)
+                    wb.close()
                     return
                 def get_col_map(sheet, row_idx=3):
                     return {str(sheet.cell(row=row_idx, column=c).value).strip().lower(): c for c in range(1, sheet.max_column + 1) if sheet.cell(row=row_idx, column=c).value}
