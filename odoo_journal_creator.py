@@ -302,12 +302,69 @@ def main():
         sys.exit(1)
 
 
+def close_excel_window_for_file(fname: str):
+    """Gracefully close Excel window containing filename on Windows or Mac."""
+    import sys, os, time, subprocess
+    if sys.platform == "darwin":
+        try:
+            subprocess.run(
+                ["osascript", "-e",
+                 f'tell application "Microsoft Excel"\n'
+                 f'  set wb_list to every workbook whose name contains "{fname}"\n'
+                 f'  repeat with wb_item in wb_list\n'
+                 f'    close wb_item saving no\n'
+                 f'  end repeat\n'
+                 f'end tell'],
+                capture_output=True, timeout=5
+            )
+        except Exception:
+            pass
+    elif os.name == "nt" or sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+
+            def enum_cb(hwnd, extra):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(hwnd, buff, length + 1)
+                        if fname.lower() in buff.value.lower():
+                            user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+                return True
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+            time.sleep(0.5)
+        except Exception:
+            try:
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
+                    capture_output=True, creationflags=flags
+                )
+                time.sleep(0.5)
+            except Exception:
+                pass
+
+
 def safe_save_workbook(wb, file_path: Path) -> bool:
     """Save openpyxl workbook safely without locking issues."""
     try:
         wb.save(str(file_path))
         return True
-    except Exception as e:
+    except PermissionError:
+        # File is locked in Excel — close it and retry
+        close_excel_window_for_file(file_path.name)
+        try:
+            wb.save(str(file_path))
+            return True
+        except Exception:
+            pass
+
         try:
             tmp_path = file_path.with_suffix(".tmp.xlsx")
             wb.save(str(tmp_path))
@@ -316,7 +373,11 @@ def safe_save_workbook(wb, file_path: Path) -> bool:
                 return True
         except Exception:
             pass
-        print(f"Error saving workbook: {e}")
+
+        print(f"❌ Error: Cannot save locked file '{file_path.name}'.")
+        return False
+    except Exception as e:
+        print(f"❌ Error saving workbook: {e}")
         return False
 
 

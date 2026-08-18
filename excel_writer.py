@@ -974,7 +974,7 @@ def _close_workbook_in_excel(file_path: Path):
             subprocess.run(
                 ["osascript", "-e",
                  f'tell application "Microsoft Excel"\n'
-                 f'  set wb_list to every workbook whose name is "{fname}"\n'
+                 f'  set wb_list to every workbook whose name contains "{fname}"\n'
                  f'  repeat with wb_item in wb_list\n'
                  f'    close wb_item saving no\n'
                  f'  end repeat\n'
@@ -985,12 +985,34 @@ def _close_workbook_in_excel(file_path: Path):
             pass
     elif os.name == "nt" or sys.platform == "win32":
         try:
-            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-            subprocess.run(["taskkill", "/FI", f"WINDOWTITLE eq *{fname}*", "/F"], capture_output=True, creationflags=flags)
-            subprocess.run(["taskkill", "/FI", f"WINDOWTITLE eq {fname}*", "/F"], capture_output=True, creationflags=flags)
-            time.sleep(0.3)
+            import ctypes
+            from ctypes import wintypes
+            user32 = ctypes.windll.user32
+
+            def enum_cb(hwnd, extra):
+                if user32.IsWindowVisible(hwnd):
+                    length = user32.GetWindowTextLengthW(hwnd)
+                    if length > 0:
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(hwnd, buff, length + 1)
+                        if fname.lower() in buff.value.lower():
+                            user32.PostMessageW(hwnd, 0x0010, 0, 0)  # WM_CLOSE
+                return True
+
+            WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
+            user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+            time.sleep(0.5)
         except Exception:
-            pass
+            try:
+                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+                subprocess.run(
+                    ["powershell", "-NoProfile", "-Command",
+                     f'Get-Process | Where-Object {{ $_.MainWindowTitle -like "*{fname}*" }} | ForEach-Object {{ $_.CloseMainWindow() }}'],
+                    capture_output=True, creationflags=flags
+                )
+                time.sleep(0.5)
+            except Exception:
+                pass
 
 
 def _safe_save_report(wb, out_path: Path) -> Path:
