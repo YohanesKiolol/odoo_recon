@@ -152,7 +152,14 @@ def download_via_xmlrpc(
                             ])
 
             ODO_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            wb_p.save(ODO_EXCEL_PATH)
+            try:
+                wb_p.save(ODO_EXCEL_PATH)
+            except Exception:
+                tmp = ODO_EXCEL_PATH.with_suffix(".tmp.xlsx")
+                wb_p.save(tmp)
+                os.replace(tmp, ODO_EXCEL_PATH)
+            finally:
+                wb_p.close()
             print(f"    -> Successfully saved to '{ODO_EXCEL_PATH.name}'.")
 
         # ── 2. Journal Entries (account.move) ──
@@ -201,7 +208,14 @@ def download_via_xmlrpc(
                 ws_j.append([m_date, m_name, m_partner, m_ref, m_journal, m_company, m_total, m_state])
 
             ODO_JOURNAL_EXCEL_PATH.parent.mkdir(parents=True, exist_ok=True)
-            wb_j.save(ODO_JOURNAL_EXCEL_PATH)
+            try:
+                wb_j.save(ODO_JOURNAL_EXCEL_PATH)
+            except Exception:
+                tmp = ODO_JOURNAL_EXCEL_PATH.with_suffix(".tmp.xlsx")
+                wb_j.save(tmp)
+                os.replace(tmp, ODO_JOURNAL_EXCEL_PATH)
+            finally:
+                wb_j.close()
             print(f"    -> Successfully saved to '{ODO_JOURNAL_EXCEL_PATH.name}'.")
 
         print("[+] Direct XML-RPC download completed successfully in < 1 second! ✅\n")

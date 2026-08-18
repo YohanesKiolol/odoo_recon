@@ -962,8 +962,37 @@ def write_report(
     # the Excel visual layer (fill colour + tag string in Status cell).
     if matches:
         _reapply_manual_matches(wb, output_dir)
-    wb.save(out_path)
-    return out_path
+    return _safe_save_report(wb, out_path)
+
+
+def _safe_save_report(wb, out_path: Path) -> Path:
+    """Save workbook safely even if locked by Microsoft Excel on Windows."""
+    try:
+        wb.save(out_path)
+        return out_path
+    except PermissionError:
+        tmp_path = out_path.with_suffix(".tmp.xlsx")
+        try:
+            wb.save(tmp_path)
+            os.replace(tmp_path, out_path)
+            return out_path
+        except Exception:
+            if tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
+
+        from datetime import datetime
+        ts = datetime.now().strftime("%H%M%S")
+        alt_path = out_path.parent / f"{out_path.stem}_{ts}.xlsx"
+        try:
+            wb.save(alt_path)
+            print(f"\n⚠️ Note: '{out_path.name}' is currently open in Excel.")
+            print(f"   Saved updated report to '{alt_path.name}' instead.\n")
+            return alt_path
+        except Exception:
+            raise
 
 
 
