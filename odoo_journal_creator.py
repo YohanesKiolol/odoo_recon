@@ -351,17 +351,17 @@ def close_excel_window_for_file(fname: str):
                 pass
 
 
-def safe_save_workbook(wb, file_path: Path) -> bool:
-    """Save openpyxl workbook safely without locking issues."""
+def safe_save_workbook(wb, file_path: Path) -> Path | None:
+    """Save openpyxl workbook safely without locking issues, returning saved Path."""
     try:
         wb.save(str(file_path))
-        return True
+        return file_path
     except PermissionError:
         # File is locked in Excel — close it and retry
         close_excel_window_for_file(file_path.name)
         try:
             wb.save(str(file_path))
-            return True
+            return file_path
         except Exception:
             pass
 
@@ -369,16 +369,29 @@ def safe_save_workbook(wb, file_path: Path) -> bool:
             tmp_path = file_path.with_suffix(".tmp.xlsx")
             wb.save(str(tmp_path))
             if tmp_path.exists():
-                os.replace(str(tmp_path), str(file_path))
-                return True
+                try:
+                    os.replace(str(tmp_path), str(file_path))
+                    return file_path
+                except Exception:
+                    pass
         except Exception:
             pass
 
-        print(f"❌ Error: Cannot save locked file '{file_path.name}'.")
-        return False
+        # Fallback to saving with timestamp if Excel keeps absolute lock
+        from datetime import datetime
+        ts = datetime.now().strftime("%H%M%S")
+        alt_path = file_path.parent / f"{file_path.stem}_{ts}.xlsx"
+        try:
+            wb.save(str(alt_path))
+            print(f"\n⚠️ Note: '{file_path.name}' was locked by Excel.")
+            print(f"   Saved updated report to '{alt_path.name}' instead.\n")
+            return alt_path
+        except Exception as e:
+            print(f"❌ Error saving workbook: {e}")
+            return None
     except Exception as e:
         print(f"❌ Error saving workbook: {e}")
-        return False
+        return None
 
 
 if __name__ == "__main__":

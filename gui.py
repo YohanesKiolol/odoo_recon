@@ -4280,14 +4280,15 @@ class App(ctk.CTk):
 
                 from pathlib import Path as _Path
                 from odoo_journal_creator import safe_save_workbook
-                saved_ok = safe_save_workbook(wb, _Path(latest_file))
-                if saved_ok:
-                    self._log_write(f"\n\u2705 Updated reconciliation report ({os.path.basename(latest_file)}) with {len(active_matched)} matched pairs!\n", "ok")
+                saved_path = safe_save_workbook(wb, _Path(latest_file))
+                if saved_path:
+                    self._last_output = saved_path
+                    self._log_write(f"\n✅ Updated reconciliation report ({saved_path.name}) with {len(active_matched)} matched pairs!\n", "ok")
                     self._set_status(f"Updated recon report with {len(active_matched)} matched pairs", SUCCESS)
                     # Persist matches to sidecar so next rerun re-applies them
                     try:
                         from excel_writer import save_manual_matches
-                        output_dir = _Path(latest_file).parent
+                        output_dir = saved_path.parent
                         sidecar_entries = []
                         for pi, pair in enumerate(active_matched, next_pair_idx):
                             sidecar_entries.append({
@@ -4306,14 +4307,14 @@ class App(ctk.CTk):
                             })
 
                         save_manual_matches(output_dir, sidecar_entries)
-                        self._log_write(f"\u2705 Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
+                        self._log_write(f"✅ Saved {len(sidecar_entries)} match(es) to .manual_matches.json\n", "ok")
                     except Exception as _se:
-                        self._log_write(f"\u26a0\ufe0f Could not save .manual_matches.json: {_se}\n", "warn")
+                        self._log_write(f"⚠️ Could not save .manual_matches.json: {_se}\n", "warn")
                     top.destroy()
                     if open_journal_modal:
                         self._on_journal()
                 else:
-                    self._log_write(f"\n\u26a0\ufe0f Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel and try again.\n", "warn")
+                    self._log_write(f"\n⚠️ Could not save reconciliation report ({os.path.basename(latest_file)}). Please close Excel and try again.\n", "warn")
                     show_modal_msg("⚠️ Could not save Excel file. Please close Excel and try again.")
 
             except Exception as e:
