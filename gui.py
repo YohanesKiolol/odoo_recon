@@ -346,13 +346,13 @@ def _center_modal_on_parent(win, parent):
             ref_w = win.winfo_screenwidth()
             ref_h = win.winfo_screenheight()
 
-    max_avail_w = max(600, ref_w - 40)
-    max_avail_h = max(450, ref_h - 70)
-    target_w = min(1080, max(840, int(ref_w * 0.82)), max_avail_w)
-    target_h = min(580, max(460, int(ref_h * 0.76)), max_avail_h)
+    max_avail_w = max(700, ref_w - 30)
+    max_avail_h = max(500, ref_h - 55)
+    target_w = min(1180, max(920, int(ref_w * 0.86)), max_avail_w)
+    target_h = min(660, max(520, int(ref_h * 0.80)), max_avail_h)
 
     x = ref_x + max(0, (ref_w - target_w) // 2)
-    y = ref_y + max(5, (ref_h - target_h) // 2 - 20)
+    y = ref_y + max(5, (ref_h - target_h) // 2 - 15)
 
     win.geometry(f"{target_w}x{target_h}+{x}+{y}")
 
@@ -365,13 +365,13 @@ class App(ctk.CTk):
         if IS_WINDOWS:
             self._apply_dpi_scaling()
 
-        # Adaptive window size to fit comfortably on standard laptop screens (1080p @ 125%/150% scaling)
+        # Adaptive window size — spacious yet safe from taskbar overlap
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
-        init_w = min(1200, max(950, sw - 80))
-        init_h = min(720, max(560, sh - 100))
-        self.geometry(f"{init_w}x{init_h}+{(sw - init_w)//2}+{max(10, (sh - init_h)//2 - 25)}")
-        self.minsize(960, 540)
+        init_w = min(1320, max(1050, sw - 60))
+        init_h = min(800, max(640, sh - 75))
+        self.geometry(f"{init_w}x{init_h}+{(sw - init_w)//2}+{max(10, (sh - init_h)//2 - 15)}")
+        self.minsize(1020, 600)
         self.resizable(True, True)
         self._running = False
         self._active_proc = None
