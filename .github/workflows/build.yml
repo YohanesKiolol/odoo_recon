@@ -1,9 +1,12 @@
-name: Build Desktop Apps (Windows & macOS)
+name: Build & Release Desktop Apps (Windows & macOS)
 
 on:
   push:
     branches: [master, main]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -44,22 +47,21 @@ jobs:
       - name: Build SalesPortal (Store GUI)
         run: pyinstaller SalesPortal.spec --clean --noconfirm
 
-      - name: Upload Recon Windows EXE
-        uses: actions/upload-artifact@v4
+      - name: Publish Windows Apps to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Recon-Windows-EXE
-          path: dist/Recon.exe
-          retention-days: 1
-
-      - name: Upload SalesPortal Windows EXE
-        uses: actions/upload-artifact@v4
-        with:
-          name: SalesPortal-Windows-EXE
-          path: dist/SalesPortal.exe
-          retention-days: 1
+          tag_name: latest
+          name: "Latest Desktop Builds (Windows & macOS)"
+          draft: false
+          prerelease: false
+          files: |
+            dist/Recon.exe
+            dist/SalesPortal.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build-macos:
-    name: Build macOS (.app)
+    name: Build macOS (.app & .dmg)
     runs-on: macos-latest
 
     steps:
@@ -92,7 +94,7 @@ jobs:
       - name: Build SalesPortal (Store GUI)
         run: pyinstaller SalesPortal.spec --clean --noconfirm
 
-      - name: Code Sign & Package macOS Apps (DMG & ZIP)
+      - name: Code Sign & Package macOS DMGs
         run: |
           codesign --force --deep --sign - dist/Recon.app
           codesign --force --deep --sign - dist/SalesPortal.app
@@ -110,21 +112,15 @@ jobs:
           hdiutil create -volname "SalesPortal" -srcfolder /tmp/dmg_sales -ov -format UDZO dist/SalesPortal-macOS.dmg
           rm -rf /tmp/dmg_sales
 
-          cd dist
-          zip -r -y Recon-macOS.zip Recon.app
-          zip -r -y SalesPortal-macOS.zip SalesPortal.app
-          cd ..
-
-      - name: Upload Recon macOS DMG
-        uses: actions/upload-artifact@v4
+      - name: Publish macOS Apps to GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: Recon-macOS-DMG
-          path: dist/Recon-macOS.dmg
-          retention-days: 1
-
-      - name: Upload SalesPortal macOS DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: SalesPortal-macOS-DMG
-          path: dist/SalesPortal-macOS.dmg
-          retention-days: 1
+          tag_name: latest
+          name: "Latest Desktop Builds (Windows & macOS)"
+          draft: false
+          prerelease: false
+          files: |
+            dist/Recon-macOS.dmg
+            dist/SalesPortal-macOS.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
