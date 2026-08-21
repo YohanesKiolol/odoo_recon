@@ -23,6 +23,7 @@ if sys.stderr is None:
         sys.stderr = open(os.devnull, "w")
 
 def _show_fatal_error(msg: str):
+    print(f"\n[FATAL ERROR] {msg}", flush=True)
     try:
         log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
         (log_dir / "recon_crash.log").write_text(msg, encoding="utf-8")
@@ -40,6 +41,11 @@ def _show_fatal_error(msg: str):
         root.destroy()
     except Exception:
         pass
+    if sys.platform == "win32":
+        try:
+            input("\nPress Enter to exit...")
+        except Exception:
+            pass
     sys.exit(1)
 
 try:
@@ -83,7 +89,6 @@ except Exception:
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.withdraw()
         self.title("Bank Reconciliation Studio")
         self.configure(fg_color=BG)
 
@@ -104,7 +109,6 @@ class App(ctk.CTk):
 
         self._build_ui()
         self.update_idletasks()
-        self.deiconify()
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
         self._auto_scan_after_id = self.after(300, self._auto_scan_on_startup)
 
@@ -563,20 +567,5 @@ if __name__ == "__main__":
         app.mainloop()
     except Exception as e:
         import traceback
-        err_str = traceback.format_exc()
-        try:
-            log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
-            (log_dir / "recon_crash.log").write_text(err_str, encoding="utf-8")
-        except Exception:
-            pass
-        try:
-            import tkinter as tk
-            from tkinter import messagebox
-            root = tk.Tk()
-            root.withdraw()
-            messagebox.showerror("Recon Studio - Error", f"Startup Error:\n\n{err_str[:1200]}")
-            root.destroy()
-        except Exception:
-            pass
-        sys.exit(1)
+        _show_fatal_error(traceback.format_exc())
 

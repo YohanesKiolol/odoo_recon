@@ -20,6 +20,7 @@ if sys.stderr is None:
         sys.stderr = open(os.devnull, "w")
 
 def _show_fatal_error(msg: str):
+    print(f"\n[FATAL ERROR] {msg}", flush=True)
     try:
         log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
         (log_dir / "sales_crash.log").write_text(msg, encoding="utf-8")
@@ -37,6 +38,11 @@ def _show_fatal_error(msg: str):
         root.destroy()
     except Exception:
         pass
+    if sys.platform == "win32":
+        try:
+            input("\nPress Enter to exit...")
+        except Exception:
+            pass
     sys.exit(1)
 
 try:
