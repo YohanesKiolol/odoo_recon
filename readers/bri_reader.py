@@ -57,33 +57,34 @@ def _find_bri_zips(zip_dir: Path, zip_pattern: str) -> list[Path]:
     )
 
 
-def _extract_detail_pdf(zip_path: Path, pdf_pattern: str) -> bytes:
+def _extract_detail_pdf(zip_path: Path, pdf_pattern: str = "") -> bytes:
     """
-    Open ZIP (no password), find the PDF whose filename starts with pdf_pattern.
+    Open ZIP (no password), find the detail PDF by pattern or PDF table structure.
     Returns the raw PDF bytes.
     """
     with zipfile.ZipFile(zip_path, "r") as zf:
         all_names = zf.namelist()
-        # Match filename (basename only) starting with pdf_pattern, case-insensitive
-        detail_files = [
-            n for n in all_names
-            if Path(n).suffix.lower() == ".pdf"
-            and Path(n).name.lower().startswith(pdf_pattern.lower())
-        ]
+        detail_files = []
+        if pdf_pattern:
+            detail_files = [
+                n for n in all_names
+                if Path(n).suffix.lower() == ".pdf"
+                and Path(n).name.lower().startswith(pdf_pattern.lower())
+            ]
+        if not detail_files:
+            detail_files = [n for n in all_names if Path(n).suffix.lower() == ".pdf" and "detail" in Path(n).name.lower()]
+        if not detail_files:
+            detail_files = [n for n in all_names if Path(n).suffix.lower() == ".pdf"]
 
         if not detail_files:
             raise FileNotFoundError(
-                f"No PDF starting with '{pdf_pattern}' found inside {zip_path.name}.\n"
-                f"Contents: {all_names}\n"
-                f"Check BRI_PDF_PATTERN in your .env file."
+                f"No PDF found inside {zip_path.name}.\n"
+                f"Contents: {all_names}"
             )
 
-        if len(detail_files) > 1:
-            print(f"  [WARN] Multiple matching PDFs found: {detail_files}")
-            print(f"  Using: {detail_files[0]}")
-
-        print(f"  PDF found: {detail_files[0]}")
-        return zf.read(detail_files[0])
+        picked = detail_files[0]
+        print(f"  PDF found: {picked}")
+        return zf.read(picked)
 
 def _normalize_pdf_header(h: str) -> str:
     """

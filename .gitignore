@@ -16,8 +16,11 @@ build/
 dist/
 *.spec.bak
 
-# Sensitive config — add your own .env next to the .exe
+# Sensitive config — add your own .env.<company> next to the .exe
 .env
+.env.*
+!.env.example
+.last_company.json
 
 # Input/output data — personal bank files and reports
 input/

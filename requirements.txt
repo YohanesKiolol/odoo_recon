@@ -3,10 +3,10 @@ openpyxl==3.1.5
 pdfminer.six==20231228
 pdfplumber==0.11.4
 pyzipper==0.3.6
-playwright==1.45.1
-playwright==1.45.1
-greenlet>=3.0.3
 tkcalendar
 customtkinter
 darkdetect
 Pillow
+holidays
+cryptography
+

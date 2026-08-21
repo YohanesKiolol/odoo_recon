@@ -85,8 +85,8 @@ def _banner(text: str):
     print(f"{'─' * 60}")
 
 
-def scan_bank_date_range(banks=None, log_fn=None) -> tuple[str, str] | None:
-    """Scan bank files in parallel and return the (min_date, max_date) ISO range."""
+def scan_bank_dates_detailed(banks=None, log_fn=None) -> dict:
+    """Scan bank files in parallel and return detailed per-bank exact dates and overall range."""
     import re, zipfile
     from collections import Counter
     from concurrent.futures import ThreadPoolExecutor
@@ -202,8 +202,10 @@ def scan_bank_date_range(banks=None, log_fn=None) -> tuple[str, str] | None:
                 pass
 
     _log("  [ BANK FILES ]\n")
+    dates_by_bank = {}
     for b_key in sorted(bank_details.keys()):
         cnt = bank_details[b_key]
+        dates_by_bank[b_key] = sorted(list(cnt.keys()))
         _log(f"    {b_key.upper()}:\n")
         if not cnt:
             _log("      (No transactions found)\n")
@@ -212,10 +214,26 @@ def scan_bank_date_range(banks=None, log_fn=None) -> tuple[str, str] | None:
                 _log(f"      {d} : {c} trxs\n")
     _log(f"\n{'─' * 60}\n\n")
 
-    if all_dates:
-        min_d, max_d = min(all_dates), max(all_dates)
+    unique_dates = sorted(list(set(all_dates)))
+    min_d = unique_dates[0] if unique_dates else None
+    max_d = unique_dates[-1] if unique_dates else None
+
+    if min_d and max_d:
         _log(f"[DATE_RANGE]|{min_d}|{max_d}\n")
-        return (min_d, max_d)
+
+    return {
+        "min_date": min_d,
+        "max_date": max_d,
+        "dates_by_bank": dates_by_bank,
+        "all_dates": unique_dates
+    }
+
+
+def scan_bank_date_range(banks=None, log_fn=None) -> tuple[str, str] | None:
+    """Scan bank files in parallel and return the (min_date, max_date) ISO range."""
+    details = scan_bank_dates_detailed(banks=banks, log_fn=log_fn)
+    if details.get("min_date") and details.get("max_date"):
+        return (details["min_date"], details["max_date"])
     return None
 
 
@@ -360,6 +378,32 @@ def run_reconciliation(banks=None, process_all=False, open_file=False) -> Path:
             except Exception as e:
                 print(f"\n[!] ERROR ({key}): {e}\n")
                 raise
+
+        # Auto-sync parsed merchant & mutation data to Supabase in background
+        try:
+            from cloud_sync import is_cloud_configured, push_merchant_transactions, push_mutation_transactions
+            if is_cloud_configured():
+                all_m_txns = []
+                for acc_k, txns in bank_txns.items():
+                    for t in txns:
+                        t_copy = dict(t)
+                        if not t_copy.get("bank"):
+                            t_copy["bank"] = acc_k.split("_")[0].upper()
+                        all_m_txns.append(t_copy)
+                if all_m_txns:
+                    res_m = push_merchant_transactions(all_m_txns)
+                    if res_m.get("success") and res_m.get("count", 0) > 0:
+                        print(f"  [☁️] Synced {res_m.get('count')} merchant transactions to Supabase.")
+
+                if "mutations" in workers:
+                    m_list, u_list = workers["mutations"].result()
+                    all_muts = (m_list or []) + (u_list or [])
+                    if all_muts:
+                        res_mut = push_mutation_transactions(all_muts)
+                        if res_mut.get("success") and res_mut.get("count", 0) > 0:
+                            print(f"  [☁️] Synced {res_mut.get('count')} mutation records to Supabase.")
+        except Exception:
+            pass
 
     # ── Step 3: Reconcile per bank ─────────────────────────────────────────────
     _banner("Comparing transactions...")

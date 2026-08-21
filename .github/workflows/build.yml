@@ -29,10 +29,6 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
-      - name: Install Playwright Browsers
-        run: |
-          python -m playwright install chromium
-
       - name: Create empty folders
         run: |
           New-Item -ItemType Directory -Force -Path input
@@ -79,10 +75,6 @@ jobs:
           python3 -m pip install --upgrade pip
           pip3 install -r requirements.txt
           pip3 install pyinstaller
-
-      - name: Install Playwright Browsers
-        run: |
-          python3 -m playwright install chromium
 
       - name: Create empty folders
         run: |

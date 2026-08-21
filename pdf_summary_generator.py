@@ -807,11 +807,40 @@ def render_html_summary(data: dict) -> str:
     return html
 
 
+def _find_system_browser() -> str | None:
+    """Find installed Chrome or Edge executable on Windows, Mac, or Linux."""
+    import shutil
+    if sys.platform == "win32" or os.name == "nt":
+        candidates = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        ]
+    elif sys.platform == "darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ]
+    else:
+        candidates = ["google-chrome", "chromium-browser", "chromium", "microsoft-edge"]
+        
+    for c in candidates:
+        if os.path.exists(c):
+            return c
+        found = shutil.which(c)
+        if found:
+            return found
+    return None
+
+
 def generate_executive_summary_pdf(excel_path: Path | str | None = None, output_pdf_path: Path | str | None = None) -> Path:
     """
     Extracts data from the latest reconciliation Excel file, generates a clean HTML summary,
-    and converts it to a professional PDF using Playwright headless Chromium.
+    and converts it to a professional PDF using native system browser CLI print (no Playwright needed).
     """
+    import subprocess
     data = extract_reconciliation_summary(excel_path)
     html_content = render_html_summary(data)
 
@@ -822,90 +851,36 @@ def generate_executive_summary_pdf(excel_path: Path | str | None = None, output_
     else:
         output_pdf_path = Path(output_pdf_path)
 
-    # Convert HTML to PDF via Playwright
-    import os
-    import sys
-    browsers_path = str(Path.home() / ".playwright_browsers")
-    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
+    browser_exe = _find_system_browser()
+    if not browser_exe:
+        raise RuntimeError("No system browser (Chrome/Edge) found to render PDF.")
 
-    from playwright.sync_api import sync_playwright
-
-    with sync_playwright() as p:
-        browser = None
-        # 1. Try system-installed browsers (Edge, Chrome) or default Playwright Chromium
-        for channel in ["msedge", "chrome", None]:
+    tmp_html = output_pdf_path.with_suffix(".tmp.html")
+    tmp_html.write_text(html_content, encoding="utf-8")
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+        cmd = [
+            browser_exe,
+            "--headless",
+            "--disable-gpu",
+            f"--print-to-pdf={output_pdf_path}",
+            str(tmp_html.resolve().as_uri())
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, creationflags=flags)
+    finally:
+        if tmp_html.exists():
             try:
-                kwargs = {"headless": True}
-                if channel:
-                    kwargs["channel"] = channel
-                browser = p.chromium.launch(**kwargs)
-                break
+                tmp_html.unlink()
             except Exception:
-                continue
-
-        # 2. Fallback to common Windows / Mac executable paths if channel launch failed
-        if browser is None:
-            possible_paths = []
-            if sys.platform == "win32" or os.name == "nt":
-                possible_paths = [
-                    r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
-                    r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
-                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                ]
-            elif sys.platform == "darwin":
-                possible_paths = [
-                    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-                ]
-
-            for path_str in possible_paths:
-                if Path(path_str).exists():
-                    try:
-                        browser = p.chromium.launch(executable_path=path_str, headless=True)
-                        break
-                    except Exception:
-                        continue
-
-        if browser is None:
-            # Auto-install chromium if no browser found
-            try:
-                import subprocess
-                flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == 'nt' else 0
-                if getattr(sys, "frozen", False):
-                    from playwright._impl._driver import compute_driver_executable, get_driver_env
-                    node_exe, cli_js = compute_driver_executable()
-                    driver_env = get_driver_env()
-                    driver_env["PLAYWRIGHT_BROWSERS_PATH"] = browsers_path
-                    subprocess.run([node_exe, cli_js, "install", "chromium"], check=True, env=driver_env, creationflags=flags)
-                else:
-                    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"], check=True, creationflags=flags)
-                browser = p.chromium.launch(headless=True)
-            except Exception as ex:
-                raise RuntimeError(f"Could not find or launch a web browser to render PDF: {ex}")
-
-        page = browser.new_page()
-        page.set_content(html_content, wait_until="networkidle")
-
-        # Generate PDF with clean professional layout
-        page.pdf(
-            path=str(output_pdf_path),
-            format="A4",
-            print_background=True,
-            margin={
-                "top": "12mm",
-                "right": "12mm",
-                "bottom": "12mm",
-                "left": "12mm"
-            },
-            prefer_css_page_size=True,
-        )
-        browser.close()
+                pass
 
     print(f"✅ Executive Summary PDF successfully generated: {output_pdf_path.name}")
     return output_pdf_path
 
 
+
+
 if __name__ == "__main__":
     pdf_file = generate_executive_summary_pdf()
     print(f"Generated PDF: {pdf_file}")
+

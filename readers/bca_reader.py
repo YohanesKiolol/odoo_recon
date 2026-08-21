@@ -42,26 +42,22 @@ def _parse_bca_date(raw) -> date | None:
             continue
     return None
 
-def _find_bca_excels(excel_dir: Path, excel_pattern: str) -> list[Path]:
+def _find_bca_excels(excel_dir: Path, excel_pattern: str = "") -> list[Path]:
     """
-    Find ALL BCA Excel files in excel_dir.
-
-    Primary:  filename contains excel_pattern (fast, zero I/O).
-    Fallback: if no filename matches, probe every .xlsx by content —
-              decrypts with BCA password and checks for BCA-specific headers.
-              This handles renamed files (e.g. 'BCA 1.xlsx').
+    Find ALL BCA Excel files in excel_dir using template structure detection.
     """
-    # Primary: filename-based
-    candidates = sorted(
-        p for p in excel_dir.iterdir()
-        if p.suffix.lower() in (".xlsx", ".xls")
-        and excel_pattern.lower() in p.name.lower()
-        and not p.name.startswith("~$")
-    )
-    if candidates:
-        return candidates
+    candidates = []
+    if excel_pattern:
+        candidates = sorted(
+            p for p in excel_dir.iterdir()
+            if p.suffix.lower() in (".xlsx", ".xls")
+            and excel_pattern.lower() in p.name.lower()
+            and not p.name.startswith("~$")
+        )
+        if candidates:
+            return candidates
 
-    # Fallback: content-based probe for renamed files
+    # Template/Content-based discovery: probe every .xlsx by content
     try:
         from readers.file_detector import _probe_and_alias_bca_xlsx
         from config import BCA_EXCEL_PASSWORD
@@ -70,9 +66,7 @@ def _find_bca_excels(excel_dir: Path, excel_pattern: str) -> list[Path]:
     else:
         content_matches = []
         for p in sorted(excel_dir.iterdir()):
-            if p.suffix.lower() not in (".xlsx", ".xls"):
-                continue
-            if p.name.startswith("~$"):
+            if p.suffix.lower() not in (".xlsx", ".xls") or p.name.startswith("~$"):
                 continue
             try:
                 is_bca, _ = _probe_and_alias_bca_xlsx(p, BCA_EXCEL_PASSWORD, {})
@@ -83,11 +77,15 @@ def _find_bca_excels(excel_dir: Path, excel_pattern: str) -> list[Path]:
         if content_matches:
             return content_matches
 
+    # If xlsx files exist in bca directory, return them directly
+    plain_excels = sorted(p for p in excel_dir.iterdir() if p.suffix.lower() in (".xlsx", ".xls") and not p.name.startswith("~$"))
+    if plain_excels:
+        return plain_excels
+
     all_xlsx = [p.name for p in excel_dir.glob("*.xlsx")] + [p.name for p in excel_dir.glob("*.xls")]
     raise FileNotFoundError(
-        f"No BCA Excel containing '{excel_pattern}' found in: {excel_dir}\n"
-        f"Available Excel files: {all_xlsx}\n"
-        f"Check BCA_EXCEL_PATTERN in your .env file."
+        f"No BCA Excel files found in: {excel_dir}\n"
+        f"Available files: {all_xlsx}"
     )
 
 
@@ -104,20 +102,23 @@ def _read_one_bca(
     """
     print(f"  BCA file: {excel_path.name}")
     print(f"  Decrypting {excel_path.name}...")
-    decrypted = io.BytesIO()
     try:
+        decrypted = io.BytesIO()
         with open(excel_path, "rb") as f:
             office_file = msoffcrypto.OfficeFile(f)
             office_file.load_key(password=password)
             office_file.decrypt(decrypted)
-    except Exception as e:
-        raise RuntimeError(
-            f"Cannot decrypt BCA Excel '{excel_path.name}': {e}\n"
-            f"Check BCA_EXCEL_PASSWORD in your .env file."
-        )
+        decrypted.seek(0)
+        wb = openpyxl.load_workbook(decrypted, data_only=True)
+    except Exception:
+        try:
+            wb = openpyxl.load_workbook(excel_path, data_only=True)
+        except Exception as e:
+            raise RuntimeError(
+                f"Cannot decrypt BCA Excel '{excel_path.name}': {e}\n"
+                f"Check BCA_EXCEL_PASSWORD in your .env file."
+            )
 
-    decrypted.seek(0)
-    wb = openpyxl.load_workbook(decrypted, data_only=True)
     try:
         ws = wb.active
         assert ws is not None
@@ -171,10 +172,46 @@ def _read_one_bca(
         except ValueError:
             pass
 
+        mid_idx: int | None = None
+
+        try:
+            mid_idx = _find_col("Merchant ID")
+        except ValueError:
+            pass
+
+        store_name = ""
+        try:
+            import config
+            bank_accounts = getattr(config, "BANK_ACCOUNTS", {})
+            bca_accs = bank_accounts.get("bca", {})
+
+            # 1. Match MID from rows against configured account MIDs
+            if mid_idx is not None:
+                for row_sample in ws.iter_rows(min_row=6, max_row=12, values_only=True):
+                    if mid_idx < len(row_sample) and row_sample[mid_idx]:
+                        raw_mid = str(row_sample[mid_idx]).strip().lstrip("'")
+                        for alias_k, acc_info in bca_accs.items():
+                            if (acc_info.get("mid") or "").strip() == raw_mid:
+                                store_name = acc_info.get("store") or alias_k.capitalize()
+                                break
+                        if store_name:
+                            break
+
+            # 2. Check folder alias
+            if not store_name and excel_path.parent.name.lower() in bca_accs:
+                store_name = bca_accs[excel_path.parent.name.lower()].get("store", "")
+
+            # 3. Fallback to main store
+            if not store_name:
+                store_name = bca_accs.get("main", {}).get("store") or "Sanur"
+        except Exception:
+            store_name = "Sanur"
+
         txns = []
         skipped_empty = 0
 
         for row_num, row in enumerate(ws.iter_rows(min_row=6, values_only=True), start=6):
+
             if not any(c is not None for c in row):
                 continue
 
@@ -292,7 +329,10 @@ def _read_one_bca(
                 "is_refund":   is_refund,
                 "filename":    excel_path.name,
                 "source":      "Bank (BCA)",
+                "bank":        "BCA",
+                "store":       store_name,
             })
+
 
         print(f"    → {len(txns)} transactions ({skipped_empty} empty skipped)")
         return txns

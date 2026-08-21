@@ -33,6 +33,7 @@ class DetectionResult:
     target_dir: Path  # final destination directory
     wrap_as_zip: bool = field(default=False)  # True = re-zip before copy
     zip_pdf_entry_name: str = field(default="")  # for BRI PDF re-wrap
+    is_valid: bool = field(default=True)
 
 
 # --------------------------------------------------------------------------- #
@@ -311,51 +312,68 @@ def _alias_from_mandiri_edc_lines(lines: list[str], accounts: dict) -> str:
 
 def _alias_bri_zip(path: Path, accounts: dict, pdf_pattern: str = "detail") -> tuple[str, list[str]]:
     """
-    Read MID from BRI PDF table.  Returns (alias, all_mids_found).
-    Logs a warning if multiple distinct MIDs found (#4).
+    Read MID and Account from BRI ZIP file and member PDFs.
+    Returns (alias, all_mids_found).
     """
-    try:
-        with zipfile.ZipFile(path, "r") as zf:
-            pdf_names = [
-                n for n in zf.namelist()
-                if Path(n).suffix.lower() == ".pdf" and
-                Path(n).name.lower().startswith(pdf_pattern.lower())
-            ]
-            if not pdf_names:
-                return _best_alias_from_text(accounts, [], key="mid"), []
-            pdf_bytes = zf.read(pdf_names[0])
-        return _alias_from_bri_pdf_bytes(pdf_bytes, accounts)
-    except Exception:
-        return _best_alias_from_text(accounts, [], key="mid"), []
-
-
-def _alias_from_bri_pdf_bytes(pdf_bytes: bytes, accounts: dict) -> tuple[str, list[str]]:
-    """Extract MID(s) from BRI PDF table. Returns (alias, all_mids)."""
-    import pdfplumber
     mids_found: list[str] = []
     try:
-        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-            for page in pdf.pages[:3]:
-                tables = page.extract_tables()
-                for table in tables:
-                    if not table or len(table) < 2:
-                        continue
-                    headers = [_normalize_pdf_header(h or "") for h in table[0]]
-                    mid_idx = next(
-                        (i for i, h in enumerate(headers) if h.upper() == "MID"), None
-                    )
-                    if mid_idx is None:
-                        continue
-                    for row in table[1:]:
-                        if row and mid_idx < len(row) and row[mid_idx]:
-                            mid_val = str(row[mid_idx]).strip().lstrip("'")
-                            if mid_val and mid_val not in mids_found:
-                                mids_found.append(mid_val)
+        import pdfplumber
+        with zipfile.ZipFile(path, "r") as zf:
+            namelist = zf.namelist()
+
+            # 1. Match member filenames against configured MIDs and Account numbers
+            for name in namelist:
+                for alias, acc_info in accounts.items():
+                    mid = (acc_info.get("mid") or "").strip()
+                    acc = (acc_info.get("acc") or "").strip()
+                    mid_s = mid.lstrip("0")
+                    acc_s = acc.lstrip("0")
+                    if (mid and mid in name) or (mid_s and len(mid_s) >= 5 and mid_s in name):
+                        mids_found.append(mid)
+                        return alias, mids_found
+                    if (acc and acc in name) or (acc_s and len(acc_s) >= 5 and acc_s in name):
+                        return alias, mids_found
+
+            # 2. Inspect PDF text and tables
+            for name in namelist:
+                if name.lower().endswith(".pdf"):
+                    try:
+                        pdf_bytes = zf.read(name)
+                        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+                            for page in pdf.pages[:3]:
+                                txt = page.extract_text() or ""
+                                for alias, acc_info in accounts.items():
+                                    mid = (acc_info.get("mid") or "").strip()
+                                    acc = (acc_info.get("acc") or "").strip()
+                                    mid_s = mid.lstrip("0")
+                                    acc_s = acc.lstrip("0")
+                                    if (mid and mid in txt) or (mid_s and len(mid_s) >= 5 and mid_s in txt):
+                                        mids_found.append(mid)
+                                        return alias, mids_found
+                                    if (acc and acc in txt) or (acc_s and len(acc_s) >= 5 and acc_s in txt):
+                                        return alias, mids_found
+
+                                tables = page.extract_tables()
+                                for table in tables:
+                                    if not table or len(table) < 2: continue
+                                    headers = [_normalize_pdf_header(h or "") for h in table[0]]
+                                    mid_idx = next((i for i, h in enumerate(headers) if h.upper() == "MID"), None)
+                                    if mid_idx is not None:
+                                        for row in table[1:]:
+                                            if row and mid_idx < len(row) and row[mid_idx]:
+                                                m_val = str(row[mid_idx]).strip().lstrip("'")
+                                                if m_val:
+                                                    mids_found.append(m_val)
+                                                    return _alias_from_mid(m_val, accounts), mids_found
+                    except Exception:
+                        pass
     except Exception:
         pass
+
     alias = _alias_from_mid(mids_found[0], accounts) if mids_found else \
             _best_alias_from_text(accounts, [], key="mid")
     return alias, mids_found
+
 
 
 def _alias_csv(path: Path, accounts: dict, key: str = "acc") -> str:

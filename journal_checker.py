@@ -53,6 +53,49 @@ def extract_journal_date_range(excel_path: Path | str) -> tuple[str, str] | None
     return None
 
 
+def get_distinct_dates_from_recap(excel_path: Path | str) -> list[str]:
+    """Extract sorted distinct ISO date strings (e.g. ['2026-07-06', '2026-07-07']) from Daily Summary."""
+    path = Path(excel_path)
+    if not path.exists():
+        return []
+    try:
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        if "Daily Summary" not in wb.sheetnames:
+            wb.close()
+            return []
+        ws = wb["Daily Summary"]
+        header_row = next(ws.iter_rows(min_row=3, max_row=3, values_only=True))
+        col_map = {str(cell).strip().lower(): idx for idx, cell in enumerate(header_row) if cell}
+        c_date = col_map.get("date", 1)
+        c_pdate = col_map.get("payment date", 2)
+
+        dates = []
+        for row in ws.iter_rows(min_row=4, values_only=True):
+            if c_date < len(row) and row[c_date] and row[c_date] != "-":
+                dates.append(row[c_date])
+            if c_pdate < len(row) and row[c_pdate] and row[c_pdate] != "-":
+                dates.append(row[c_pdate])
+        wb.close()
+
+        parsed_dates = set()
+        for d in dates:
+            if isinstance(d, datetime):
+                parsed_dates.add(d.strftime("%Y-%m-%d"))
+                continue
+            d_str = str(d).strip().split(" ")[0]
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d %b %y"):
+                try:
+                    dt = datetime.strptime(d_str, fmt)
+                    parsed_dates.add(dt.strftime("%Y-%m-%d"))
+                    break
+                except Exception:
+                    pass
+
+        return sorted(list(parsed_dates))
+    except Exception:
+        return []
+
+
 def check_journals(excel_path: Path | str, skip_download: bool = False, get_dates: bool = False, debug: bool = False):
     path = Path(excel_path)
     if not path.exists():
@@ -345,6 +388,9 @@ def check_journals(excel_path: Path | str, skip_download: bool = False, get_date
         return True
     finally:
         wb.close()
+
+
+check_journal_entries = check_journals
 
 
 if __name__ == "__main__":

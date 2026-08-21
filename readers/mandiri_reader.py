@@ -177,19 +177,16 @@ def _read_csv_from_bytes(
     return txns
 
 
-def _find_mandiri_zips(zip_dir: Path, zip_pattern: str, password: str = "") -> list[Path]:
+def _find_mandiri_zips(zip_dir: Path, zip_pattern: str = "", password: str = "") -> list[Path]:
     """
-    Find ALL Mandiri ZIP files in zip_dir.
-
-    Primary:  filename matching zip_pattern (fast, zero I/O).
-    Fallback: if no filename matches, return all .zip files in zip_dir —
-              probing content via AES password if available. Handles renamed files.
+    Find ALL Mandiri ZIP files in zip_dir using template structure detection.
     """
-    candidates = sorted(p for p in zip_dir.glob(zip_pattern) if p.is_file() and not p.name.startswith("."))
-    if candidates:
-        return candidates
+    if zip_pattern:
+        candidates = sorted(p for p in zip_dir.glob(zip_pattern) if p.is_file() and not p.name.startswith("."))
+        if candidates:
+            return candidates
 
-    # Fallback: check all .zip files in zip_dir
+    # Template/Content-based: check all .zip files in zip_dir
     all_zips = sorted(
         p for p in zip_dir.iterdir()
         if p.is_file() and p.suffix.lower() == ".zip" and not p.name.startswith(".")
@@ -212,9 +209,9 @@ def _find_mandiri_zips(zip_dir: Path, zip_pattern: str, password: str = "") -> l
 def read_mandiri(
     zip_dir: Path,
     password: str,
-    amount_col: str,
-    number_col: str = "",
-    zip_pattern: str = "MSR_*.zip",
+    amount_col: str = "AMOUNT",
+    number_col: str = "AUTHCODE",
+    zip_pattern: str = "",
     filter_dates: set | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """

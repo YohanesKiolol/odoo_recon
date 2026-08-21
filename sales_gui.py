@@ -125,7 +125,7 @@ class SalesPortalApp(ctk.CTk):
         self._filtered_items: list[dict] = []
         self._current_type_filter = "ALL"
         self._current_bank_filter = "ALL"
-        self._current_status_filter = "pending_sales"
+        self._current_status_filter = "Pending"
         self._search_query = ""
 
         self._set_app_icon()
@@ -401,10 +401,10 @@ class SalesPortalApp(ctk.CTk):
 
         # Status Tabs
         self._status_btns = {}
-        for key, label in [("pending_sales", "Action Needed"), ("resolved_by_sales", "Resolved"), ("ALL", "All")]:
+        for key, label in [("Pending", "Action Needed"), ("Resolve", "Resolved"), ("ALL", "All")]:
             is_st_sel = (key == self._current_status_filter)
             btn = ctk.CTkButton(
-                f_right, text=label, height=36, width=115 if key == "pending_sales" else (90 if key == "resolved_by_sales" else 60),
+                f_right, text=label, height=36, width=115 if key == "Pending" else (90 if key == "Resolve" else 60),
                 fg_color=ACCENT if is_st_sel else WHITE,
                 text_color=WHITE if is_st_sel else TEXT,
                 border_color=ACCENT if is_st_sel else BORDER_DARK,
@@ -504,7 +504,8 @@ class SalesPortalApp(ctk.CTk):
             if self._current_type_filter != "ALL" and dtype != self._current_type_filter:
                 continue
 
-            st = item.get("status", "pending_sales")
+            st_raw = str(item.get("status") or "Pending").strip()
+            st = "Pending" if "pending" in st_raw.lower() else ("Resolve" if "resolve" in st_raw.lower() else ("Ignored" if "ignore" in st_raw.lower() else st_raw))
             if self._current_status_filter != "ALL" and st != self._current_status_filter:
                 continue
 

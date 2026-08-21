@@ -11,13 +11,13 @@ from typing import Any
 try:
     from config import ODOO_URL, ODOO_DB, ODOO_API_KEY, PREDEFINED_ACCOUNTS
 except Exception:
-    ODOO_URL = os.environ.get("ODOO_URL", "https://eyerizz.raytech.id")
-    ODOO_DB = os.environ.get("ODOO_DB", "production")
+    ODOO_URL = os.environ.get("ODOO_URL", "")
+    ODOO_DB = os.environ.get("ODOO_DB", "")
     ODOO_API_KEY = os.environ.get("ODOO_API_KEY", "")
     PREDEFINED_ACCOUNTS = {}
 
-DEFAULT_ODOO_URL = "https://eyerizz.raytech.id"
-DEFAULT_ODOO_DB = "production"
+DEFAULT_ODOO_URL = ""
+DEFAULT_ODOO_DB = ""
 
 _cached_auth: dict[str, Any] = {
     "url": None,
@@ -29,32 +29,56 @@ _cached_auth: dict[str, Any] = {
 
 def _get_base_url() -> str:
     """Extract scheme + netloc base URL from ODOO_URL."""
-    raw = ODOO_URL or DEFAULT_ODOO_URL
+    raw = (ODOO_URL or DEFAULT_ODOO_URL or "").strip()
+    if not raw:
+        return ""
     parsed = urllib.parse.urlparse(raw)
     if parsed.scheme and parsed.netloc:
         return f"{parsed.scheme}://{parsed.netloc}"
     return raw.rstrip("/")
 
 
+_active_credentials: dict[str, str] = {
+    "username": "",
+    "password": ""
+}
+
+
+def set_active_credentials(username: str, password: str) -> None:
+    """Set active credentials selected in GUI and reset cached session."""
+    global _active_credentials, _cached_auth
+    u = str(username or "").strip()
+    p = str(password or "").strip()
+    if _active_credentials.get("username") != u or _active_credentials.get("password") != p:
+        _active_credentials["username"] = u
+        _active_credentials["password"] = p
+        _cached_auth = {
+            "url": None,
+            "db": None,
+            "uid": None,
+            "pwd": None
+        }
+
+
 def _get_credentials() -> tuple[str, str, str, str]:
     """Retrieve url, db, username, password/api_key for Odoo RPC authentication."""
     url = _get_base_url()
-    db = ODOO_DB or DEFAULT_ODOO_DB
+    db = (ODOO_DB or DEFAULT_ODOO_DB or "").strip()
 
-    username = ""
-    password = ""
+    username = _active_credentials.get("username", "")
+    password = _active_credentials.get("password", "")
 
-    if PREDEFINED_ACCOUNTS:
+    if not username and PREDEFINED_ACCOUNTS:
         first_acc = next(iter(PREDEFINED_ACCOUNTS.values()))
         username = first_acc.get("username", "")
-        password = first_acc.get("password", "")
+        password = first_acc.get("api_key") or first_acc.get("password", "")
 
     if not username:
-        username = os.environ.get("ODOO_USER", "fransisca")
+        username = os.environ.get("ODOO_USER", "")
     if not password:
-        password = os.environ.get("ODOO_PASSWORD", "250201")
+        password = os.environ.get("ODOO_API_KEY", os.environ.get("ODOO_PASSWORD", ""))
 
-    if ODOO_API_KEY:
+    if not _active_credentials.get("password") and ODOO_API_KEY:
         password = ODOO_API_KEY.strip()
 
     return url, db, username, password
@@ -103,7 +127,23 @@ def _execute_kw(model: str, method: str, args: list, kwargs: dict | None = None)
     return _cached_models_proxy.execute_kw(db, uid, password, model, method, args, kwargs or {})
 
 
+def get_odoo_user_profile() -> dict:
+
+    """Retrieve full name, login, email of the authenticated user from Odoo server."""
+    try:
+        uid, err = authenticate()
+        if not uid:
+            return {}
+        info = _execute_kw('res.users', 'read', [[uid]], {'fields': ['name', 'login', 'email']})
+        if info and isinstance(info, list) and len(info) > 0:
+            return info[0]
+    except Exception:
+        pass
+    return {}
+
+
 def _normalize_date_to_iso(val: Any) -> str:
+
     """Safely convert any date string, datetime, or date object to ISO 'YYYY-MM-DD'."""
     if not val:
         return ""
@@ -134,14 +174,14 @@ def _normalize_date_to_iso(val: Any) -> str:
 # =============================================================================
 # 1. 🏦 Bank Only — Possible Candidate Invoices (Draft or Unpaid on that date)
 # =============================================================================
-def inspect_bank_only(amount: float, date_str: str) -> dict:
+def inspect_bank_only(amount: float, date_str: str, bank_name: str = "", journal_name: str = "") -> dict:
     """
     Diagnose '🏦 Bank Only' discrepancy.
-    Rule: Search invoices on the exact date and amount.
-    Filter criteria: Only return possible candidates:
-      - 🟡 Invoices still in Draft (state == 'draft')
-      - 🟢 Invoices posted but unpaid (state == 'posted' and payment_state == 'not_paid')
-    Already-paid / linked invoices are filtered out.
+    Rule:
+      1. Search invoices on the exact date and amount (Draft or Unpaid).
+      2. Search account.payment on date (+/-1 day) for exact amount to detect:
+         - 🔄 Cross-Journal Misclassification (e.g. recorded under Mandiri/Cash instead of BCA).
+         - 💳 Existing Odoo payments in the same journal.
     """
     try:
         clean_amt = float(amount)
@@ -153,70 +193,147 @@ def inspect_bank_only(amount: float, date_str: str) -> dict:
         return {
             "success": False,
             "error": "Invalid date or amount provided.",
-            "invoices": []
+            "invoices": [],
+            "cross_journal_payments": [],
+            "same_journal_payments": []
         }
 
-    domain = [
+    # 1. Check account.move for candidate draft/unpaid invoices
+    inv_domain = [
         ('move_type', '=', 'out_invoice'),
         ('invoice_date', '=', t_date),
         ('amount_total', '>=', round(clean_amt - 0.01, 2)),
         ('amount_total', '<=', round(clean_amt + 0.01, 2)),
     ]
 
+    candidates = []
     try:
         invoices = _execute_kw(
             'account.move',
             'search_read',
-            [domain],
+            [inv_domain],
             {
                 'fields': ['name', 'invoice_date', 'amount_total', 'payment_state', 'state', 'partner_id'],
                 'limit': 25
             }
         )
-    except Exception as e:
-        return {
-            "success": False,
-            "error": f"Odoo Query Error: {str(e)}",
-            "invoices": []
-        }
+        for inv in (invoices or []):
+            state = inv.get('state', '')
+            pay_state = inv.get('payment_state', '')
+            p_name = inv['partner_id'][1] if inv.get('partner_id') else "Walk-in Customer"
 
-    candidates = []
-    for inv in invoices:
-        state = inv.get('state', '')
-        pay_state = inv.get('payment_state', '')
-        p_name = inv['partner_id'][1] if inv.get('partner_id') else "Walk-in Customer"
+            if state == 'draft':
+                candidates.append({
+                    "id": inv['id'],
+                    "name": inv['name'],
+                    "customer": p_name,
+                    "partner": p_name,
+                    "amount": inv['amount_total'],
+                    "date": inv['invoice_date'],
+                    "status_code": "DRAFT_INVOICE",
+                    "badge": "🟡 Draft Invoice",
+                    "state": "Draft",
+                    "detail": f"Invoice {inv['name']} is in Draft state (Needs to be posted in Odoo)"
+                })
+            elif state == 'posted' and pay_state == 'not_paid':
+                candidates.append({
+                    "id": inv['id'],
+                    "name": inv['name'],
+                    "customer": p_name,
+                    "partner": p_name,
+                    "amount": inv['amount_total'],
+                    "date": inv['invoice_date'],
+                    "status_code": "AVAILABLE_OPEN",
+                    "badge": "🟢 Unpaid Open Invoice",
+                    "state": "Unpaid",
+                    "detail": f"Invoice {inv['name']} is posted & unpaid (Ready to match with bank payment)"
+                })
+    except Exception:
+        invoices = []
 
-        if state == 'draft':
-            candidates.append({
-                "id": inv['id'],
-                "name": inv['name'],
-                "customer": p_name,
-                "partner": p_name,
-                "amount": inv['amount_total'],
-                "date": inv['invoice_date'],
-                "status_code": "DRAFT_INVOICE",
-                "badge": "🟡 Draft Invoice",
-                "state": "Draft",
-                "detail": f"Invoice {inv['name']} is in Draft state (Needs to be posted in Odoo)"
-            })
-        elif state == 'posted' and pay_state == 'not_paid':
-            candidates.append({
-                "id": inv['id'],
-                "name": inv['name'],
-                "customer": p_name,
-                "partner": p_name,
-                "amount": inv['amount_total'],
-                "date": inv['invoice_date'],
-                "status_code": "AVAILABLE_OPEN",
-                "badge": "🟢 Unpaid Open Invoice",
-                "state": "Unpaid",
-                "detail": f"Invoice {inv['name']} is posted & unpaid (Ready to match with bank payment)"
-            })
+    # 2. Check account.payment across ALL journals (date +/- 1 day)
+    from datetime import datetime as _dt, timedelta as _tmd
+    try:
+        dt_obj = _dt.strptime(t_date, "%Y-%m-%d").date()
+        d_min = (dt_obj - _tmd(days=1)).strftime("%Y-%m-%d")
+        d_max = (dt_obj + _tmd(days=1)).strftime("%Y-%m-%d")
+    except Exception:
+        d_min = t_date
+        d_max = t_date
 
-    if not candidates:
-        summary = f"No draft or unpaid invoices found in Odoo on {t_date} matching Rp {clean_amt:,.2f}."
-    else:
-        summary = f"Found {len(candidates)} candidate invoice(s) on {t_date} matching Rp {clean_amt:,.2f}."
+    pay_domain = [
+        ('date', '>=', d_min),
+        ('date', '<=', d_max),
+        ('amount', '>=', round(clean_amt - 0.01, 2)),
+        ('amount', '<=', round(clean_amt + 0.01, 2)),
+    ]
+
+    cross_journal_payments = []
+    same_journal_payments = []
+
+    try:
+        payments = _execute_kw(
+            'account.payment',
+            'search_read',
+            [pay_domain],
+            {
+                'fields': ['name', 'date', 'amount', 'journal_id', 'state', 'partner_id', 'ref'],
+                'limit': 25
+            }
+        )
+        from config import get_journal_store
+        expected_store = get_journal_store(journal_name or bank_name)
+
+        for p in (payments or []):
+            j_info = p.get('journal_id') or [0, "Unknown Journal"]
+            actual_jrn_name = j_info[1] if isinstance(j_info, (list, tuple)) and len(j_info) > 1 else str(j_info)
+            act_jrn_upper = actual_jrn_name.upper()
+
+            is_same = False
+            if norm_expected_jrn and norm_expected_jrn in act_jrn_upper:
+                is_same = True
+            elif norm_expected_bank and norm_expected_bank in act_jrn_upper:
+                is_same = True
+
+            actual_store = get_journal_store(actual_jrn_name)
+
+            # Store Location Isolation: Cross-journal must belong to the same physical store
+            if expected_store and actual_store and expected_store != actual_store:
+                continue
+
+            p_partner = p['partner_id'][1] if p.get('partner_id') else "Walk-in Customer"
+            p_dict = {
+                "id": p['id'],
+                "name": p.get('name', '-'),
+                "date": p.get('date', '-'),
+                "amount": float(p.get('amount', 0.0)),
+                "actual_journal": actual_jrn_name,
+                "expected_journal": journal_name or bank_name,
+                "store": actual_store or expected_store,
+                "state": p.get('state', 'posted'),
+                "customer": p_partner,
+                "ref": p.get('ref') or "-",
+                "is_same_journal": is_same
+            }
+
+            if not is_same:
+                cross_journal_payments.append(p_dict)
+            else:
+                same_journal_payments.append(p_dict)
+    except Exception:
+        pass
+
+    summary_parts = []
+    if cross_journal_payments:
+        j_names = ", ".join(sorted(set(p['actual_journal'] for p in cross_journal_payments)))
+        summary_parts.append(f"🚨 Possible Wrong Journal: Found {len(cross_journal_payments)} payment(s) in Odoo recorded under '{j_names}' matching Rp {clean_amt:,.2f}.")
+    if candidates:
+        summary_parts.append(f"Found {len(candidates)} candidate draft/unpaid invoice(s) in Odoo matching Rp {clean_amt:,.2f}.")
+    if not summary_parts:
+        if same_journal_payments:
+            summary_parts.append(f"Found existing payment in '{same_journal_payments[0]['actual_journal']}' ({same_journal_payments[0]['name']}), but not reconciled.")
+        else:
+            summary_parts.append(f"No draft/unpaid invoices or cross-journal payments found in Odoo on {t_date} matching Rp {clean_amt:,.2f}.")
 
     return {
         "success": True,
@@ -225,7 +342,9 @@ def inspect_bank_only(amount: float, date_str: str) -> dict:
         "amount": clean_amt,
         "found_count": len(candidates),
         "invoices": candidates,
-        "summary": summary
+        "cross_journal_payments": cross_journal_payments,
+        "same_journal_payments": same_journal_payments,
+        "summary": " ".join(summary_parts)
     }
 
 
@@ -512,9 +631,11 @@ def inspect_discrepancy(item: dict) -> dict:
     amt = float(item.get("amount", 0.0))
     t_date = str(item.get("transaction_date", item.get("date", ""))).strip()
     o_num = str(item.get("odoo_number", item.get("number_odo", item.get("invoice_no", "")))).strip()
+    b_name = str(item.get("bank", item.get("bank_name", ""))).strip()
+    j_name = str(item.get("journal", "")).strip()
 
     if dtype == "bank_only":
-        return inspect_bank_only(amount=amt, date_str=t_date)
+        return inspect_bank_only(amount=amt, date_str=t_date, bank_name=b_name, journal_name=j_name)
     elif dtype == "odoo_only":
         return inspect_odoo_only(odoo_number=o_num, amount=amt)
     elif dtype == "unreconciled_odoo":

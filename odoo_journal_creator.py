@@ -307,16 +307,21 @@ def close_excel_window_for_file(fname: str):
     import sys, os, time, subprocess
     if sys.platform == "darwin":
         try:
-            subprocess.run(
-                ["osascript", "-e",
-                 f'tell application "Microsoft Excel"\n'
-                 f'  set wb_list to every workbook whose name contains "{fname}"\n'
-                 f'  repeat with wb_item in wb_list\n'
-                 f'    close wb_item saving no\n'
-                 f'  end repeat\n'
-                 f'end tell'],
-                capture_output=True, timeout=5
+            check_running = subprocess.run(
+                ["osascript", "-e", 'application "Microsoft Excel" is running'],
+                capture_output=True, text=True, timeout=2
             )
+            if "true" in check_running.stdout.lower():
+                subprocess.run(
+                    ["osascript", "-e",
+                     f'tell application "Microsoft Excel"\n'
+                     f'  set wb_list to every workbook whose name contains "{fname}"\n'
+                     f'  repeat with wb_item in wb_list\n'
+                     f'    close wb_item saving no\n'
+                     f'  end repeat\n'
+                     f'end tell'],
+                    capture_output=True, timeout=5
+                )
         except Exception:
             pass
     elif os.name == "nt" or sys.platform == "win32":
@@ -373,6 +378,129 @@ def safe_save_workbook(wb, file_path: Path) -> Path | None:
     except Exception as e:
         print(f"❌ Error saving workbook: {e}")
         return None
+
+
+def get_draft_journal_details(move_identifier, jrn_type: str = "EDC", date_val: str = None, group_val: str = None) -> dict | None:
+    """Fetch live draft account.move details and journal item lines from Odoo."""
+    import odoo_inspector
+    from config import ODOO_JOURNAL_EDC, ODOO_JOURNAL_AR
+    from datetime import datetime
+
+    ident_str = str(move_identifier or "").strip()
+    domain = [("state", "=", "draft"), ("move_type", "=", "entry")]
+
+    # Parse ISO date if provided
+    iso_date = ""
+    if date_val:
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d %b %y", "%d %B %Y"):
+            try:
+                iso_date = datetime.strptime(str(date_val).strip(), fmt).strftime("%Y-%m-%d")
+                break
+            except Exception:
+                pass
+
+    if ident_str and ident_str not in ["/", "-", "None", ""]:
+        if ident_str.isdigit():
+            domain.append(("id", "=", int(ident_str)))
+        else:
+            domain.extend(["|", ("name", "=", ident_str), ("ref", "=", ident_str)])
+    else:
+        target_jrn = ODOO_JOURNAL_EDC if jrn_type.upper() == "EDC" else ODOO_JOURNAL_AR
+        domain.append(("journal_id.name", "=", target_jrn))
+        if iso_date:
+            domain.append(("date", "=", iso_date))
+
+    try:
+        moves = odoo_inspector._execute_kw(
+            "account.move", "search_read",
+            [domain],
+            {"fields": ["id", "name", "ref", "date", "journal_id", "amount_total", "line_ids"], "limit": 1}
+        )
+        if not moves and group_val:
+            target_jrn = ODOO_JOURNAL_EDC if jrn_type.upper() == "EDC" else ODOO_JOURNAL_AR
+            domain2 = [("state", "=", "draft"), ("move_type", "=", "entry"), ("journal_id.name", "=", target_jrn)]
+            if iso_date:
+                domain2.append(("date", "=", iso_date))
+            moves = odoo_inspector._execute_kw(
+                "account.move", "search_read",
+                [domain2],
+                {"fields": ["id", "name", "ref", "date", "journal_id", "amount_total", "line_ids"], "limit": 1}
+            )
+
+        if not moves:
+            return None
+
+        m = moves[0]
+        lines = []
+        if m.get("line_ids"):
+            lines_data = odoo_inspector._execute_kw(
+                "account.move.line", "search_read",
+                [[("id", "in", m["line_ids"])]],
+                {"fields": ["account_id", "debit", "credit"]}
+            )
+            for l in (lines_data or []):
+                acc_name = l["account_id"][1] if l.get("account_id") else "Unknown Account"
+                lines.append({
+                    "account": acc_name,
+                    "debit": float(l.get("debit", 0.0)),
+                    "credit": float(l.get("credit", 0.0))
+                })
+
+        disp_name = m.get("ref") if m.get("ref") else (m.get("name") if m.get("name") and m.get("name") != "/" else f"Draft Move #{m['id']}")
+        return {
+            "id": m["id"],
+            "name": disp_name,
+            "ref": m.get("ref") or "-",
+            "date": m.get("date") or "-",
+            "journal": m["journal_id"][1] if m.get("journal_id") else "-",
+            "amount_total": float(m.get("amount_total", 0.0)),
+            "lines": lines
+        }
+    except Exception as e:
+        print(f"[WARN] Error fetching draft details: {e}")
+        return None
+
+
+def post_draft_settlement_journals(move_numbers: list) -> dict:
+    """Find and post draft account.move entries in Odoo matching given IDs, move numbers, or refs."""
+    import odoo_inspector
+    if not move_numbers:
+        return {"success": True, "count": 0, "message": "No draft identifiers provided."}
+
+    try:
+        int_ids = [int(x) for x in move_numbers if str(x).isdigit()]
+        str_refs = [str(x).strip() for x in move_numbers if str(x).strip() and not str(x).isdigit() and str(x).strip() not in ["-", "None", "/", ""]]
+
+        moves = []
+        if int_ids:
+            moves += odoo_inspector._execute_kw(
+                "account.move", "search_read",
+                [[("id", "in", int_ids), ("state", "=", "draft")]],
+                {"fields": ["id", "name", "ref", "state"]}
+            ) or []
+        if str_refs:
+            moves += odoo_inspector._execute_kw(
+                "account.move", "search_read",
+                [["|", ("name", "in", str_refs), ("ref", "in", str_refs), ("state", "=", "draft")]],
+                {"fields": ["id", "name", "ref", "state"]}
+            ) or []
+
+        if not moves:
+            return {"success": True, "count": 0, "message": "No draft entries found in Odoo matching criteria."}
+
+        # Deduplicate
+        seen_ids = set()
+        unique_moves = []
+        for m in moves:
+            if m["id"] not in seen_ids:
+                seen_ids.add(m["id"])
+                unique_moves.append(m)
+
+        m_ids = [m["id"] for m in unique_moves]
+        odoo_inspector._execute_kw("account.move", "action_post", [m_ids])
+        return {"success": True, "count": len(m_ids), "posted_names": [m.get("ref") or m.get("name") or str(m["id"]) for m in unique_moves]}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 if __name__ == "__main__":

@@ -7,17 +7,8 @@ from pathlib import Path
 block_cipher = None
 ROOT = Path(SPECPATH)
 
-# Find Playwright driver directory to bundle node + cli.js
-import importlib
-_pw_spec = importlib.util.find_spec('playwright')
-_pw_driver = []
-if _pw_spec and _pw_spec.submodule_search_locations:
-    _pw_root = Path(list(_pw_spec.submodule_search_locations)[0])
-    _pw_driver_dir = _pw_root / 'driver'
-    if _pw_driver_dir.exists():
-        _pw_driver = [(str(_pw_driver_dir), str(Path('playwright') / 'driver'))]
-
 # Find CustomTkinter assets (themes, images)
+import importlib
 _ctk_spec = importlib.util.find_spec('customtkinter')
 _ctk_data = []
 if _ctk_spec and _ctk_spec.submodule_search_locations:
@@ -30,7 +21,7 @@ a = Analysis(
     pathex=[str(ROOT)],
     binaries=[],
     datas=[
-        # Bundle source modules (main + readers) so --worker mode can import them
+        # Bundle source modules (main + readers + ui) so --worker mode can import them
         (str(ROOT / 'main.py'),           '.'),
         (str(ROOT / 'config.py'),         '.'),
         (str(ROOT / 'reconciler.py'),     '.'),
@@ -42,26 +33,26 @@ a = Analysis(
         (str(ROOT / 'odoo_journal_creator.py'),'.'),
         (str(ROOT / 'pdf_summary_generator.py'),'.'),
         (str(ROOT / 'cloud_sync.py'),     '.'),
+        (str(ROOT / 'ui'),                'ui'),
         (str(ROOT / 'readers'),           'readers'),
         (str(ROOT / 'assets'),            'assets'),   # includes app_icon.ico + app_icon.png
-    ] + _pw_driver + _ctk_data,
+    ] + _ctk_data,
     hiddenimports=[
         'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
         'journal_checker', 'journal_generator', 'odoo_journal_creator',
         'pdf_summary_generator', 'cloud_sync',
         'readers.odoo_reader', 'readers.bca_reader',
         'readers.mandiri_reader', 'readers.bri_reader',
+        'ui', 'ui.theme', 'ui.widgets', 'ui.modals', 'ui.views', 'ui.controllers',
         'openpyxl', 'pdfplumber', 'pdfminer', 'pyzipper',
-        'msoffcrypto', 'playwright', 'playwright.sync_api',
-        'playwright._impl._driver', 'playwright._repo_version',
-        'tkcalendar', 'babel.numbers',
+        'msoffcrypto', 'tkcalendar', 'babel.numbers',
         'customtkinter', 'darkdetect',
         'PIL', 'PIL.Image', 'PIL._imaging',
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['playwright'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
