@@ -1089,15 +1089,27 @@ def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: st
                     "banks": info["banks"]
                 })
         else:
-            for d in active_days:
-                info = by_date[d]
-                daily_stats.append({
-                    "date": d,
-                    "gross": info["gross"],
-                    "count": info["count"],
-                    "avg": (info["gross"] / info["count"]) if info["count"] > 0 else 0.0,
-                    "banks": info["banks"]
-                })
+            timeline_days = expected_days if (date_from and date_to and expected_days) else active_days
+            for d in timeline_days:
+                if d in by_date:
+                    info = by_date[d]
+                    daily_stats.append({
+                        "date": d,
+                        "gross": info["gross"],
+                        "count": info["count"],
+                        "avg": (info["gross"] / info["count"]) if info["count"] > 0 else 0.0,
+                        "banks": info["banks"],
+                        "is_missing": False
+                    })
+                else:
+                    daily_stats.append({
+                        "date": d,
+                        "gross": 0.0,
+                        "count": 0,
+                        "avg": 0.0,
+                        "banks": {},
+                        "is_missing": True
+                    })
 
         peak_day = ("—", 0.0, 0)
         if daily_stats:

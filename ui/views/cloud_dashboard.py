@@ -922,8 +922,14 @@ class CloudDashboardView(ctk.CTkFrame):
             )
         elif len(points) == 1:
             px, py = points[0][0], points[0][1]
+            base_y = pad_t + plot_h
+            bar_w = 28
+            self.chart_canvas.create_rectangle(
+                px - bar_w / 2, py, px + bar_w / 2, base_y,
+                fill="#EEF2FF", outline="#6366F1", width=1.5, tags="area"
+            )
             self.chart_canvas.create_line(
-                pad_l, py, pad_l + plot_w, py, fill="#E0E7FF", width=1.5,
+                pad_l, py, pad_l + plot_w, py, fill="#E0E7FF", width=1.2,
                 dash=(4, 4), tags="line"
             )
 
