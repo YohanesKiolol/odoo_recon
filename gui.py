@@ -65,15 +65,17 @@ except Exception:
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
+        self.withdraw()
         self.title("Bank Reconciliation Studio")
         self.configure(fg_color=BG)
-        self.withdraw()
 
         # Window sizing & centering
         sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
         init_w = min(1320, max(1050, sw - 60))
         init_h = min(800, max(640, sh - 75))
-        self.geometry(f"{init_w}x{init_h}+{(sw - init_w)//2}+{max(10, (sh - init_h)//2 - 15)}")
+        init_x = max(0, (sw - init_w) // 2)
+        init_y = max(10, (sh - init_h) // 2 - 15)
+        self.geometry(f"{init_w}x{init_h}+{init_x}+{init_y}")
         self.minsize(1020, 600)
         self.resizable(True, True)
 
@@ -84,10 +86,9 @@ class App(ctk.CTk):
 
         self._build_ui()
         self.update_idletasks()
-        self._center()
         self.deiconify()
         self.protocol("WM_DELETE_WINDOW", self._on_app_close)
-        self._auto_scan_after_id = self.after(500, self._auto_scan_on_startup)
+        self._auto_scan_after_id = self.after(300, self._auto_scan_on_startup)
 
     def _set_app_icon(self):
         try:

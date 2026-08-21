@@ -69,8 +69,8 @@ class SidebarView(ctk.CTkFrame):
 
         ctk.CTkFrame(self, height=1, fg_color=BORDER).pack(fill="x")
 
-        # Scrollable Control Area
-        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        # Scrollable Control Area (fixed initial width prevents layout shift)
+        scroll = ctk.CTkScrollableFrame(self, width=268, fg_color="transparent")
         scroll.pack(fill="both", expand=True, padx=4, pady=4)
 
         # ── 1. Workspace / Company Section ──
@@ -345,7 +345,7 @@ class SidebarView(ctk.CTkFrame):
 
         def _refresh_bank_cards():
             for bname, refs in self._card_refs.items():
-                outer, strip, name_lbl, sub_lbl, check_lbl = refs
+                outer, name_lbl, sub_lbl, check_lbl = refs
                 sel = self._bank_vars[bname].get() if bname in self._bank_vars else False
                 strip_c = _strip_col.get(bname, ACCENT)
                 outer.configure(
@@ -353,7 +353,6 @@ class SidebarView(ctk.CTkFrame):
                     border_color=strip_c if sel else BORDER,
                     border_width=2 if sel else 1,
                 )
-                strip.configure(fg_color=strip_c if sel else BORDER_DARK)
                 name_lbl.configure(text_color=strip_c if sel else TEXT)
                 sub_lbl.configure(text_color=MUTED)
                 check_lbl.configure(text="✓" if sel else "", text_color=strip_c)
@@ -377,7 +376,7 @@ class SidebarView(ctk.CTkFrame):
                 return _cmd
 
             outer = ctk.CTkFrame(
-                self.bank_grid, width=120, height=48, corner_radius=7,
+                self.bank_grid, width=120, height=48, corner_radius=8,
                 fg_color=WHITE if sel else PREVIEW_BG,
                 border_color=strip_c if sel else BORDER,
                 border_width=2 if sel else 1,
@@ -390,13 +389,8 @@ class SidebarView(ctk.CTkFrame):
             outer.pack_propagate(False)
             outer.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
 
-            strip = ctk.CTkFrame(outer, width=4, corner_radius=0, fg_color=strip_c if sel else BORDER_DARK)
-            strip.pack(side="left", fill="y")
-            strip.pack_propagate(False)
-            strip.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
-
             txt = ctk.CTkFrame(outer, fg_color="transparent")
-            txt.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=3)
+            txt.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=4)
             txt.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
 
             name_lbl = ctk.CTkLabel(
@@ -416,12 +410,12 @@ class SidebarView(ctk.CTkFrame):
 
             check_lbl = ctk.CTkLabel(
                 outer, text="✓" if sel else "", font=(FONT_FAMILY, 11, "bold"),
-                text_color=strip_c, fg_color="transparent", width=14,
+                text_color=strip_c, fg_color="transparent", width=16,
             )
-            check_lbl.pack(side="right", padx=(0, 4))
+            check_lbl.pack(side="right", padx=(0, 8))
             check_lbl.bind("<Button-1>", lambda e, n=bname: _make_cmd(n)())
 
-            self._card_refs[bname] = (outer, strip, name_lbl, sub_lbl, check_lbl)
+            self._card_refs[bname] = (outer, name_lbl, sub_lbl, check_lbl)
 
         _refresh_bank_cards()
 

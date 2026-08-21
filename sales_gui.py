@@ -90,39 +90,17 @@ TYPE_BADGE_INFO = {
 
 def _maximize_window(win):
     """Maximize a Tk/CTk window cross-platform without taskbar clipping."""
-    import sys
-    win.update_idletasks()
-    system = sys.platform
-
-    if system == "win32":
-        try:
-            import ctypes
-            from ctypes import wintypes
-            rect = wintypes.RECT()
-            if ctypes.windll.user32.SystemParametersInfoW(48, 0, ctypes.byref(rect), 0):
-                work_x = rect.left
-                work_y = rect.top
-                work_w = rect.right - rect.left
-                work_h = rect.bottom - rect.top
-                client_h = max(500, work_h - 45)
-                win.geometry(f"{work_w}x{client_h}+{work_x}+{work_y}")
-                return
-        except Exception:
-            pass
-        sw = win.winfo_screenwidth()
-        sh = win.winfo_screenheight()
-        win.geometry(f"{sw}x{max(500, sh - 80)}+0+0")
-    elif system == "darwin":
-        sw = win.winfo_screenwidth()
-        sh = win.winfo_screenheight()
-        win.geometry(f"{sw}x{max(500, sh - 95)}+0+25")
-    else:
-        try:
-            win.attributes("-zoomed", True)
-        except Exception:
+    try:
+        if sys.platform == "win32":
+            win.state("zoomed")
+        elif sys.platform == "darwin":
             sw = win.winfo_screenwidth()
             sh = win.winfo_screenheight()
-            win.geometry(f"{sw}x{max(500, sh - 80)}+0+0")
+            win.geometry(f"{sw}x{max(500, sh - 95)}+0+25")
+        else:
+            win.attributes("-zoomed", True)
+    except Exception:
+        pass
 
 
 class SalesPortalApp(ctk.CTk):
