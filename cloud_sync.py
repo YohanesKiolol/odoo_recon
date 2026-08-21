@@ -1115,6 +1115,7 @@ def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: st
             "atv": atv,
             "daily_run_rate": daily_run_rate,
             "active_days_count": active_days_count,
+            "expected_days_count": expected_days_count,
             "missing_dates": missing_dates,
             "missing_dates_count": len(missing_dates),
             "date_span": date_span,
