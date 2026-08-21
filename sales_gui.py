@@ -4,20 +4,12 @@ import os
 import traceback
 from pathlib import Path
 
-# Redirect stdout/stderr if None (standard PyInstaller --noconsole behavior on Windows)
+# Suppress stdout/stderr if None (standard PyInstaller --noconsole behavior on Windows)
 if sys.stdout is None:
-    try:
-        _log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
-        sys.stdout = open(_log_dir / "sales_stdout.log", "a", encoding="utf-8")
-    except Exception:
-        sys.stdout = open(os.devnull, "w")
+    sys.stdout = open(os.devnull, "w")
 
 if sys.stderr is None:
-    try:
-        _log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
-        sys.stderr = open(_log_dir / "sales_stderr.log", "a", encoding="utf-8")
-    except Exception:
-        sys.stderr = open(os.devnull, "w")
+    sys.stderr = open(os.devnull, "w")
 
 def _show_fatal_error(msg: str):
     print(f"\n[FATAL ERROR] {msg}", flush=True)
