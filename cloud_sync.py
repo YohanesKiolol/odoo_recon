@@ -399,7 +399,6 @@ def push_merchant_transactions(transactions: list[dict], user_profile: str = "")
             "gross_amount": gross_amt,
             "net_amount": net_amt,
             "fee_amount": fee_amt,
-            "filename": fname,
             "recon_hash": r_hash,
             "uploaded_by": uploader,
             "device_id": dev_id,
@@ -454,20 +453,24 @@ def push_mutation_transactions(mutations: list[dict], user_profile: str = "") ->
         if isinstance(t_date, (datetime, date)):
             t_date = t_date.strftime("%Y-%m-%d")
         else:
-            t_date = str(t_date).strip()
+            s = str(t_date).strip()
+            parsed_d = None
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d %b %Y"):
+                try:
+                    parsed_d = datetime.strptime(s[:10] if len(s) >= 10 else s, fmt).strftime("%Y-%m-%d")
+                    break
+                except Exception:
+                    pass
+            t_date = parsed_d or s
 
         b_name = str(item.get("bank", item.get("bank_name", ""))).upper().strip()
         acc_num = str(item.get("account_number", item.get("acc", ""))).strip()
         amt = float(item.get("amount", 0.0))
-        m_type = str(item.get("mutation_type", item.get("type", "CR"))).upper().strip()
+        m_type = str(item.get("mutation_type", item.get("type", "CR"))).upper().strip()[:50]
         desc = str(item.get("description", item.get("remark", ""))).strip()
-        bal = float(item.get("balance", 0.0))
-        fname = str(item.get("filename", "")).strip()
 
         # ponytail: hash on plaintext before encryption
         r_hash = generate_mutation_hash(ckey, b_name, acc_num, t_date, amt, m_type, desc)
-        acc_num = encrypt_field(acc_num)
-        desc = encrypt_field(desc)
         enc_bank = encrypt_field(b_name)
         enc_company = encrypt_field(cname)
 
@@ -475,13 +478,9 @@ def push_mutation_transactions(mutations: list[dict], user_profile: str = "") ->
             "company_key": ckey,
             "company": enc_company,
             "bank_name": enc_bank,
-            "account_number": acc_num,
             "transaction_date": t_date,
-            "description": desc,
             "amount": amt,
             "mutation_type": m_type,
-            "balance": bal,
-            "filename": fname,
             "recon_hash": r_hash,
             "uploaded_by": uploader,
             "device_id": dev_id,
@@ -782,7 +781,7 @@ def fetch_cloud_transactions(data_type: str = "merchant", bank: str = "", date_f
     all_rows = []
     page_size = 1000
     offset = 0
-    decrypt_fields = ["trace_number", "bank_name", "store", "company"] if data_type == "merchant" else ["account_number", "description", "bank_name", "company"]
+    decrypt_fields = ["trace_number", "bank_name", "store", "company"] if data_type == "merchant" else ["bank_name", "company"]
 
     while len(all_rows) < limit:
         chunk_limit = min(page_size, limit - len(all_rows))
@@ -862,7 +861,7 @@ def fetch_cloud_dashboard_summary() -> dict:
         # Fetch recent mutation records
         mut_rows = _make_request(f"/bank_mutation_transactions?company_key=eq.{urllib.parse.quote(ckey)}&order=transaction_date.desc,id.desc&limit=500", method="GET", timeout=6)
         if isinstance(mut_rows, list) and mut_rows:
-            _decrypt_rows(mut_rows, ["bank_name", "company", "account_number", "description"])
+            _decrypt_rows(mut_rows, ["bank_name", "company"])
             summary["mutation_count"] = len(mut_rows)
             summary["mutation_volume"] = sum(float(r.get("amount", 0.0)) for r in mut_rows)
 
