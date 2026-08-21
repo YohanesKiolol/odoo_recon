@@ -664,6 +664,7 @@ class CloudDashboardView(ctk.CTkFrame):
 
         pace = stats["daily_run_rate"]
         granularity = stats.get("granularity", "daily")
+        unit_str = "mo" if granularity == "monthly" else "day"
         days_cnt = stats.get("active_days_count", 0)
         missing_cnt = stats.get("missing_dates_count", 0)
         missing_list = stats.get("missing_dates", [])
