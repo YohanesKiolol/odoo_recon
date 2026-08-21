@@ -863,6 +863,8 @@ def generate_executive_summary_pdf(excel_path: Path | str | None = None, output_
             browser_exe,
             "--headless",
             "--disable-gpu",
+            "--no-pdf-header-footer",
+            "--run-all-compositor-stages-before-draw",
             f"--print-to-pdf={output_pdf_path}",
             str(tmp_html.resolve().as_uri())
         ]
