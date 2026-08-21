@@ -329,7 +329,15 @@ def push_merchant_transactions(transactions: list[dict], user_profile: str = "")
         if isinstance(t_date, (datetime, date)):
             t_date = t_date.strftime("%Y-%m-%d")
         else:
-            t_date = str(t_date).strip()
+            s = str(t_date).strip()
+            parsed_d = None
+            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d", "%d %b %Y"):
+                try:
+                    parsed_d = datetime.strptime(s[:10] if len(s) >= 10 else s, fmt).strftime("%Y-%m-%d")
+                    break
+                except Exception:
+                    pass
+            t_date = parsed_d or s
 
         b_name = str(item.get("bank", item.get("bank_name", ""))).upper().strip()
         trace_no = str(item.get("number", item.get("trace_number", item.get("bank_number", "")))).strip()
@@ -1234,16 +1242,20 @@ def sync_local_to_cloud(user_profile: str = "") -> dict:
         from readers.bca_reader import _read_one_bca
         bca_store = BANK_ACCOUNTS.get("bca", {}).get("main", {}).get("store", "Sanur")
         if BCA_EXCEL_DIR.exists():
-            for f in BCA_EXCEL_DIR.rglob("*.xlsx"):
+            for f in sorted(BCA_EXCEL_DIR.rglob("*.xlsx")):
                 if not f.name.startswith((".", "~$")):
-                    for r in _read_one_bca(f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN):
-                        r_copy = dict(r)
-                        r_copy["bank"] = "BCA"
-                        r_copy["store"] = bca_store
-                        r_copy["card_type"] = r.get("card_type") or r.get("category") or "Credit Card"
-                        all_merchants.append(r_copy)
-    except Exception:
-        pass
+                    try:
+                        rows = _read_one_bca(f, BCA_EXCEL_PASSWORD, BCA_AMOUNT_COLUMN, BCA_DATE_COLUMN, BCA_NUMBER_COLUMN)
+                        for r in rows:
+                            r_copy = dict(r)
+                            r_copy["bank"] = "BCA"
+                            r_copy["store"] = bca_store
+                            r_copy["card_type"] = r.get("card_type") or r.get("category") or "Credit Card"
+                            all_merchants.append(r_copy)
+                    except Exception as e:
+                        print(f"  [CloudSync] Error reading BCA file {f.name}: {e}")
+    except Exception as e:
+        print(f"  [CloudSync] BCA setup error: {e}")
 
     # 2. Parse Mandiri Merchant
     try:

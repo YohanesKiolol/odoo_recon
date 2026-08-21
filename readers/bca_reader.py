@@ -123,23 +123,39 @@ def _read_one_bca(
         ws = wb.active
         assert ws is not None
 
-        header_row = [cell.value for cell in ws[5]]
+        header_row = None
+        header_row_idx = 5
+        for r_idx in range(1, min(12, ws.max_row + 1)):
+            row_vals = [str(cell.value or "").strip().lower() for cell in ws[r_idx]]
+            if any("date" in v or "tanggal" in v for v in row_vals) and any("amount" in v or "nilai" in v or "gross" in v or "original" in v for v in row_vals):
+                header_row = [cell.value for cell in ws[r_idx]]
+                header_row_idx = r_idx
+                break
+
+        if header_row is None:
+            header_row = [cell.value for cell in ws[5]] if ws.max_row >= 5 else [cell.value for cell in ws[1]]
+            header_row_idx = 5 if ws.max_row >= 5 else 1
+
         headers = [str(h).strip() if h is not None else "" for h in header_row]
 
-        def _find_col(col_name: str) -> int:
+        def _find_col(col_name: str, fallback_keywords: tuple = ()) -> int:
             col_name = col_name.strip()
             if col_name in headers:
                 return headers.index(col_name)
             for i, h in enumerate(headers):
                 if h.lower() == col_name.lower():
                     return i
+            for kw in fallback_keywords:
+                for i, h in enumerate(headers):
+                    if kw.lower() in h.lower():
+                        return i
             raise ValueError(
                 f"Column '{col_name}' not found in BCA Excel '{excel_path.name}'.\n"
                 f"Available columns: {[h for h in headers if h]}"
             )
 
-        amount_idx = _find_col(amount_col)
-        date_idx   = _find_col(date_col)
+        amount_idx = _find_col(amount_col, ("original amount", "gross amount", "total amount", "amount", "nilai"))
+        date_idx   = _find_col(date_col, ("transaction date", "tanggal transaksi", "trans date", "date", "tgl"))
 
         number_idx: int | None = None
         if number_col:
@@ -210,7 +226,7 @@ def _read_one_bca(
         txns = []
         skipped_empty = 0
 
-        for row_num, row in enumerate(ws.iter_rows(min_row=6, values_only=True), start=6):
+        for row_num, row in enumerate(ws.iter_rows(min_row=header_row_idx + 1, values_only=True), start=header_row_idx + 1):
 
             if not any(c is not None for c in row):
                 continue
