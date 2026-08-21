@@ -1,27 +1,42 @@
 from __future__ import annotations
-
-import os
 import sys
-import tkinter as tk
-from datetime import datetime, date
+import os
+import traceback
 from pathlib import Path
 
-try:
-    import customtkinter as ctk
-except ImportError:
-    print("Error: customtkinter is required. Install via: pip install customtkinter")
+def _show_fatal_error(msg: str):
+    try:
+        log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
+        (log_dir / "sales_crash.log").write_text(msg, encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Sales Portal - Fatal Error", f"Startup Error:\n\n{msg[:1500]}")
+        root.destroy()
+    except Exception:
+        pass
     sys.exit(1)
 
-from cloud_sync import (
-    is_cloud_configured,
-    fetch_discrepancies,
-    resolve_discrepancy,
-    reopen_discrepancy,
-    test_connection,
-    supabase_auth_login
-)
-import threading
-import odoo_inspector
+try:
+    import tkinter as tk
+    from datetime import datetime, date
+    import threading
+    import customtkinter as ctk
+    from cloud_sync import (
+        is_cloud_configured,
+        fetch_discrepancies,
+        resolve_discrepancy,
+        reopen_discrepancy,
+        test_connection,
+        supabase_auth_login
+    )
+    import odoo_inspector
+except Exception:
+    _show_fatal_error(traceback.format_exc())
 
 if getattr(sys, "frozen", False):
     if sys.platform == "darwin" and ".app/Contents/MacOS" in str(sys.executable):
@@ -38,6 +53,7 @@ FONT_MONO   = "Consolas" if IS_WINDOWS else "Menlo"
 
 ctk.set_appearance_mode("light")
 ctk.set_default_color_theme("blue")
+
 
 BG          = "#F4F5F8"
 PANEL       = "#FFFFFF"

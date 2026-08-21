@@ -47,9 +47,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
+          target_commitish: ${{ github.sha }}
           name: "Latest Desktop Builds (Windows & macOS)"
           draft: false
           prerelease: false
+          make_latest: true
           files: |
             dist/Recon.exe
             dist/SalesPortal.exe
@@ -108,9 +110,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
+          target_commitish: ${{ github.sha }}
           name: "Latest Desktop Builds (Windows & macOS)"
           draft: false
           prerelease: false
+          make_latest: true
           files: |
             dist/Recon-macOS.dmg
             dist/SalesPortal-macOS.dmg

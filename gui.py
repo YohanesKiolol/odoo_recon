@@ -4,38 +4,61 @@ Modularized main application container.
 """
 import sys
 import os
-import io
-import shutil
-import threading
-import subprocess
+import traceback
 from pathlib import Path
-from datetime import datetime
-import tkinter as tk
-from tkinter import filedialog, messagebox
-import customtkinter as ctk
 
-# Configure CustomTkinter
-ctk.set_appearance_mode("light")
-ctk.set_default_color_theme("blue")
+def _show_fatal_error(msg: str):
+    try:
+        log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
+        (log_dir / "recon_crash.log").write_text(msg, encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Recon Studio - Fatal Error", f"Startup Error:\n\n{msg[:1500]}")
+        root.destroy()
+    except Exception:
+        pass
+    sys.exit(1)
 
-# Design System, Widgets, Views & Modals
-from ui.theme import (
-    BASE_DIR, IS_WINDOWS, IS_MAC, FONT_FAMILY, BG, PANEL, SIDEBAR_BG, PREVIEW_BG,
-    BORDER, BORDER_DARK, ACCENT, ACCENT_DARK, SUCCESS, ERROR, WARN, TEXT, MUTED, WHITE,
-    init_fonts
-)
-from ui.widgets import _open_path, _maximize_window, _center_modal_on_parent
-from ui.views import SidebarView, LocalDashboardView, CloudDashboardView, LogConsoleView
-from ui.controllers import ReconController
-from ui.modals import (
-    open_breakdown_modal, open_cleanup_modal, open_conflict_modal,
-    open_sales_portal_modal, open_discrepancy_inspection_modal,
-    open_manual_match_modal, open_journal_modal
-)
-from config import INPUT_DIR, MUTATION_DIR, OUTPUT_DIR, ODO_EXCEL_PATH, ODO_JOURNAL_EXCEL_PATH
-RECAP_DIR = BASE_DIR / "recap"
+try:
+    import io
+    import shutil
+    import threading
+    import subprocess
+    from datetime import datetime
+    import tkinter as tk
+    from tkinter import filedialog, messagebox
+    import customtkinter as ctk
 
-init_fonts()
+    # Configure CustomTkinter
+    ctk.set_appearance_mode("light")
+    ctk.set_default_color_theme("blue")
+
+    # Design System, Widgets, Views & Modals
+    from ui.theme import (
+        BASE_DIR, IS_WINDOWS, IS_MAC, FONT_FAMILY, BG, PANEL, SIDEBAR_BG, PREVIEW_BG,
+        BORDER, BORDER_DARK, ACCENT, ACCENT_DARK, SUCCESS, ERROR, WARN, TEXT, MUTED, WHITE,
+        init_fonts
+    )
+    from ui.widgets import _open_path, _maximize_window, _center_modal_on_parent
+    from ui.views import SidebarView, LocalDashboardView, CloudDashboardView, LogConsoleView
+    from ui.controllers import ReconController
+    from ui.modals import (
+        open_breakdown_modal, open_cleanup_modal, open_conflict_modal,
+        open_sales_portal_modal, open_discrepancy_inspection_modal,
+        open_manual_match_modal, open_journal_modal
+    )
+    from config import INPUT_DIR, MUTATION_DIR, OUTPUT_DIR, ODO_EXCEL_PATH, ODO_JOURNAL_EXCEL_PATH
+    RECAP_DIR = BASE_DIR / "recap"
+
+    init_fonts()
+except Exception:
+    _show_fatal_error(traceback.format_exc())
+
 
 
 
