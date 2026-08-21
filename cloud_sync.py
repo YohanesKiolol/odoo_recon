@@ -869,15 +869,17 @@ def fetch_cloud_dashboard_summary() -> dict:
     return summary
 
 
-def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: str = "", custom_to: str = "") -> dict:
+def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: str = "", custom_to: str = "", data_type: str = "merchant") -> dict:
     """
     Compute comprehensive executive financial analytics from Supabase Cloud data.
+    Separates EDC / Merchant transactions and Bank Account Mutation transactions into distinct streams.
     Provides volume totals, ATV, store distribution, bank share, and daily/monthly performance run-rate.
     Accurately computes missing settlement dates against the requested period calendar.
     """
     if not is_cloud_configured():
         return {
             "configured": False,
+            "data_type": data_type,
             "total_gross": 0.0,
             "total_net": 0.0,
             "total_fee": 0.0,
@@ -939,24 +941,25 @@ def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: st
             date_from = (today - timedelta(days=29)).strftime("%Y-%m-%d")
             date_to = today.strftime("%Y-%m-%d")
 
-        txns_m = fetch_cloud_transactions(data_type="merchant", bank=bank, date_from=date_from, date_to=date_to, limit=25000)
-        txns_mut = fetch_cloud_transactions(data_type="mutation", bank=bank, date_from=date_from, date_to=date_to, limit=25000)
+        # Query isolated data stream
+        target_type = "mutation" if data_type == "mutation" else "merchant"
+        raw_txns = fetch_cloud_transactions(data_type=target_type, bank=bank, date_from=date_from, date_to=date_to, limit=35000)
 
-        # Normalize field names for unified analytics processing
         txns = []
-        for t in txns_m:
-            t_copy = dict(t)
-            t_copy["source_type"] = "merchant"
-            txns.append(t_copy)
-
-        for t in txns_mut:
+        for t in raw_txns:
             t_norm = dict(t)
-            amt = float(t.get("amount", 0.0))
-            t_norm["gross_amount"] = amt
-            t_norm["net_amount"] = amt
-            t_norm["fee_amount"] = 0.0
-            t_norm["card_type"] = t.get("mutation_type") or "Mutation"
-            t_norm["source_type"] = "mutation"
+            if target_type == "mutation":
+                amt = float(t.get("amount", 0.0))
+                t_norm["gross_amount"] = amt
+                t_norm["net_amount"] = amt
+                t_norm["fee_amount"] = 0.0
+                t_norm["card_type"] = t.get("mutation_type") or "Mutation"
+            else:
+                g = float(t.get("gross_amount", 0.0))
+                t_norm["gross_amount"] = g
+                t_norm["net_amount"] = float(t.get("net_amount", g))
+                t_norm["fee_amount"] = float(t.get("fee_amount", 0.0))
+                t_norm["card_type"] = str(t.get("card_type") or "EDC").upper().strip()
             txns.append(t_norm)
 
         total_gross = 0.0
@@ -975,15 +978,10 @@ def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: st
 
         try:
             ckey = get_company_key()
-            latest_rows = _make_request(f"/bank_merchant_transactions?company_key=eq.{urllib.parse.quote(ckey)}&order=created_at.desc&limit=1", method="GET", timeout=5)
-            latest_muts = _make_request(f"/bank_mutation_transactions?company_key=eq.{urllib.parse.quote(ckey)}&order=created_at.desc&limit=1", method="GET", timeout=5)
-            candidates = []
+            tbl_name = "bank_mutation_transactions" if target_type == "mutation" else "bank_merchant_transactions"
+            latest_rows = _make_request(f"/{tbl_name}?company_key=eq.{urllib.parse.quote(ckey)}&order=created_at.desc&limit=1", method="GET", timeout=5)
             if isinstance(latest_rows, list) and latest_rows:
-                candidates.append(latest_rows[0])
-            if isinstance(latest_muts, list) and latest_muts:
-                candidates.append(latest_muts[0])
-            if candidates:
-                lr = max(candidates, key=lambda r: str(r.get("created_at", "")))
+                lr = latest_rows[0]
                 last_u = lr.get("uploaded_by", "—")
                 last_d = lr.get("device_id", "—")
                 last_up = str(lr.get("created_at", "—"))[:19].replace("T", " ")
@@ -1153,6 +1151,65 @@ def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: st
             "last_updated": "—",
         }
 
+
+
+def fetch_cloud_coverage_matrix() -> list[dict]:
+    """
+    Fetch distinct date ranges for Merchant Settlements and Bank Mutations per bank account.
+    Returns structured data for the Date Coverage by Account & Mutation table in Cloud Dashboard.
+    """
+    if not is_cloud_configured():
+        return []
+
+    # Query distinct dates for merchant
+    m_rows = fetch_cloud_transactions(data_type="merchant", limit=50000)
+    # Query distinct dates for mutations
+    mut_rows = fetch_cloud_transactions(data_type="mutation", limit=50000)
+
+    from collections import defaultdict
+    bank_m_dates = defaultdict(set)
+    bank_mut_dates = defaultdict(set)
+
+    for r in m_rows:
+        b = str(r.get("bank_name") or "BCA").upper().strip()
+        d = str(r.get("transaction_date") or "").strip()
+        if b and d:
+            bank_m_dates[b].add(d)
+
+    for r in mut_rows:
+        b = str(r.get("bank_name") or "BCA").upper().strip()
+        d = str(r.get("transaction_date") or "").strip()
+        if b and d:
+            bank_mut_dates[b].add(d)
+
+    def _fmt_dates(d_set):
+        clean = sorted(d_set)
+        if not clean:
+            return "—"
+        try:
+            d_start = datetime.strptime(clean[0], "%Y-%m-%d").strftime("%d/%m/%y")
+            d_end = datetime.strptime(clean[-1], "%Y-%m-%d").strftime("%d/%m/%y")
+            if len(clean) == 1:
+                return f"{d_start} (1 day)"
+            return f"{d_start} – {d_end} ({len(clean)} days)"
+        except Exception:
+            return f"{clean[0]} – {clean[-1]} ({len(clean)} days)"
+
+    all_banks = sorted(set(list(bank_m_dates.keys()) + list(bank_mut_dates.keys())))
+    if not all_banks:
+        all_banks = ["BCA", "MANDIRI", "BRI"]
+
+    matrix = []
+    for b in all_banks:
+        matrix.append({
+            "bank": b,
+            "merchant_dates": _fmt_dates(bank_m_dates[b]),
+            "merchant_count": len(bank_m_dates[b]),
+            "mutation_dates": _fmt_dates(bank_mut_dates[b]),
+            "mutation_count": len(bank_mut_dates[b]),
+        })
+
+    return matrix
 
 
 # Backward compatibility alias

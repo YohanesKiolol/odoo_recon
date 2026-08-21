@@ -44,6 +44,16 @@ class CloudDashboardView(ctk.CTkFrame):
         ico_font = ("Segoe UI Emoji", 11) if IS_WINDOWS else (FONT_FAMILY, 11)
         ctk.CTkLabel(f_left, text="🎯 Dashboard Scope:", font=(FONT_FAMILY, 10, "bold"), text_color=MUTED, fg_color="transparent").pack(side="left", padx=(0, 8))
 
+        # Stream dropdown (Default: 📊 EDC Settlements)
+        self.stream_filter = "merchant"
+        self.stream_menu = ctk.CTkOptionMenu(
+            f_left, values=["📊 EDC Settlements", "🏦 Bank Mutations"],
+            width=150, height=28, font=(FONT_FAMILY, 10, "bold"),
+            fg_color=WHITE, text_color=TEXT, button_color="#E2E8F0", button_hover_color="#CBD5E1",
+            dropdown_font=(FONT_FAMILY, 10, "bold"), command=self._on_stream_changed
+        )
+        self.stream_menu.pack(side="left", padx=(0, 6))
+
         # Bank dropdown (Default: ALL Banks)
         self.bank_filter = "ALL"
         self.period_filter = "3d"
@@ -274,6 +284,10 @@ class CloudDashboardView(ctk.CTkFrame):
         self.chart_canvas.bind("<Motion>", self._on_canvas_motion)
         self.chart_canvas.bind("<Leave>", self._on_canvas_leave)
 
+    def _on_stream_changed(self, choice: str):
+        self.stream_filter = "mutation" if "Mutation" in choice else "merchant"
+        self.update_summary()
+
     def _on_bank_changed(self, choice: str):
         self.bank_filter = "ALL" if choice == "ALL Banks" else choice
         self.update_summary()
@@ -343,7 +357,8 @@ class CloudDashboardView(ctk.CTkFrame):
                     bank=self.bank_filter,
                     period=self.period_filter,
                     custom_from=self.custom_from,
-                    custom_to=self.custom_to
+                    custom_to=self.custom_to,
+                    data_type=self.stream_filter
                 )
                 self.after(0, lambda: self._apply_analytics(stats))
             except Exception as e:
@@ -375,14 +390,15 @@ class CloudDashboardView(ctk.CTkFrame):
         h_left = ctk.CTkFrame(hdr_frame, fg_color="transparent")
         h_left.pack(side="left", padx=14, pady=12)
 
+        stream_lbl = "Bank Mutations" if getattr(self, "stream_filter", "merchant") == "mutation" else "EDC Settlements"
         ctk.CTkLabel(
-            h_left, text="🧾 Bank Settlement & Missing Dates Audit",
+            h_left, text=f"🧾 {stream_lbl} & Missing Dates Audit",
             font=(FONT_FAMILY, 15, "bold"), text_color=TEXT
         ).pack(anchor="w")
 
         bank_name = self.bank_filter
         span_str = stats.get("date_span", "—")
-        scope_str = f"Filter Scope: Bank: {bank_name} • Period: {span_str}"
+        scope_str = f"Stream: {stream_lbl} • Bank: {bank_name} • Period: {span_str}"
         ctk.CTkLabel(
             h_left, text=scope_str,
             font=(FONT_FAMILY, 11, "bold"), text_color=MUTED
@@ -450,7 +466,45 @@ class CloudDashboardView(ctk.CTkFrame):
         table_frame = ctk.CTkScrollableFrame(top, fg_color=WHITE, corner_radius=8, border_color=BORDER_DARK, border_width=1)
         table_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
+        def _render_matrix():
+            for w in table_frame.winfo_children():
+                w.destroy()
+
+            # Coverage Matrix Header
+            th = ctk.CTkFrame(table_frame, fg_color=PREVIEW_BG, corner_radius=4, height=34)
+            th.pack(fill="x", pady=(0, 4))
+            ctk.CTkLabel(th, text="Bank Account", width=180, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=12)
+            ctk.CTkLabel(th, text="Merchant Settlements Date Range", width=280, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8)
+            ctk.CTkLabel(th, text="Bank Mutations Date Range", width=280, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8)
+
+            try:
+                import cloud_sync
+                matrix_data = cloud_sync.fetch_cloud_coverage_matrix()
+            except Exception as e:
+                matrix_data = []
+
+            if not matrix_data:
+                ctk.CTkLabel(table_frame, text="No coverage data found", font=(FONT_FAMILY, 11, "bold"), text_color=MUTED).pack(pady=40)
+                return
+
+            for row in matrix_data:
+                b_name = row.get("bank", "")
+                m_dates = row.get("merchant_dates", "—")
+                mut_dates = row.get("mutation_dates", "—")
+                m_col = bank_colors.get(b_name.upper(), TEXT)
+
+                tr = ctk.CTkFrame(table_frame, fg_color="transparent", corner_radius=4)
+                tr.pack(fill="x", pady=4)
+
+                ctk.CTkLabel(tr, text=b_name, width=180, font=(FONT_FAMILY, 11, "bold"), text_color=m_col, anchor="w").pack(side="left", padx=12, pady=6)
+                ctk.CTkLabel(tr, text=m_dates, width=280, font=(FONT_FAMILY, 11, "bold" if m_dates != "—" else "normal"), text_color=SUCCESS if m_dates != "—" else MUTED, anchor="w").pack(side="left", padx=8)
+                ctk.CTkLabel(tr, text=mut_dates, width=280, font=(FONT_FAMILY, 11, "bold" if mut_dates != "—" else "normal"), text_color=SUCCESS if mut_dates != "—" else MUTED, anchor="w").pack(side="left", padx=8)
+
         def _render_table(filter_mode):
+            if filter_mode == "matrix":
+                _render_matrix()
+                return
+
             for w in table_frame.winfo_children():
                 w.destroy()
 
@@ -514,16 +568,20 @@ class CloudDashboardView(ctk.CTkFrame):
             btn_all.configure(fg_color=ACCENT if mode == "all" else "transparent", text_color=WHITE if mode == "all" else TEXT)
             btn_miss.configure(fg_color="#EF4444" if mode == "missing" else "transparent", text_color=WHITE if mode == "missing" else TEXT)
             btn_sett.configure(fg_color=SUCCESS if mode == "settled" else "transparent", text_color=WHITE if mode == "settled" else TEXT)
+            btn_matrix.configure(fg_color=ACCENT if mode == "matrix" else "transparent", text_color=WHITE if mode == "matrix" else TEXT)
             _render_table(mode)
 
-        btn_all = ctk.CTkButton(filter_bar, text=f"All Dates ({len(all_dates)})", width=120, height=32, font=(FONT_FAMILY, 11, "bold"), fg_color=ACCENT, text_color=WHITE, corner_radius=6, command=lambda: _set_tab("all"))
+        btn_all = ctk.CTkButton(filter_bar, text=f"All Dates ({len(all_dates)})", width=110, height=32, font=(FONT_FAMILY, 11, "bold"), fg_color=ACCENT, text_color=WHITE, corner_radius=6, command=lambda: _set_tab("all"))
         btn_all.pack(side="left", padx=(0, 4))
 
-        btn_miss = ctk.CTkButton(filter_bar, text=f"⚠️ Missing Dates ({missing_cnt})", width=150, height=32, font=(FONT_FAMILY, 11, "bold"), fg_color="transparent", text_color=TEXT, border_color=BORDER_DARK, border_width=1, corner_radius=6, command=lambda: _set_tab("missing"))
+        btn_miss = ctk.CTkButton(filter_bar, text=f"⚠️ Missing Dates ({missing_cnt})", width=140, height=32, font=(FONT_FAMILY, 11, "bold"), fg_color="transparent", text_color=TEXT, border_color=BORDER_DARK, border_width=1, corner_radius=6, command=lambda: _set_tab("missing"))
         btn_miss.pack(side="left", padx=4)
 
-        btn_sett = ctk.CTkButton(filter_bar, text=f"✅ Settled Dates ({active_cnt})", width=145, height=32, font=(FONT_FAMILY, 11, "bold"), fg_color="transparent", text_color=TEXT, border_color=BORDER_DARK, border_width=1, corner_radius=6, command=lambda: _set_tab("settled"))
+        btn_sett = ctk.CTkButton(filter_bar, text=f"✅ Settled Dates ({active_cnt})", width=135, height=32, font=(FONT_FAMILY, 11, "bold"), fg_color="transparent", text_color=TEXT, border_color=BORDER_DARK, border_width=1, corner_radius=6, command=lambda: _set_tab("settled"))
         btn_sett.pack(side="left", padx=4)
+
+        btn_matrix = ctk.CTkButton(filter_bar, text="📅 Date Coverage Matrix", width=160, height=32, font=(FONT_FAMILY, 11, "bold"), fg_color="transparent", text_color=TEXT, border_color=BORDER_DARK, border_width=1, corner_radius=6, command=lambda: _set_tab("matrix"))
+        btn_matrix.pack(side="left", padx=4)
 
         # Initial render
         _render_table("all")
@@ -609,16 +667,16 @@ class CloudDashboardView(ctk.CTkFrame):
         days_cnt = stats.get("active_days_count", 0)
         missing_cnt = stats.get("missing_dates_count", 0)
         missing_list = stats.get("missing_dates", [])
-        unit_str = "mo" if granularity == "monthly" else "day"
-
+        is_mutation = stats.get("data_type") == "mutation"
         self.kpi_gross_val.configure(text=f"Rp {gross:,.0f}".replace(",", "."), text_color=TEXT)
-        self.kpi_gross_sub.configure(text="Settled Sales Revenue", text_color=MUTED)
+        self.kpi_gross_sub.configure(text="Bank Mutation Volume" if is_mutation else "Settled Sales Revenue", text_color=MUTED)
 
         self.kpi_txns_val.configure(text=f"{txns:,} Transactions", text_color=TEXT)
+        stream_name = "Mutation" if is_mutation else "Settlement"
         if missing_cnt > 0:
             self.kpi_txns_sub.configure(text=f"Across {days_cnt} Days (⚠️ {missing_cnt} Missing Days)", text_color="#D97706")
         else:
-            self.kpi_txns_sub.configure(text=f"Across {days_cnt} Settlement Days", text_color=MUTED)
+            self.kpi_txns_sub.configure(text=f"Across {days_cnt} {stream_name} Days", text_color=MUTED)
 
         self.kpi_pace_val.configure(text=f"Rp {pace/1_000_000:,.1f}M", text_color=TEXT)
         self.kpi_pace_sub.configure(text=f"Velocity per active {unit_str}", text_color=MUTED)
