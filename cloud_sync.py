@@ -939,7 +939,26 @@ def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: st
             date_from = (today - timedelta(days=29)).strftime("%Y-%m-%d")
             date_to = today.strftime("%Y-%m-%d")
 
-        txns = fetch_cloud_transactions(data_type="merchant", bank=bank, date_from=date_from, date_to=date_to, limit=10000)
+        txns_m = fetch_cloud_transactions(data_type="merchant", bank=bank, date_from=date_from, date_to=date_to, limit=25000)
+        txns_mut = fetch_cloud_transactions(data_type="mutation", bank=bank, date_from=date_from, date_to=date_to, limit=25000)
+
+        # Normalize field names for unified analytics processing
+        txns = []
+        for t in txns_m:
+            t_copy = dict(t)
+            t_copy["source_type"] = "merchant"
+            txns.append(t_copy)
+
+        for t in txns_mut:
+            t_norm = dict(t)
+            amt = float(t.get("amount", 0.0))
+            t_norm["gross_amount"] = amt
+            t_norm["net_amount"] = amt
+            t_norm["fee_amount"] = 0.0
+            t_norm["card_type"] = t.get("mutation_type") or "Mutation"
+            t_norm["source_type"] = "mutation"
+            txns.append(t_norm)
+
         total_gross = 0.0
         total_net = 0.0
         total_fee = 0.0
@@ -957,8 +976,14 @@ def fetch_cloud_analytics(bank: str = "ALL", period: str = "3d", custom_from: st
         try:
             ckey = get_company_key()
             latest_rows = _make_request(f"/bank_merchant_transactions?company_key=eq.{urllib.parse.quote(ckey)}&order=created_at.desc&limit=1", method="GET", timeout=5)
+            latest_muts = _make_request(f"/bank_mutation_transactions?company_key=eq.{urllib.parse.quote(ckey)}&order=created_at.desc&limit=1", method="GET", timeout=5)
+            candidates = []
             if isinstance(latest_rows, list) and latest_rows:
-                lr = latest_rows[0]
+                candidates.append(latest_rows[0])
+            if isinstance(latest_muts, list) and latest_muts:
+                candidates.append(latest_muts[0])
+            if candidates:
+                lr = max(candidates, key=lambda r: str(r.get("created_at", "")))
                 last_u = lr.get("uploaded_by", "—")
                 last_d = lr.get("device_id", "—")
                 last_up = str(lr.get("created_at", "—"))[:19].replace("T", " ")
