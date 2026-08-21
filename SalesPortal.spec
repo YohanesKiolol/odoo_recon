@@ -15,6 +15,7 @@ hiddenimports = [
     'cloud_sync', 'config',
     'customtkinter', 'darkdetect',
     'PIL', 'PIL.Image', 'PIL._imaging',
+    'cryptography', 'cryptography.fernet',
 ]
 
 tmp_ret = collect_all('customtkinter')

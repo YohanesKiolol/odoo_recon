@@ -7,48 +7,51 @@ from pathlib import Path
 block_cipher = None
 ROOT = Path(SPECPATH)
 
-# Find CustomTkinter assets (themes, images)
-import importlib
-_ctk_spec = importlib.util.find_spec('customtkinter')
-_ctk_data = []
-if _ctk_spec and _ctk_spec.submodule_search_locations:
-    _ctk_root = Path(list(_ctk_spec.submodule_search_locations)[0])
-    if _ctk_root.exists():
-        _ctk_data = [(str(_ctk_root), 'customtkinter')]
+from PyInstaller.utils.hooks import collect_all
+
+datas = [
+    # Bundle source modules (main + readers + ui) so --worker mode can import them
+    (str(ROOT / 'main.py'),           '.'),
+    (str(ROOT / 'config.py'),         '.'),
+    (str(ROOT / 'reconciler.py'),     '.'),
+    (str(ROOT / 'excel_writer.py'),   '.'),
+    (str(ROOT / 'amount_utils.py'),   '.'),
+    (str(ROOT / 'odoo_downloader.py'),'.'),
+    (str(ROOT / 'journal_checker.py'),'.'),
+    (str(ROOT / 'journal_generator.py'),'.'),
+    (str(ROOT / 'odoo_journal_creator.py'),'.'),
+    (str(ROOT / 'pdf_summary_generator.py'),'.'),
+    (str(ROOT / 'cloud_sync.py'),     '.'),
+    (str(ROOT / 'ui'),                'ui'),
+    (str(ROOT / 'readers'),           'readers'),
+    (str(ROOT / 'assets'),            'assets'),   # includes app_icon.ico + app_icon.png + fonts
+]
+binaries = []
+hiddenimports = [
+    'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
+    'journal_checker', 'journal_generator', 'odoo_journal_creator',
+    'pdf_summary_generator', 'cloud_sync',
+    'readers.odoo_reader', 'readers.bca_reader',
+    'readers.mandiri_reader', 'readers.bri_reader',
+    'ui', 'ui.theme', 'ui.widgets', 'ui.modals', 'ui.views', 'ui.controllers',
+    'openpyxl', 'pdfplumber', 'pdfminer', 'pyzipper',
+    'msoffcrypto', 'tkcalendar', 'babel.numbers',
+    'customtkinter', 'darkdetect',
+    'PIL', 'PIL.Image', 'PIL._imaging',
+    'holidays', 'cryptography', 'cryptography.fernet',
+]
+
+ctk_ret = collect_all('customtkinter')
+datas += ctk_ret[0]
+binaries += ctk_ret[1]
+hiddenimports += ctk_ret[2]
 
 a = Analysis(
     [str(ROOT / 'gui.py')],
     pathex=[str(ROOT)],
-    binaries=[],
-    datas=[
-        # Bundle source modules (main + readers + ui) so --worker mode can import them
-        (str(ROOT / 'main.py'),           '.'),
-        (str(ROOT / 'config.py'),         '.'),
-        (str(ROOT / 'reconciler.py'),     '.'),
-        (str(ROOT / 'excel_writer.py'),   '.'),
-        (str(ROOT / 'amount_utils.py'),   '.'),
-        (str(ROOT / 'odoo_downloader.py'),'.'),
-        (str(ROOT / 'journal_checker.py'),'.'),
-        (str(ROOT / 'journal_generator.py'),'.'),
-        (str(ROOT / 'odoo_journal_creator.py'),'.'),
-        (str(ROOT / 'pdf_summary_generator.py'),'.'),
-        (str(ROOT / 'cloud_sync.py'),     '.'),
-        (str(ROOT / 'ui'),                'ui'),
-        (str(ROOT / 'readers'),           'readers'),
-        (str(ROOT / 'assets'),            'assets'),   # includes app_icon.ico + app_icon.png
-    ] + _ctk_data,
-    hiddenimports=[
-        'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
-        'journal_checker', 'journal_generator', 'odoo_journal_creator',
-        'pdf_summary_generator', 'cloud_sync',
-        'readers.odoo_reader', 'readers.bca_reader',
-        'readers.mandiri_reader', 'readers.bri_reader',
-        'ui', 'ui.theme', 'ui.widgets', 'ui.modals', 'ui.views', 'ui.controllers',
-        'openpyxl', 'pdfplumber', 'pdfminer', 'pyzipper',
-        'msoffcrypto', 'tkcalendar', 'babel.numbers',
-        'customtkinter', 'darkdetect',
-        'PIL', 'PIL.Image', 'PIL._imaging',
-    ],
+    binaries=binaries,
+    datas=datas,
+    hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

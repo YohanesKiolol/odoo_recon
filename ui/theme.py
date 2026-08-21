@@ -82,6 +82,8 @@ def init_fonts():
                 _FR_PRIVATE = 0x10
                 for f_file in fonts_dir.glob("*.ttf"):
                     _gdi32.AddFontResourceExW(str(f_file), _FR_PRIVATE, 0)
-                ctypes.windll.user32.SendMessageW(0xFFFF, 0x001D, 0, 0)
+                # SendNotifyMessageW is non-blocking (SendMessageW blocks indefinitely if any desktop window hangs)
+                ctypes.windll.user32.SendNotifyMessageW(0xFFFF, 0x001D, 0, 0)
             except Exception:
                 pass
+
