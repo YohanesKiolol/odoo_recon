@@ -912,15 +912,20 @@ class CloudDashboardView(ctk.CTkFrame):
 
             curve_coords.extend([pts[-1][0], pts[-1][1]])
 
-        # 4. Soft Gradient Area Fill
-        poly = [pad_l, pad_t + plot_h] + curve_coords + [pad_l + plot_w, pad_t + plot_h]
-        self.chart_canvas.create_polygon(poly, fill="#EEF2FF", outline="", tags="area")
-
-        # 5. Crisp Clean Vector Line Stroke (100% Solid & Smooth)
-        self.chart_canvas.create_line(
-            curve_coords, fill="#6366F1", width=2.4,
-            capstyle="round", joinstyle="round", tags="line"
-        )
+        # 4. Soft Gradient Area Fill & Smooth Line Stroke
+        if len(points) >= 2 and len(curve_coords) >= 4:
+            poly = [pad_l, pad_t + plot_h] + curve_coords + [pad_l + plot_w, pad_t + plot_h]
+            self.chart_canvas.create_polygon(poly, fill="#EEF2FF", outline="", tags="area")
+            self.chart_canvas.create_line(
+                curve_coords, fill="#6366F1", width=2.4,
+                capstyle="round", joinstyle="round", tags="line"
+            )
+        elif len(points) == 1:
+            px, py = points[0][0], points[0][1]
+            self.chart_canvas.create_line(
+                pad_l, py, pad_l + plot_w, py, fill="#E0E7FF", width=1.5,
+                dash=(4, 4), tags="line"
+            )
 
         # 6. Nodes & Peak Highlights
         actual_peak_val = max(d["gross"] for d in daily_list)
