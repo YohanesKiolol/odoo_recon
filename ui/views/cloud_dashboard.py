@@ -462,25 +462,29 @@ class CloudDashboardView(ctk.CTkFrame):
 
         tab_var = tk.StringVar(value="all")
 
-        # Table Container (Scrollable)
-        table_frame = ctk.CTkScrollableFrame(top, fg_color=WHITE, corner_radius=8, border_color=BORDER_DARK, border_width=1)
+        # Frozen Column Header Container (Fixed at top, outside scroll area)
+        th_container = ctk.CTkFrame(top, fg_color=PREVIEW_BG, corner_radius=6, border_color=BORDER_DARK, border_width=1, height=36)
+        th_container.pack(fill="x", padx=16, pady=(0, 2))
+
+        # Table Rows Container (Scrollable rows only)
+        table_frame = ctk.CTkScrollableFrame(top, fg_color=WHITE, corner_radius=6, border_color=BORDER_DARK, border_width=1)
         table_frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
         def _render_matrix():
+            for w in th_container.winfo_children():
+                w.destroy()
             for w in table_frame.winfo_children():
                 w.destroy()
 
-            # Coverage Matrix Header
-            th = ctk.CTkFrame(table_frame, fg_color=PREVIEW_BG, corner_radius=4, height=34)
-            th.pack(fill="x", pady=(0, 4))
-            ctk.CTkLabel(th, text="Bank Account", width=180, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=12)
-            ctk.CTkLabel(th, text="Merchant Settlements Date Range", width=280, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8)
-            ctk.CTkLabel(th, text="Bank Mutations Date Range", width=280, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8)
+            # Frozen Matrix Header
+            ctk.CTkLabel(th_container, text="Bank Account", width=180, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=12, pady=6)
+            ctk.CTkLabel(th_container, text="Merchant Settlements Date Range", width=280, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8, pady=6)
+            ctk.CTkLabel(th_container, text="Bank Mutations Date Range", width=280, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8, pady=6)
 
             try:
                 import cloud_sync
                 matrix_data = cloud_sync.fetch_cloud_coverage_matrix()
-            except Exception as e:
+            except Exception:
                 matrix_data = []
 
             if not matrix_data:
@@ -505,17 +509,17 @@ class CloudDashboardView(ctk.CTkFrame):
                 _render_matrix()
                 return
 
+            for w in th_container.winfo_children():
+                w.destroy()
             for w in table_frame.winfo_children():
                 w.destroy()
 
-            # Table Header
-            th = ctk.CTkFrame(table_frame, fg_color=PREVIEW_BG, corner_radius=4, height=34)
-            th.pack(fill="x", pady=(0, 4))
-            ctk.CTkLabel(th, text="Settlement Date", width=160, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8)
-            ctk.CTkLabel(th, text="Status", width=120, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=4)
+            # Frozen Table Header
+            ctk.CTkLabel(th_container, text="Settlement Date", width=160, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=8, pady=6)
+            ctk.CTkLabel(th_container, text="Status", width=120, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="w").pack(side="left", padx=4, pady=6)
             for b_name in all_banks:
-                ctk.CTkLabel(th, text=b_name, width=120, font=(FONT_FAMILY, 11, "bold"), text_color=bank_colors.get(b_name, TEXT), anchor="e").pack(side="left", padx=4)
-            ctk.CTkLabel(th, text="Total Settled", width=170, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="e").pack(side="left", padx=8)
+                ctk.CTkLabel(th_container, text=b_name, width=120, font=(FONT_FAMILY, 11, "bold"), text_color=bank_colors.get(b_name, TEXT), anchor="e").pack(side="left", padx=4, pady=6)
+            ctk.CTkLabel(th_container, text="Total Settled", width=170, font=(FONT_FAMILY, 11, "bold"), text_color=TEXT, anchor="e").pack(side="left", padx=8, pady=6)
 
             filtered_dates = []
             for d in all_dates:
