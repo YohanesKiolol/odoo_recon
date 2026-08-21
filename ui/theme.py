@@ -75,15 +75,5 @@ def init_fonts():
                 ctk.FontManager.load_font(str(f_file))
             except Exception:
                 pass
-        if IS_WINDOWS:
-            try:
-                import ctypes
-                _gdi32 = ctypes.windll.gdi32
-                _FR_PRIVATE = 0x10
-                for f_file in fonts_dir.glob("*.ttf"):
-                    _gdi32.AddFontResourceExW(str(f_file), _FR_PRIVATE, 0)
-                # SendNotifyMessageW is non-blocking (SendMessageW blocks indefinitely if any desktop window hangs)
-                ctypes.windll.user32.SendNotifyMessageW(0xFFFF, 0x001D, 0, 0)
-            except Exception:
-                pass
+
 

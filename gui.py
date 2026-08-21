@@ -505,16 +505,36 @@ class App(ctk.CTk):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "--run-downloader":
-            import odoo_downloader
-            sys.argv = [sys.argv[0]] + sys.argv[2:]
-            odoo_downloader.run_downloader()
-            sys.exit(0)
-        elif sys.argv[1] == "--run-main":
-            import runpy
-            runpy.run_module('main', run_name='__main__')
-            sys.exit(0)
+    try:
+        if len(sys.argv) > 1:
+            if sys.argv[1] == "--run-downloader":
+                import odoo_downloader
+                sys.argv = [sys.argv[0]] + sys.argv[2:]
+                odoo_downloader.run_downloader()
+                sys.exit(0)
+            elif sys.argv[1] == "--run-main":
+                import runpy
+                runpy.run_module('main', run_name='__main__')
+                sys.exit(0)
 
-    app = App()
-    app.mainloop()
+        app = App()
+        app.mainloop()
+    except Exception as e:
+        import traceback
+        err_str = traceback.format_exc()
+        try:
+            log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
+            (log_dir / "recon_crash.log").write_text(err_str, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Recon Studio - Error", f"Startup Error:\n\n{err_str[:1200]}")
+            root.destroy()
+        except Exception:
+            pass
+        sys.exit(1)
+

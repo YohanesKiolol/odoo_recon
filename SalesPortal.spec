@@ -8,14 +8,16 @@ ROOT = Path(SPECPATH)
 datas = [
     (str(ROOT / 'cloud_sync.py'), '.'),
     (str(ROOT / 'config.py'), '.'),
+    (str(ROOT / 'odoo_inspector.py'), '.'),
     (str(ROOT / 'assets'), 'assets'),
 ]
 binaries = []
 hiddenimports = [
-    'cloud_sync', 'config',
+    'cloud_sync', 'config', 'odoo_inspector',
     'customtkinter', 'darkdetect',
     'PIL', 'PIL.Image', 'PIL._imaging',
     'cryptography', 'cryptography.fernet',
+    'xmlrpc', 'xmlrpc.client',
 ]
 
 tmp_ret = collect_all('customtkinter')

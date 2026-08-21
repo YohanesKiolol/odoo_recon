@@ -17,6 +17,7 @@ datas = [
     (str(ROOT / 'excel_writer.py'),   '.'),
     (str(ROOT / 'amount_utils.py'),   '.'),
     (str(ROOT / 'odoo_downloader.py'),'.'),
+    (str(ROOT / 'odoo_inspector.py'), '.'),
     (str(ROOT / 'journal_checker.py'),'.'),
     (str(ROOT / 'journal_generator.py'),'.'),
     (str(ROOT / 'odoo_journal_creator.py'),'.'),
@@ -28,17 +29,19 @@ datas = [
 ]
 binaries = []
 hiddenimports = [
-    'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader',
+    'main', 'config', 'reconciler', 'excel_writer', 'amount_utils', 'odoo_downloader', 'odoo_inspector',
     'journal_checker', 'journal_generator', 'odoo_journal_creator',
     'pdf_summary_generator', 'cloud_sync',
     'readers.odoo_reader', 'readers.bca_reader',
     'readers.mandiri_reader', 'readers.bri_reader',
+    'readers.file_detector', 'readers.mutation_reader',
     'ui', 'ui.theme', 'ui.widgets', 'ui.modals', 'ui.views', 'ui.controllers',
     'openpyxl', 'pdfplumber', 'pdfminer', 'pyzipper',
     'msoffcrypto', 'tkcalendar', 'babel.numbers',
     'customtkinter', 'darkdetect',
     'PIL', 'PIL.Image', 'PIL._imaging',
     'holidays', 'cryptography', 'cryptography.fernet',
+    'xmlrpc', 'xmlrpc.client',
 ]
 
 ctk_ret = collect_all('customtkinter')

@@ -851,5 +851,25 @@ class SalesPortalApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    app = SalesPortalApp()
-    app.mainloop()
+    try:
+        app = SalesPortalApp()
+        app.mainloop()
+    except Exception as e:
+        import traceback
+        err_str = traceback.format_exc()
+        try:
+            log_dir = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(".")
+            (log_dir / "sales_crash.log").write_text(err_str, encoding="utf-8")
+        except Exception:
+            pass
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror("Sales Portal - Error", f"Startup Error:\n\n{err_str[:1200]}")
+            root.destroy()
+        except Exception:
+            pass
+        sys.exit(1)
+
